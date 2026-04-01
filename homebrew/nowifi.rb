@@ -5,7 +5,7 @@ class Nowifi < Formula
   homepage "https://github.com/MikkoParkkola/nowifi"
   url "https://github.com/MikkoParkkola/nowifi/archive/refs/tags/v0.1.0.tar.gz"
   # sha256 "FILL_WHEN_TAG_CREATED"
-  license "MIT"
+  license "AGPL-3.0-or-later"
 
   depends_on "python@3.12"
 
