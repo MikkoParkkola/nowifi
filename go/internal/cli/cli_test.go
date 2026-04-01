@@ -38,6 +38,9 @@ func TestSubcommandsRegistered(t *testing.T) {
 		"setup",
 		"ui",
 		"menubar",
+		"scan",
+		"history",
+		"watch",
 	}
 
 	commands := rootCmd.Commands()
@@ -56,10 +59,10 @@ func TestSubcommandsRegistered(t *testing.T) {
 }
 
 func TestSubcommandCount(t *testing.T) {
-	// At minimum, the 10 expected subcommands should be present.
+	// At minimum, the 13 expected subcommands should be present.
 	count := len(rootCmd.Commands())
-	if count < 10 {
-		t.Errorf("rootCmd has %d subcommands, want >= 10", count)
+	if count < 13 {
+		t.Errorf("rootCmd has %d subcommands, want >= 13", count)
 	}
 }
 
@@ -240,6 +243,7 @@ func TestRootFlags(t *testing.T) {
 		{"stealth", "true"},
 		{"fast", "false"},
 		{"probe-only", "false"},
+		{"auto", "false"},
 	}
 
 	for _, tt := range flags {
@@ -280,6 +284,53 @@ func TestServerDestroyFlags(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Long description content
 // ---------------------------------------------------------------------------
+
+func TestScanCmd(t *testing.T) {
+	if scanCmd.Use != "scan" {
+		t.Errorf("scanCmd.Use = %q, want scan", scanCmd.Use)
+	}
+	if scanCmd.Short == "" {
+		t.Error("scanCmd.Short is empty")
+	}
+}
+
+func TestHistoryCmd(t *testing.T) {
+	if historyCmd.Use != "history" {
+		t.Errorf("historyCmd.Use = %q, want history", historyCmd.Use)
+	}
+	if historyCmd.Short == "" {
+		t.Error("historyCmd.Short is empty")
+	}
+}
+
+func TestWatchCmd(t *testing.T) {
+	if watchCmd.Use != "watch" {
+		t.Errorf("watchCmd.Use = %q, want watch", watchCmd.Use)
+	}
+	if watchCmd.Short == "" {
+		t.Error("watchCmd.Short is empty")
+	}
+	f := watchCmd.Flags().Lookup("interval")
+	if f == nil {
+		t.Fatal("--interval flag not registered on watchCmd")
+	}
+	if f.DefValue != "60" {
+		t.Errorf("--interval default = %q, want 60", f.DefValue)
+	}
+}
+
+func TestAutoFlag(t *testing.T) {
+	f := rootCmd.Flags().Lookup("auto")
+	if f == nil {
+		t.Fatal("--auto flag not registered on rootCmd")
+	}
+	if f.Shorthand != "y" {
+		t.Errorf("--auto shorthand = %q, want y", f.Shorthand)
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--auto default = %q, want false", f.DefValue)
+	}
+}
 
 func TestRootLongDescription(t *testing.T) {
 	tests := []struct {

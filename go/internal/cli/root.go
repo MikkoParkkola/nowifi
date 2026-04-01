@@ -69,6 +69,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
 	rootCmd.Flags().BoolVar(&flagFast, "fast", false, "Skip stealth delays")
 	rootCmd.Flags().BoolVarP(&flagProbeOnly, "probe-only", "p", false, "Probe only, don't exploit")
+	rootCmd.Flags().BoolVarP(&flagAutoBypass, "auto", "y", false, "Skip interactive prompt, auto-bypass immediately")
 
 	// Register subcommands.
 	rootCmd.AddCommand(diagnoseCmd)
@@ -81,6 +82,9 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(uiCmd)
 	rootCmd.AddCommand(menubarCmd)
+	rootCmd.AddCommand(scanCmd)
+	rootCmd.AddCommand(historyCmd)
+	rootCmd.AddCommand(watchCmd)
 }
 
 // Execute runs the root command. Called from main.
