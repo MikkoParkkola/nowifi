@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 package cli
 
 import (
@@ -9,6 +12,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 	"github.com/spf13/cobra"
 )
 
@@ -34,12 +39,12 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	allOK := true
 
 	check := func(label string, ok bool, detail string) {
-		status := "OK"
+		statusStr := green("OK")
 		if !ok {
-			status = "FAIL"
+			statusStr = red("FAIL")
 			allOK = false
 		}
-		msg := fmt.Sprintf("  %-6s %s", status, label)
+		msg := fmt.Sprintf("  %-6s %s", statusStr, label)
 		if detail != "" {
 			msg += "  " + detail
 		}
@@ -54,10 +59,16 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	check("Operating system", osOK, fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 
 	// WiFi connected.
-	// TODO: Use platform.GetWifiInfo when implemented.
-	// For now, check if the default interface exists.
 	iface := flagInterface
-	check("WiFi interface", true, fmt.Sprintf("(checking %s — full check not yet implemented)", iface))
+	wifi, wifiErr := platform.GetWifiInfo(iface)
+	wifiOK := wifiErr == nil && wifi != nil
+	wifiDetail := fmt.Sprintf("interface %s", iface)
+	if wifiOK {
+		wifiDetail = fmt.Sprintf("%s on %s (%ddBm)", wifi.SSID, iface, wifi.RSSI)
+	} else if wifiErr != nil {
+		wifiDetail = fmt.Sprintf("%s: %v", iface, wifiErr)
+	}
+	check("WiFi interface", wifiOK, wifiDetail)
 
 	// Sudo access.
 	sudoOK := os.Geteuid() == 0
@@ -67,11 +78,11 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	}
 	check("Sudo access", sudoOK, sudoDetail)
 
-	// Core tools.
-	coreTools := []string{"chisel", "hysteria"}
+	// Core tools (use toolchain.FindTool for comprehensive lookup).
+	coreTools := []string{"chisel", "hysteria", "cloudflared"}
 	for _, t := range coreTools {
-		path, err := exec.LookPath(t)
-		ok := err == nil
+		path := toolchain.FindTool(t)
+		ok := path != ""
 		detail := path
 		if !ok {
 			detail = "missing (nowifi tools -d)"
@@ -79,10 +90,22 @@ func runDoctor(cmd *cobra.Command, args []string) {
 		check(fmt.Sprintf("Tool: %s", t), ok, detail)
 	}
 
+	// Optional tools.
+	optionalTools := []string{"iodine", "hans", "hashcat", "aircrack-ng"}
+	for _, t := range optionalTools {
+		path, lookErr := exec.LookPath(t)
+		ok := lookErr == nil
+		detail := path
+		if !ok {
+			detail = dim("optional, not installed")
+		}
+		check(fmt.Sprintf("Tool: %s", t), ok, detail)
+	}
+
 	// DNS resolution.
 	dnsOK := false
-	addrs, err := net.LookupHost("cloudflare.com")
-	if err == nil && len(addrs) > 0 {
+	addrs, dnsErr := net.LookupHost("cloudflare.com")
+	if dnsErr == nil && len(addrs) > 0 {
 		dnsOK = true
 	}
 	dnsDetail := "cloudflare.com"
@@ -94,8 +117,8 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	// Internet reachability.
 	inetOK := false
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://connectivitycheck.gstatic.com/generate_204")
-	if err == nil {
+	resp, inetErr := client.Get("http://connectivitycheck.gstatic.com/generate_204")
+	if inetErr == nil {
 		resp.Body.Close()
 		inetOK = resp.StatusCode == 204
 	}

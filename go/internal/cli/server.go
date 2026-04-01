@@ -1,9 +1,13 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 package cli
 
 import (
 	"fmt"
 	"os"
 
+	"github.com/MikkoParkkola/nowifi/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -103,14 +107,27 @@ func runServerCreate(cmd *cobra.Command, args []string) {
 	case "cloudflare":
 		fmt.Println("\nnowifi — Deploying Cloudflare Worker")
 		fmt.Println()
-		// TODO: url := server.SetupCloudflareWorker()
-		fmt.Println("  (Cloudflare Worker deployment not yet implemented)")
+		info, err := server.SetupCloudflareWorker()
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			os.Exit(1)
+		}
+		fmt.Printf("  %s Worker deployed: %s\n", green("OK"), info.URL)
 		fmt.Println("  Free tier: 100,000 requests/day")
+		fmt.Printf("  Use: sudo nowifi --cf-workers %s\n", info.URL)
 	case "digitalocean", "hetzner":
 		fmt.Printf("\nnowifi — Creating %s VPS\n\n", serverProvider)
-		// TODO: info := server.CreateVPS(serverProvider, serverToken, serverTTL)
-		fmt.Printf("  (VPS creation not yet implemented for %s)\n", serverProvider)
-		fmt.Printf("  TTL: %dh\n", serverTTL)
+		info, err := server.CreateVPS(serverProvider, serverToken, serverTTL)
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			os.Exit(1)
+		}
+		fmt.Printf("  %s Server created: %s\n", green("OK"), info.IP)
+		fmt.Printf("  Tunnel URL: %s\n", info.URL)
+		fmt.Printf("  TTL: %dh (auto-destroy)\n", serverTTL)
+		fmt.Printf("  Use: sudo nowifi -t %s\n", info.URL)
 	default:
 		fmt.Printf("  Unknown provider: %s\n", serverProvider)
 		os.Exit(1)
@@ -121,9 +138,48 @@ func runServerCreate(cmd *cobra.Command, args []string) {
 func runServerList(cmd *cobra.Command, args []string) {
 	fmt.Println("\nnowifi — Tunnel Servers")
 	fmt.Println()
-	// TODO: servers := server.ListServers()
-	fmt.Println("  No active servers.")
-	fmt.Println("  Create one: nowifi server create")
+
+	servers, err := server.ListServers()
+	if err != nil {
+		fmt.Printf("  %s %v\n", red("ERROR"), err)
+		fmt.Println()
+		return
+	}
+
+	if len(servers) == 0 {
+		fmt.Println("  No active servers.")
+		fmt.Println("  Create one: nowifi server create")
+		fmt.Println()
+		return
+	}
+
+	fmt.Printf("  %-20s  %-16s  %-20s  %-8s  %s\n",
+		bold("Provider"), bold("IP"), bold("URL"), bold("TTL"), bold("Created"))
+	for _, s := range servers {
+		ip := s.IP
+		if ip == "" {
+			ip = dim("(edge)")
+		}
+		ttl := "-"
+		if s.TTLHours > 0 {
+			ttl = fmt.Sprintf("%dh", s.TTLHours)
+		}
+		created := s.CreatedAt
+		if len(created) > 19 {
+			created = created[:19]
+		}
+		fmt.Printf("  %-20s  %-16s  %-20s  %-8s  %s\n",
+			s.Provider, ip, s.URL, ttl, dim(created))
+	}
+
+	// Check for expired servers.
+	expired := server.CheckExpiredServers()
+	if len(expired) > 0 {
+		fmt.Println()
+		fmt.Printf("  %s %d server(s) past TTL — consider destroying them.\n",
+			yellow("WARN"), len(expired))
+	}
+
 	fmt.Println()
 }
 
@@ -144,11 +200,44 @@ func runServerDestroy(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	if serverDestroyAll {
-		// TODO: destroy all servers.
-		fmt.Println("  (destroy all not yet implemented)")
+		servers, err := server.ListServers()
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			return
+		}
+		if len(servers) == 0 {
+			fmt.Println("  No active servers to destroy.")
+			fmt.Println()
+			return
+		}
+		for _, s := range servers {
+			if err := server.DestroyServer(&s, serverToken); err != nil {
+				fmt.Printf("  %s %s (%s): %v\n", red("FAIL"), s.ServerID, s.Provider, err)
+			} else {
+				fmt.Printf("  %s %s (%s) destroyed\n", green("OK"), s.ServerID, s.Provider)
+			}
+		}
 	} else {
-		// TODO: destroy specific server.
-		fmt.Printf("  (destroy %s not yet implemented)\n", serverID)
+		// Find the specific server.
+		servers, _ := server.LoadServers()
+		var target *server.Info
+		for i := range servers {
+			if servers[i].ServerID == serverID {
+				target = &servers[i]
+				break
+			}
+		}
+		if target == nil {
+			fmt.Printf("  Server %s not found. Run: nowifi server list\n", serverID)
+			fmt.Println()
+			os.Exit(1)
+		}
+		if err := server.DestroyServer(target, serverToken); err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+		} else {
+			fmt.Printf("  %s %s (%s) destroyed\n", green("OK"), target.ServerID, target.Provider)
+		}
 	}
 	fmt.Println()
 }

@@ -1,10 +1,16 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 package cli
 
 import (
 	"fmt"
-	"os/exec"
+	"os"
 	"runtime"
 
+	"github.com/MikkoParkkola/nowifi/internal/detect"
+	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 	"github.com/spf13/cobra"
 )
 
@@ -38,26 +44,37 @@ func runSetup(cmd *cobra.Command, args []string) {
 		iface = "wlan0"
 	}
 	fmt.Printf("   Interface: %s\n", iface)
-	// TODO: wifi := platform.GetWifiInfo(iface)
-	fmt.Println("   (WiFi check not yet implemented)")
+	wifi, wifiErr := platform.GetWifiInfo(iface)
+	if wifiErr == nil && wifi != nil {
+		fmt.Printf("   SSID: %s  Signal: %d dBm\n", wifi.SSID, wifi.RSSI)
+	} else {
+		fmt.Println("   Not connected (run setup after connecting to WiFi)")
+	}
 
 	// 3. External tools.
 	fmt.Println("\n3. External tools")
-	tools := []string{"chisel", "hysteria", "iodine", "hans", "hcxdumptool", "hashcat", "aircrack-ng", "cloudflared"}
-	for _, t := range tools {
-		path, err := exec.LookPath(t)
-		if err == nil {
-			fmt.Printf("   OK  %-18s %s\n", t, path)
+	toolNames := []string{"chisel", "hysteria", "iodine", "hans", "hcxdumptool", "hashcat", "aircrack-ng", "cloudflared"}
+	for _, t := range toolNames {
+		path := toolchain.FindTool(t)
+		if path != "" {
+			fmt.Printf("   %s  %-18s %s\n", green("OK"), t, path)
 		} else {
-			fmt.Printf("   --  %-18s not installed\n", t)
+			fmt.Printf("   %s  %-18s not installed\n", dim("--"), t)
 		}
 	}
 
 	// 4. Quick test.
 	fmt.Println("\n4. Quick test")
 	fmt.Println("   Running portal detection (read-only)...")
-	// TODO: portal := detect.DetectPortal(iface)
-	fmt.Println("   (portal detection not yet implemented)")
+	portalInfo := detect.DetectPortal(iface)
+	if portalInfo.IsCaptive {
+		fmt.Printf("   Captive portal detected: %s\n", string(portalInfo.Type))
+		if portalInfo.Vendor != "" {
+			fmt.Printf("   Vendor: %s\n", portalInfo.Vendor)
+		}
+	} else {
+		fmt.Println("   No captive portal (network appears open)")
+	}
 
 	// 5. Offline readiness check.
 	fmt.Println("\n5. Offline readiness")
@@ -66,14 +83,14 @@ func runSetup(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	allReady := true
-	// Check downloadable tools
+	// Check downloadable tools.
 	for _, t := range []string{"chisel", "hysteria"} {
-		if _, err := exec.LookPath(t); err != nil {
-			fmt.Printf("   MISSING  %s — run: nowifi tools -d (requires internet)\n", t)
+		if toolchain.FindTool(t) == "" {
+			fmt.Printf("   %s  %s — run: nowifi tools -d (requires internet)\n", yellow("MISSING"), t)
 			allReady = false
 		}
 	}
-	// Check for wordlists (for WPA cracking)
+	// Check for wordlists (for WPA cracking).
 	wordlistPaths := []string{
 		"/usr/share/wordlists/rockyou.txt",
 		"/usr/share/wordlists/rockyou.txt.gz",
@@ -81,12 +98,9 @@ func runSetup(cmd *cobra.Command, args []string) {
 	}
 	hasWordlist := false
 	for _, p := range wordlistPaths {
-		if _, err := exec.LookPath("test"); err == nil {
-			// Just check file exists
-			if out, _ := exec.Command("test", "-f", p).CombinedOutput(); len(out) == 0 {
-				hasWordlist = true
-				break
-			}
+		if _, statErr := os.Stat(p); statErr == nil {
+			hasWordlist = true
+			break
 		}
 	}
 	if !hasWordlist {

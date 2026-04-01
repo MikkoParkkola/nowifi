@@ -1,8 +1,13 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 package cli
 
 import (
 	"fmt"
+	"sort"
 
+	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 	"github.com/spf13/cobra"
 )
 
@@ -26,42 +31,67 @@ func init() {
 func runTools(cmd *cobra.Command, args []string) {
 	fmt.Printf("\nnowifi — External Tools\n\n")
 
-	// Tool registry — each tool with name, description, and install hint.
-	type toolEntry struct {
-		name        string
-		desc        string
-		installHint string
-		downloadable bool
-	}
+	allTools := toolchain.ListTools()
 
-	tools := []toolEntry{
-		{"chisel", "HTTPS/WebSocket tunnel client", "go install github.com/jpillora/chisel@latest", true},
-		{"hysteria", "QUIC tunnel (Hysteria2)", "go install github.com/apernet/hysteria/app/v2@latest", true},
-		{"iodine", "DNS tunnel client", "brew install iodine", false},
-		{"hans", "ICMP tunnel client", "brew install hans", false},
-		{"hcxdumptool", "PMKID/handshake capture", "brew install hcxdumptool", false},
-		{"hcxpcapngtool", "Convert captures to hashcat format", "brew install hcxtools", false},
-		{"hashcat", "GPU-accelerated password cracking", "brew install hashcat", false},
-		{"aircrack-ng", "CPU password cracking (fallback)", "brew install aircrack-ng", false},
-		{"cloudflared", "Cloudflare tunnel / DoH proxy", "brew install cloudflare/cloudflare/cloudflared", true},
-		{"bettercap", "Network MITM framework", "brew install bettercap", false},
-		{"dnscrypt-proxy", "DNS encryption proxy", "brew install dnscrypt-proxy", false},
-		{"reaver", "WPS PIN brute force", "brew install reaver", false},
+	// Sort tool names for consistent output.
+	names := make([]string, 0, len(allTools))
+	for name := range allTools {
+		names = append(names, name)
 	}
+	sort.Strings(names)
 
-	for _, t := range tools {
-		// TODO: check if tool is installed via toolchain.FindTool(t.name)
-		status := "missing"
-		if toolsDownload && t.downloadable {
-			status = "(would download)"
-		} else if t.installHint != "" {
-			status = fmt.Sprintf("missing  install: %s", t.installHint)
+	installedCount := 0
+	missingCount := 0
+	downloadedCount := 0
+
+	for _, name := range names {
+		ts := allTools[name]
+
+		if ts.Installed {
+			installedCount++
+			fmt.Printf("  %s  %-18s %s\n", green("OK"), name, dim(ts.Path))
+			if ts.Description != "" {
+				fmt.Printf("  %s  %-18s   %s\n", "  ", "", dim(ts.Description))
+			}
+		} else if toolsDownload && ts.Downloadable {
+			// Attempt auto-download.
+			fmt.Printf("  %s  %-18s downloading...\n", yellow("DL"), name)
+			path, err := toolchain.DownloadTool(name)
+			if err != nil {
+				fmt.Printf("  %s  %-18s %v\n", red("!!"), name, err)
+				missingCount++
+			} else {
+				fmt.Printf("  %s  %-18s %s\n", green("OK"), name, path)
+				downloadedCount++
+			}
+		} else {
+			missingCount++
+			hint := ts.InstallHint
+			if hint == "" && ts.Downloadable {
+				hint = "nowifi tools -d"
+			}
+			fmt.Printf("  %s  %-18s %s\n", red("--"), name, dim("install: "+hint))
+			if ts.Description != "" {
+				fmt.Printf("  %s  %-18s   %s\n", "  ", "", dim(ts.Description))
+			}
 		}
-		fmt.Printf("  %-20s %s\n", t.name, status)
-		if t.desc != "" {
-			fmt.Printf("  %-20s   %s\n", "", t.desc)
-		}
 	}
 
+	// Summary.
+	fmt.Println()
+	fmt.Printf("  %d installed", installedCount)
+	if downloadedCount > 0 {
+		fmt.Printf(", %s downloaded", green(fmt.Sprintf("%d", downloadedCount)))
+	}
+	if missingCount > 0 {
+		fmt.Printf(", %s missing", yellow(fmt.Sprintf("%d", missingCount)))
+	}
+	fmt.Println()
+
+	if missingCount > 0 && !toolsDownload {
+		fmt.Println()
+		fmt.Println(dim("  Run 'nowifi tools -d' to auto-download chisel, hysteria, and cloudflared."))
+		fmt.Println(dim("  Other tools require manual installation (see hints above)."))
+	}
 	fmt.Println()
 }

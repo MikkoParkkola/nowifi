@@ -1,8 +1,15 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 package cli
 
 import (
 	"fmt"
+	"os/exec"
+	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/bypass"
+	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/spf13/cobra"
 )
 
@@ -32,34 +39,83 @@ func runReset(cmd *cobra.Command, args []string) {
 		"chisel", "iodine", "iodined", "hans", "ptunnel",
 		"wstunnel", "hysteria", "ntpescape", "dnscrypt-proxy",
 	}
+	killed := 0
 	for _, proc := range tunnelProcesses {
-		// TODO: Find and kill process by name.
-		_ = proc
+		if err := exec.Command("pkill", "-f", proc).Run(); err == nil {
+			killed++
+		}
 	}
-	fmt.Println("  Killed orphaned tunnel processes")
+	if killed > 0 {
+		fmt.Printf("  Killed %d orphaned tunnel process(es)\n", killed)
+	} else {
+		fmt.Println("  No orphaned tunnel processes found")
+	}
 
 	// 2. Remove system SOCKS proxy.
-	// TODO: bypass.ClearSystemSOCKSProxy(iface)
+	bypass.ClearSystemSOCKSProxy(iface)
 	fmt.Println("  SOCKS proxy disabled")
 
 	// 3. Restore hardware MAC.
-	// TODO: Read hw MAC from system, compare with current, restore if different.
-	fmt.Printf("  MAC check (interface: %s)\n", iface)
+	fmt.Printf("  MAC check (interface: %s)... ", iface)
+	currentMAC, err := platform.GetCurrentMAC(iface)
+	if err != nil {
+		fmt.Printf("could not read current MAC: %v\n", err)
+	} else {
+		// The hardware MAC is not easily retrievable after spoofing,
+		// but we can detect if it has the locally-administered bit set
+		// (bit 1 of first octet), which indicates it was spoofed by nowifi.
+		if len(currentMAC) >= 2 {
+			firstByte := currentMAC[0:2]
+			isLocal := false
+			for _, c := range []string{"02", "06", "0a", "0e"} {
+				if firstByte == c {
+					isLocal = true
+					break
+				}
+			}
+			if isLocal {
+				fmt.Printf("spoofed MAC detected (%s), ", currentMAC)
+				// Generate a random vendor MAC to replace the spoofed one.
+				// The real hardware MAC restoration happens via WiFi power cycle below.
+				fmt.Println("will be restored via WiFi power cycle")
+			} else {
+				fmt.Printf("hardware MAC (%s) — OK\n", currentMAC)
+			}
+		} else {
+			fmt.Printf("%s — OK\n", currentMAC)
+		}
+	}
 
 	// 4. Flush DNS.
-	// TODO: platform.FlushDNS()
-	fmt.Println("  DNS cache flushed")
+	if err := platform.FlushDNS(); err != nil {
+		fmt.Printf("  DNS cache flush failed: %v\n", err)
+	} else {
+		fmt.Println("  DNS cache flushed")
+	}
 
 	// 5. WiFi power cycle.
 	fmt.Println("  WiFi power cycling...")
-	// TODO: platform.DisconnectWifi(iface); sleep 2s; platform.ConnectWifi(iface); sleep 3s
+	if err := platform.DisconnectWifi(iface); err != nil {
+		fmt.Printf("    WiFi off failed: %v\n", err)
+	} else {
+		time.Sleep(2 * time.Second)
+		if err := platform.ConnectWifi(iface); err != nil {
+			fmt.Printf("    WiFi on failed: %v\n", err)
+		} else {
+			time.Sleep(3 * time.Second)
+			fmt.Println("  WiFi power cycle complete")
+		}
+	}
 
 	// 6. Renew DHCP.
-	// TODO: platform.RenewDHCP(iface)
-	fmt.Println("  DHCP renewed")
+	if err := platform.RenewDHCP(iface); err != nil {
+		fmt.Printf("  DHCP renewal failed: %v\n", err)
+	} else {
+		fmt.Println("  DHCP renewed")
+	}
 
 	// 7. Remove WireGuard tunnel if present.
-	// TODO: exec wg-quick down wg-nowifi
+	_ = exec.Command("wg-quick", "down", "wg-nowifi").Run()
 
 	fmt.Print("\nNetwork reset complete. Try browsing now.\n\n")
 }
