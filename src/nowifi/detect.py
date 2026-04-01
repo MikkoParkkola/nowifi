@@ -268,7 +268,7 @@ def _detect_auth_methods(html: str) -> list[str]:
         "email": [r'type=["\']email["\']', r'name=["\']email["\']', r"email"],
         "password": [r'type=["\']password["\']', r"password"],
         "phone": [r'type=["\']tel["\']', r"phone", r"mobile"],
-        "social_google": [r"google.*sign.?in", r"accounts\.google\.com", r"oauth.*google"],
+        "social_google": [r"google.*sign.?in", r"sign.?in.*google", r"accounts\.google\.com", r"oauth.*google"],
         "social_facebook": [r"facebook.*login", r"facebook\.com/dialog", r"fb-login"],
         "room_number": [r"room.?number", r"room.?no"],
         "voucher": [r"voucher", r"access.?code", r"token"],

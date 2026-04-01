@@ -556,6 +556,7 @@ def _try_default_creds(probes: ProbeResults, interface: str = "en0") -> BypassRe
                             r2 = requests.post(
                                 url, data={"username": user, "password": passwd},
                                 timeout=5, verify=False, allow_redirects=True,  # nosec B501 - intentional: LAN gateway admin panel
+                            )
                             # Heuristic: if we get a different page (no "login" in response), creds worked
                             if r2.status_code == 200 and "login" not in r2.text.lower()[:500]:
                                 return BypassResult(

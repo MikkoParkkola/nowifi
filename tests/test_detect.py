@@ -339,7 +339,7 @@ class TestFingerprintPortal:
     def test_unknown_vendor(self):
         """No vendor signatures match -> vendor remains empty."""
         info = PortalInfo(is_captive=True, portal_type=PortalType.HTTP_REDIRECT)
-        _fingerprint_portal(info, "<html>Generic Login Page</html>", "http://10.0.0.1/login", {})
+        _fingerprint_portal(info, "<html>Generic Page</html>", "http://10.0.0.1/welcome", {})
         assert info.vendor == ""
 
     def test_vendor_requires_min_score(self):
