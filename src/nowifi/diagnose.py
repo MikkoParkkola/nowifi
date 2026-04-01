@@ -232,6 +232,51 @@ def assess_methods(portal: PortalInfo, probes: ProbeResults, has_tools: dict[str
         risk="Low — encrypted DNS to trusted providers",
     ))
 
+    # --- WPA Cracking Assessment ---
+
+    # 20. PMKID capture
+    has_hcx = has_tools.get("hcxdumptool", False)
+    methods.append(MethodAssessment(
+        name="WPA PMKID capture", number=20,
+        feasible=has_hcx,
+        confidence="MEDIUM" if has_hcx else "N/A",
+        reason="~60% of APs respond with PMKID. Client-less — no connected devices needed." if has_hcx else "hcxdumptool not installed",
+        prerequisites="hcxdumptool + monitor-capable adapter" + (" [INSTALLED]" if has_hcx else " [MISSING]"),
+        risk="Low — single association attempt",
+    ))
+
+    # 21. WPS Pixie-Dust
+    has_reaver = has_tools.get("reaver", False)
+    methods.append(MethodAssessment(
+        name="WPS Pixie-Dust", number=21,
+        feasible=has_reaver,
+        confidence="MEDIUM" if has_reaver else "N/A",
+        reason="~30% of WPS-enabled APs vulnerable. Takes 5-30 seconds." if has_reaver else "reaver not installed",
+        prerequisites="reaver + monitor-capable adapter" + (" [INSTALLED]" if has_reaver else " [MISSING]"),
+        risk="Low — single WPS exchange",
+    ))
+
+    # 22. WPA handshake capture + crack
+    has_hashcat = has_tools.get("hashcat", False)
+    methods.append(MethodAssessment(
+        name="WPA handshake capture + hashcat", number=22,
+        feasible=has_hcx and has_hashcat,
+        confidence="HIGH" if (has_hcx and has_hashcat) else "N/A",
+        reason="Capture 4-way handshake (needs connected client), crack with GPU." if (has_hcx and has_hashcat) else "Missing tools",
+        prerequisites="hcxdumptool + hashcat + GPU + wordlist" + (" [TOOLS OK]" if (has_hcx and has_hashcat) else " [MISSING]"),
+        risk="Medium — deauth required to force reconnection",
+    ))
+
+    # 23. WPS PIN brute force
+    methods.append(MethodAssessment(
+        name="WPS PIN brute force", number=23,
+        feasible=has_reaver,
+        confidence="LOW" if has_reaver else "N/A",
+        reason="Brute force 11000 PIN combinations. Takes 2-10 hours. Last resort." if has_reaver else "reaver not installed",
+        prerequisites="reaver + monitor-capable adapter + patience",
+        risk="High — many auth attempts, AP may lock WPS",
+    ))
+
     return methods
 
 
@@ -240,7 +285,8 @@ def _check_tools() -> dict[str, bool]:
     import shutil
     import os
     tools = ["chisel", "iodine", "hans", "hysteria", "ntpescape", "cloudflared",
-             "dnscrypt-proxy", "hashcat", "hcxdumptool", "wg-quick", "aircrack-ng"]
+             "dnscrypt-proxy", "hashcat", "hcxdumptool", "wg-quick", "aircrack-ng",
+             "reaver", "wash", "airodump-ng", "aireplay-ng"]
     result = {}
     for t in tools:
         path = shutil.which(t)

@@ -5,10 +5,13 @@ Default command: just run `sudo nowifi` — it does everything automatically.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 import click
@@ -116,11 +119,20 @@ def _run_full_audit(interface: str, tunnel_server: str, dns_domain: str, icmp_se
 
     console.print(f"\n[bold cyan]nowifi v{__version__}[/bold cyan] — No WiFi? Now WiFi.\n")
 
+    # Check for root — many techniques need it
+    if os.geteuid() != 0 and not probe_only:
+        console.print("[yellow]Warning:[/yellow] Running without sudo. MAC spoofing and tunnels won't work.")
+        console.print("  For full capability: [bold]sudo nowifi[/bold]")
+        console.print("  For read-only scan:  [bold]nowifi diagnose[/bold]\n")
+
     # --- Phase 1: WiFi info ---
     console.print("[bold]1. WiFi[/bold]", highlight=False, end="  ")
     wifi = get_wifi_info(interface)
     if not wifi:
         console.print(f"[red]Not connected on {interface}[/red]")
+        console.print("\n  [yellow]Connect to the target WiFi network first, then re-run.[/yellow]")
+        console.print("  Wrong interface? Try: [bold]sudo nowifi -i en1[/bold]")
+        console.print("  List interfaces: [bold]networksetup -listallhardwareports[/bold]\n")
         sys.exit(1)
     gateway = get_gateway(interface)
     console.print(f"[cyan]{wifi.ssid}[/cyan]  gw:{gateway}")
@@ -195,6 +207,11 @@ def _run_full_audit(interface: str, tunnel_server: str, dns_domain: str, icmp_se
                 console.print(f"  Method: [bold]{wins[0].method.value}[/bold]")
             else:
                 console.print("[yellow]no bypass succeeded[/yellow]")
+                console.print("\n  [yellow]What to try next:[/yellow]")
+                console.print("  1. Run [bold]nowifi diagnose[/bold] to see which methods are feasible")
+                console.print("  2. Set up a tunnel server: [bold]nowifi ecosystem[/bold] for guidance")
+                console.print("  3. Install more tools: [bold]nowifi tools -d[/bold]")
+                console.print("  4. Try without stealth: [bold]sudo nowifi --fast[/bold]")
 
             # Report
             console.print()
@@ -390,7 +407,6 @@ def reset(interface):
     interface = _validate_interface(interface)
     console.print("\n[bold cyan]nowifi[/bold cyan] — Network Reset\n")
 
-    import os
     import signal as sig
 
     # 1. Kill orphaned tunnel processes
@@ -443,7 +459,6 @@ def reset(interface):
     console.print("  DHCP renewed")
 
     # 7. Remove any WireGuard tunnel we might have started
-    import shutil
     if shutil.which("wg-quick"):
         try:
             subprocess.run(["sudo", "wg-quick", "down", "wg-nowifi"], capture_output=True, timeout=5)
@@ -688,6 +703,209 @@ def crack(interface, target, timeout, wordlist, scan_only):
         step_table.add_row(r.method.value, result_str, time_str, detail)
 
     console.print(step_table)
+    console.print()
+
+
+@main.command()
+def setup():
+    """Interactive first-time setup wizard.
+
+    \b
+    Checks your system, installs missing tools, and configures nowifi.
+    Run this once after installing nowifi.
+    """
+    console.print("\n[bold cyan]nowifi[/bold cyan] -- Setup Wizard\n")
+
+    # 1. System check
+    console.print("[bold]1. System check[/bold]")
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    import platform as _plat
+    os_name = _plat.system()
+    arch = _plat.machine()
+    console.print(f"   Python {py_ver}  {os_name} {arch}")
+
+    if sys.version_info < (3, 11):
+        console.print("   [red]Python 3.11+ required. Please upgrade.[/red]")
+        sys.exit(1)
+    console.print("   [green]OK[/green]")
+
+    # 2. WiFi interface
+    console.print("\n[bold]2. WiFi interface[/bold]")
+    default_iface = "en0" if sys.platform == "darwin" else "wlan0"
+    wifi = get_wifi_info(default_iface)
+    if wifi:
+        console.print(f"   Interface: {default_iface}")
+        console.print(f"   SSID: [cyan]{wifi.ssid}[/cyan]")
+        mac = platform_mac.get_current_mac(default_iface)
+        if mac:
+            console.print(f"   MAC: {mac}")
+        console.print("   [green]Connected[/green]")
+    else:
+        console.print(f"   Interface: {default_iface}")
+        console.print("   [yellow]Not connected to WiFi[/yellow]")
+        console.print("   (nowifi works best when connected to a captive portal network)")
+
+    # 3. External tools
+    console.print("\n[bold]3. External tools[/bold]")
+    from .toolchain import list_tools, download_tool
+
+    tool_status = list_tools()
+    missing_downloadable = []
+    for name, info in sorted(tool_status.items()):
+        if info["installed"]:
+            console.print(f"   [green]OK[/green]  {name:<18} {info['path']}")
+        elif info["downloadable"]:
+            console.print(f"   [yellow]--[/yellow]  {name:<18} not installed (auto-downloadable)")
+            missing_downloadable.append(name)
+        else:
+            hint = info.get("install_hint", "")
+            console.print(f"   [red]--[/red]  {name:<18} not installed" + (f"  ({hint})" if hint else ""))
+
+    if missing_downloadable:
+        console.print()
+        if click.confirm(f"   Download {len(missing_downloadable)} missing tool(s)?", default=True):
+            for name in missing_downloadable:
+                console.print(f"   Downloading {name}...", end=" ")
+                path = download_tool(name)
+                if path:
+                    console.print(f"[green]OK[/green]  {path}")
+                else:
+                    console.print("[red]failed[/red]")
+
+    # 4. Quick test
+    console.print("\n[bold]4. Quick test[/bold]")
+    console.print("   Running portal detection (read-only)...", end=" ")
+    try:
+        portal = detect_portal(default_iface)
+        if portal.is_captive:
+            vendor = f" ({portal.vendor})" if portal.vendor else ""
+            console.print(f"[red]CAPTIVE[/red] {portal.portal_type.value}{vendor}")
+        else:
+            console.print("[green]No portal detected[/green]")
+    except Exception as e:
+        console.print(f"[yellow]skipped[/yellow] ({e})")
+
+    # 5. Summary
+    console.print("\n[bold]5. Ready![/bold]")
+    console.print("   Available commands:\n")
+    console.print("   [bold]sudo nowifi[/bold]          Auto-detect and bypass captive portal")
+    console.print("   [bold]nowifi diagnose[/bold]      Read-only network assessment")
+    console.print("   [bold]nowifi crack[/bold]         WPA password cracking")
+    console.print("   [bold]nowifi tools -d[/bold]      Download missing tools")
+    console.print("   [bold]nowifi doctor[/bold]        System health check")
+    console.print("   [bold]nowifi reset[/bold]         Restore network after crash")
+    console.print()
+
+
+@main.command()
+def doctor():
+    """Check system health and diagnose common issues.
+
+    \b
+    Quick non-interactive health check. Shows green/red for each item:
+      - Python version and OS
+      - WiFi connection
+      - Sudo access
+      - External tools
+      - DNS resolution
+      - Internet reachability
+    """
+    console.print("\n[bold cyan]nowifi[/bold cyan] -- Doctor\n")
+
+    all_ok = True
+
+    def _check(label: str, ok: bool, detail: str = "") -> bool:
+        status = "[green]OK[/green]" if ok else "[red]FAIL[/red]"
+        msg = f"  {status}  {label}"
+        if detail:
+            msg += f"  [dim]{detail}[/dim]"
+        console.print(msg)
+        return ok
+
+    # Python version
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_ok = sys.version_info >= (3, 11)
+    all_ok &= _check("Python version", py_ok, py_ver + ("" if py_ok else " (need 3.11+)"))
+
+    # OS
+    import platform as _plat
+    os_name = _plat.system()
+    os_ok = os_name in ("Darwin", "Linux")
+    all_ok &= _check("Operating system", os_ok, f"{os_name} {_plat.machine()}")
+
+    # WiFi connected
+    default_iface = "en0" if sys.platform == "darwin" else "wlan0"
+    wifi = get_wifi_info(default_iface)
+    all_ok &= _check("WiFi connected", wifi is not None,
+                      f"{wifi.ssid} on {default_iface}" if wifi else f"no connection on {default_iface}")
+
+    # Sudo access
+    sudo_ok = os.geteuid() == 0
+    _check("Sudo access", sudo_ok, "running as root" if sudo_ok else "run with sudo for full functionality")
+
+    # Core tools
+    from .toolchain import find_tool
+    core_tools = ["chisel", "hysteria"]
+    for t in core_tools:
+        path = find_tool(t)
+        all_ok &= _check(f"Tool: {t}", path is not None, path or "missing (nowifi tools -d)")
+
+    # DNS resolution
+    dns_ok = False
+    try:
+        socket.gethostbyname("cloudflare.com")
+        dns_ok = True
+    except socket.gaierror:
+        pass
+    all_ok &= _check("DNS resolution", dns_ok, "cloudflare.com" if dns_ok else "cannot resolve cloudflare.com")
+
+    # Internet reachability
+    inet_ok = False
+    try:
+        import urllib.request
+        urllib.request.urlopen("http://connectivitycheck.gstatic.com/generate_204", timeout=5)
+        inet_ok = True
+    except Exception:
+        pass
+    all_ok &= _check("Internet reachable", inet_ok,
+                      "" if inet_ok else "connectivity check failed (expected behind captive portal)")
+
+    # Summary
+    console.print()
+    if all_ok:
+        console.print("  [bold green]All checks passed.[/bold green]\n")
+    else:
+        console.print("  [bold yellow]Some checks failed.[/bold yellow] See above for details.\n")
+
+
+@main.command()
+@click.confirmation_option(prompt="This will remove nowifi data from ~/.nowifi. Continue?")
+def uninstall():
+    """Remove nowifi data and show pip uninstall command.
+
+    \b
+    Removes:
+      - ~/.nowifi/ directory (downloaded tools, config)
+    Does NOT change:
+      - System proxy settings (already clean after normal exit)
+      - MAC address (already restored after normal exit)
+    """
+    console.print("\n[bold cyan]nowifi[/bold cyan] -- Uninstall\n")
+
+    nowifi_dir = Path.home() / ".nowifi"
+    if nowifi_dir.exists():
+        file_count = sum(1 for _ in nowifi_dir.rglob("*") if _.is_file())
+        console.print(f"  Removing {nowifi_dir}/ ({file_count} file(s))...", end=" ")
+        shutil.rmtree(nowifi_dir)
+        console.print("[green]done[/green]")
+    else:
+        console.print(f"  {nowifi_dir}/ does not exist (nothing to remove)")
+
+    console.print()
+    console.print("  To remove the Python package:")
+    console.print("  [bold]pip uninstall nowifi[/bold]")
+    console.print()
+    console.print("  [dim]System proxy and MAC address are not affected.[/dim]")
     console.print()
 
 

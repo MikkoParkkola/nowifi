@@ -42,6 +42,9 @@ class TestCliBasics:
         assert "reset" in result.output
         assert "ui" in result.output
         assert "menubar" in result.output
+        assert "setup" in result.output
+        assert "doctor" in result.output
+        assert "uninstall" in result.output
 
     def test_audit_help(self):
         """audit --help works."""
@@ -310,3 +313,139 @@ class TestCliReset:
             result = runner.invoke(main, ["reset"])
             assert result.exit_code == 0
             assert "reset complete" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# CLI: setup subcommand
+# ---------------------------------------------------------------------------
+
+class TestCliSetup:
+
+    def test_setup_help(self):
+        """setup --help works."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["setup", "--help"])
+        assert result.exit_code == 0
+        assert "setup wizard" in result.output.lower()
+
+    @patch("nowifi.cli.detect_portal")
+    @patch("nowifi.cli.platform_mac.get_current_mac", return_value="aa:bb:cc:dd:ee:ff")
+    @patch("nowifi.cli.get_wifi_info")
+    def test_setup_runs(self, mock_wifi, mock_mac, mock_detect):
+        """setup runs through all steps."""
+        from nowifi.platform_mac import WifiInfo
+        from nowifi.detect import PortalInfo, PortalType
+
+        mock_wifi.return_value = WifiInfo(
+            ssid="Test_WiFi", bssid="", channel="", security="", rssi=-64,
+        )
+        mock_detect.return_value = PortalInfo(is_captive=False, portal_type=PortalType.NONE)
+
+        runner = CliRunner()
+        # Answer "no" to tool download prompt
+        result = runner.invoke(main, ["setup"], input="n\n")
+        assert result.exit_code == 0
+        assert "System check" in result.output
+        assert "WiFi interface" in result.output
+        assert "External tools" in result.output
+        assert "Ready" in result.output
+
+    @patch("nowifi.cli.detect_portal")
+    @patch("nowifi.cli.get_wifi_info", return_value=None)
+    def test_setup_no_wifi(self, mock_wifi, mock_detect):
+        """setup handles no WiFi gracefully."""
+        from nowifi.detect import PortalInfo, PortalType
+        mock_detect.return_value = PortalInfo(is_captive=False, portal_type=PortalType.NONE)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["setup"], input="n\n")
+        assert result.exit_code == 0
+        assert "Not connected" in result.output
+
+
+# ---------------------------------------------------------------------------
+# CLI: doctor subcommand
+# ---------------------------------------------------------------------------
+
+class TestCliDoctor:
+
+    def test_doctor_help(self):
+        """doctor --help works."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["doctor", "--help"])
+        assert result.exit_code == 0
+        assert "health" in result.output.lower()
+
+    @patch("nowifi.cli.get_wifi_info")
+    @patch("nowifi.cli.os.geteuid", return_value=1000)
+    @patch("nowifi.cli.socket.gethostbyname", return_value="1.1.1.1")
+    def test_doctor_runs(self, mock_dns, mock_euid, mock_wifi):
+        """doctor runs and produces output."""
+        from nowifi.platform_mac import WifiInfo
+        mock_wifi.return_value = WifiInfo(
+            ssid="Test", bssid="", channel="", security="", rssi=-64,
+        )
+
+        runner = CliRunner()
+        with patch("urllib.request.urlopen"):
+            result = runner.invoke(main, ["doctor"])
+        assert result.exit_code == 0
+        assert "Python version" in result.output
+        assert "Operating system" in result.output
+        assert "WiFi connected" in result.output
+        assert "DNS resolution" in result.output
+
+
+# ---------------------------------------------------------------------------
+# CLI: uninstall subcommand
+# ---------------------------------------------------------------------------
+
+class TestCliUninstall:
+
+    def test_uninstall_help(self):
+        """uninstall --help works."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["uninstall", "--help"])
+        assert result.exit_code == 0
+        assert "remove" in result.output.lower()
+
+    def test_uninstall_aborted(self):
+        """uninstall without --yes aborts when user declines."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["uninstall"], input="n\n")
+        assert result.exit_code != 0  # Aborted
+
+    @patch("nowifi.cli.shutil.rmtree")
+    @patch("nowifi.cli.Path.home")
+    def test_uninstall_removes_dir(self, mock_home, mock_rmtree):
+        """uninstall --yes removes ~/.nowifi."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nowifi_dir = Path(tmpdir) / ".nowifi"
+            nowifi_dir.mkdir()
+            (nowifi_dir / "bin").mkdir()
+            (nowifi_dir / "bin" / "chisel").touch()
+            mock_home.return_value = Path(tmpdir)
+
+            runner = CliRunner()
+            result = runner.invoke(main, ["uninstall", "--yes"])
+            assert result.exit_code == 0
+            assert "pip uninstall nowifi" in result.output
+
+    @patch("nowifi.cli.Path.home")
+    def test_uninstall_no_dir(self, mock_home):
+        """uninstall --yes handles missing ~/.nowifi."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home.return_value = Path(tmpdir)
+
+            runner = CliRunner()
+            result = runner.invoke(main, ["uninstall", "--yes"])
+            assert result.exit_code == 0
+            # Rich may wrap long paths across lines, so normalize whitespace
+            output_flat = " ".join(result.output.split())
+            assert "does not exist" in output_flat
