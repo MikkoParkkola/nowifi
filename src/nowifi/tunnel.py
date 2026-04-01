@@ -70,7 +70,7 @@ def start_chisel_tunnel(
     """Start chisel client connecting to server, creating a SOCKS5 proxy.
 
     Args:
-        server_url: The chisel server URL (e.g., https://tun.raxor.ai)
+        server_url: The chisel server URL (e.g., https://your-server.example.com)
         local_port: Local SOCKS5 proxy port
         timeout: Seconds to wait for tunnel establishment
     """

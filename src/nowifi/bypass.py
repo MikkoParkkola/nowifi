@@ -81,7 +81,7 @@ class BypassResult:
 @dataclass
 class AuditConfig:
     interface: str = "en0"
-    tunnel_server: str = "https://tun.raxor.ai"
+    tunnel_server: str = ""
     dns_tunnel_domain: str = ""
     icmp_tunnel_server: str = ""
     vpn_port53_server: str = ""
@@ -110,6 +110,12 @@ def _log(msg: str) -> None:
 def run_bypasses(probe_results: ProbeResults, config: AuditConfig) -> list[BypassResult]:
     """Try all 19 bypass techniques in order. Stop on first success."""
     results: list[BypassResult] = []
+
+    # Inform user about server-dependent techniques
+    has_server = bool(config.tunnel_server)
+    if not has_server:
+        _log("[dim]No tunnel server configured — 10 serverless techniques available.[/dim]")
+        _log("[dim]For all 19: run `nowifi server create` first.[/dim]")
 
     techniques = [
         ("IPv6 bypass", lambda: _try_ipv6(probe_results)),
