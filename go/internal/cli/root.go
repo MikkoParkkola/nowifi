@@ -79,6 +79,8 @@ func init() {
 	rootCmd.AddCommand(ecosystemCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(uiCmd)
+	rootCmd.AddCommand(menubarCmd)
 }
 
 // Execute runs the root command. Called from main.

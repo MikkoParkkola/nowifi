@@ -36,6 +36,8 @@ func TestSubcommandsRegistered(t *testing.T) {
 		"ecosystem",
 		"doctor",
 		"setup",
+		"ui",
+		"menubar",
 	}
 
 	commands := rootCmd.Commands()
@@ -54,10 +56,10 @@ func TestSubcommandsRegistered(t *testing.T) {
 }
 
 func TestSubcommandCount(t *testing.T) {
-	// At minimum, the 8 expected subcommands should be present.
+	// At minimum, the 10 expected subcommands should be present.
 	count := len(rootCmd.Commands())
-	if count < 8 {
-		t.Errorf("rootCmd has %d subcommands, want >= 8", count)
+	if count < 10 {
+		t.Errorf("rootCmd has %d subcommands, want >= 10", count)
 	}
 }
 
@@ -165,6 +167,31 @@ func TestDoctorCmd(t *testing.T) {
 func TestSetupCmd(t *testing.T) {
 	if setupCmd.Use != "setup" {
 		t.Errorf("setupCmd.Use = %q, want setup", setupCmd.Use)
+	}
+}
+
+func TestUICmd(t *testing.T) {
+	if uiCmd.Use != "ui" {
+		t.Errorf("uiCmd.Use = %q, want ui", uiCmd.Use)
+	}
+	if uiCmd.Short == "" {
+		t.Error("uiCmd.Short is empty")
+	}
+	f := uiCmd.Flags().Lookup("port")
+	if f == nil {
+		t.Fatal("--port flag not registered on uiCmd")
+	}
+	if f.DefValue != "8321" {
+		t.Errorf("--port default = %q, want 8321", f.DefValue)
+	}
+}
+
+func TestMenubarCmd(t *testing.T) {
+	if menubarCmd.Use != "menubar" {
+		t.Errorf("menubarCmd.Use = %q, want menubar", menubarCmd.Use)
+	}
+	if menubarCmd.Short == "" {
+		t.Error("menubarCmd.Short is empty")
 	}
 }
 

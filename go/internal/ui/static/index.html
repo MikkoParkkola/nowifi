@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nowifi Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f172a;--bg-card:#1e293b;--bg-input:#0a0f1a;
+  --border:#334155;--border-light:#475569;
+  --text:#f1f5f9;--text-dim:#94a3b8;--text-muted:#64748b;
+  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;
+  --blue:#3b82f6;--purple:#8b5cf6;--cyan:#06b6d4;
+  --gray:#6b7280;
+}
+body{background:var(--bg);color:var(--text);font-family:'Inter','SF Pro Display',system-ui,sans-serif;line-height:1.5}
+a{color:var(--blue);text-decoration:none}
+
+/* Header */
+.header{background:linear-gradient(135deg,#0f172a,#1e293b);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+.header-left{display:flex;align-items:center;gap:12px}
+.logo{font-size:1.6rem;font-weight:800;letter-spacing:-0.02em}
+.logo-no{color:var(--text)}
+.logo-wifi{color:var(--green)}
+.version{font-size:0.75rem;color:var(--text-muted)}
+.tagline{font-size:0.875rem;color:var(--text-dim);font-style:italic}
+.header-right{display:flex;align-items:center;gap:8px}
+.status-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.status-label{font-size:0.875rem;font-weight:600;text-transform:uppercase}
+
+/* Layout */
+.container{max-width:1200px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.row>*{flex:1;min-width:300px}
+
+/* Cards */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px}
+.card-title{font-size:0.75rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px}
+.card-subtitle{font-size:0.7rem;color:var(--text-muted);margin-top:-4px;margin-bottom:8px}
+.card-sep{border:none;border-top:1px solid var(--border);margin:8px 0}
+
+/* Info rows */
+.info-row{display:flex;align-items:center;gap:8px;padding:3px 0}
+.info-label{font-size:0.7rem;color:var(--text-muted);width:80px;flex-shrink:0}
+.info-value{font-size:0.875rem;color:var(--text);font-weight:600}
+.info-value.mono{font-family:'SF Mono','Fira Code',monospace;font-size:0.8rem;color:var(--text-dim)}
+.info-value.spoofed{color:var(--yellow)}
+
+/* Signal bars */
+.signal-bars{display:inline-flex;align-items:flex-end;gap:2px}
+.signal-bar{width:4px;border-radius:1px;background:var(--border)}
+.signal-rssi{font-size:0.7rem;color:var(--text-dim);margin-left:4px}
+
+/* Buttons */
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:none;border-radius:6px;padding:8px 16px;font-size:0.875rem;font-weight:600;cursor:pointer;color:white;transition:opacity 0.15s}
+.btn:hover{opacity:0.85}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn-audit{background:var(--purple);padding:10px 24px;font-size:1rem}
+.btn-diagnose{background:var(--blue)}
+.btn-probe{background:var(--cyan)}
+.btn-reset{background:transparent;border:1px solid var(--red);color:var(--red);margin-left:auto}
+.btn-reset:hover{background:rgba(239,68,68,0.1)}
+
+/* Probe grid */
+.probe-row{display:flex;align-items:center;padding:4px 0;gap:8px}
+.probe-name{font-size:0.875rem;color:#e2e8f0;width:180px;flex-shrink:0}
+.probe-badge{padding:2px 10px;border-radius:4px;font-size:0.75rem;font-weight:600;min-width:70px;text-align:center;display:inline-block}
+.badge-pending{background:rgba(107,114,128,0.15);color:var(--gray);border:1px solid rgba(107,114,128,0.3)}
+.badge-running{background:rgba(245,158,11,0.15);color:var(--yellow);border:1px solid rgba(245,158,11,0.3);animation:pulse 1.5s infinite}
+.badge-open{background:rgba(34,197,94,0.15);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
+.badge-closed{background:rgba(239,68,68,0.15);color:var(--red);border:1px solid rgba(239,68,68,0.3)}
+.probe-detail{font-size:0.7rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+
+/* Tables */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;padding:8px 12px;border-bottom:1px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid rgba(51,65,85,0.5);font-size:0.85rem;color:var(--text)}
+tr:hover{background:rgba(51,65,85,0.3)}
+.badge-yes{background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:3px;font-weight:600;font-size:0.75rem}
+.badge-no{background:rgba(107,114,128,0.15);color:var(--gray);padding:2px 8px;border-radius:3px;font-weight:600;font-size:0.75rem}
+.badge-success{background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:3px;font-weight:600;font-size:0.75rem}
+.badge-fail{background:rgba(239,68,68,0.15);color:var(--red);padding:2px 8px;border-radius:3px;font-weight:600;font-size:0.75rem}
+.conf-high{color:var(--green);font-weight:600}
+.conf-medium{color:var(--yellow);font-weight:600}
+.conf-low{color:var(--cyan);font-weight:600}
+
+/* Severity badges */
+.sev-critical{background:rgba(239,68,68,0.15);color:var(--red);padding:2px 8px;border-radius:3px;font-size:0.75rem;font-weight:600}
+.sev-high{background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:3px;font-size:0.75rem;font-weight:600}
+.sev-medium{background:rgba(245,158,11,0.15);color:var(--yellow);padding:2px 8px;border-radius:3px;font-size:0.75rem;font-weight:600}
+.sev-low{background:rgba(6,182,212,0.15);color:var(--cyan);padding:2px 8px;border-radius:3px;font-size:0.75rem;font-weight:600}
+
+/* Active tunnel card */
+.tunnel-card{flex:none;width:320px;min-width:240px}
+.tunnel-inactive{font-size:0.875rem;color:var(--text-muted);margin-top:8px}
+.tunnel-method{font-size:0.875rem;font-weight:600;color:var(--green);margin-top:4px}
+.tunnel-proxy{font-size:0.8rem;color:var(--text-dim);font-family:monospace;margin-top:4px}
+
+/* Log panel */
+.log-area{background:var(--bg-input);border:1px solid var(--border);border-radius:6px;height:220px;overflow-y:auto;padding:8px 12px;font-family:'SF Mono','Fira Code',monospace;font-size:0.8rem;color:var(--green);white-space:pre-wrap;word-break:break-word}
+
+/* Portal status styling */
+.portal-captive{color:var(--red);font-weight:700}
+.portal-open{color:var(--green);font-weight:700}
+
+/* Animations */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+
+/* Responsive */
+@media(max-width:768px){
+  .row>*{min-width:100%}
+  .tunnel-card{width:100%}
+  .btn-reset{margin-left:0}
+  .header{flex-direction:column;gap:8px}
+}
+
+/* No JS fallback */
+noscript .noscript-msg{background:var(--bg-card);border:1px solid var(--yellow);border-radius:8px;padding:16px;margin:16px;color:var(--yellow);text-align:center}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo"><span class="logo-no">no</span><span class="logo-wifi">wifi</span></span>
+    <span class="version">Go</span>
+    <span style="color:var(--border);font-size:1.2rem">|</span>
+    <span class="tagline">No WiFi? Now WiFi.</span>
+  </div>
+  <div class="header-right">
+    <span class="status-dot" id="status-dot" style="background:var(--gray)"></span>
+    <span class="status-label" id="status-label" style="color:var(--gray)">IDLE</span>
+  </div>
+</header>
+
+<noscript>
+<div class="noscript-msg" style="background:var(--bg-card);border:1px solid var(--yellow);border-radius:8px;padding:16px;margin:16px;color:var(--yellow);text-align:center">
+  <strong>Dashboard requires JavaScript for real-time updates.</strong><br>
+  Use <code>nowifi diagnose</code> or <code>sudo nowifi</code> from the terminal instead.
+</div>
+</noscript>
+
+<main class="container">
+
+  <!-- Row 1: Network Overview + Portal Status -->
+  <div class="row">
+    <div class="card">
+      <div class="card-title">Network Overview</div>
+      <hr class="card-sep">
+      <div class="info-row"><span class="info-label">SSID</span><span class="info-value" id="wifi-ssid">--</span></div>
+      <div class="info-row"><span class="info-label">BSSID</span><span class="info-value mono" id="wifi-bssid">--</span></div>
+      <div class="info-row">
+        <span class="info-label">Channel</span><span class="info-value" id="wifi-channel">--</span>
+        <span class="info-label" style="width:auto;margin-left:16px">Signal</span>
+        <span id="signal-display">--</span>
+      </div>
+      <hr class="card-sep" style="background:var(--bg)">
+      <div class="info-row"><span class="info-label">Gateway</span><span class="info-value mono" id="gateway">--</span></div>
+      <div class="info-row"><span class="info-label">MAC</span><span class="info-value mono" id="current-mac">--</span></div>
+      <div class="info-row"><span class="info-label">Original</span><span class="info-value mono" id="original-mac" style="color:var(--text-muted)">--</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Portal Status</div>
+      <hr class="card-sep">
+      <div class="info-row"><span class="info-label">Detected</span><span class="info-value" id="portal-detected">--</span></div>
+      <div class="info-row"><span class="info-label">Type</span><span class="info-value" id="portal-type" style="color:var(--text-dim)">--</span></div>
+      <div class="info-row"><span class="info-label">Vendor</span><span class="info-value" id="portal-vendor" style="color:var(--text-dim)">--</span></div>
+      <div class="info-row"><span class="info-label">Auth</span><span class="info-value" id="portal-auth" style="color:var(--text-dim)">--</span></div>
+    </div>
+  </div>
+
+  <!-- Row 2: Action Buttons -->
+  <div class="card">
+    <div class="actions">
+      <button class="btn btn-audit" id="btn-audit" onclick="doAction('audit')">Run Audit</button>
+      <button class="btn btn-diagnose" id="btn-diagnose" onclick="doAction('diagnose')">Diagnose</button>
+      <button class="btn btn-probe" id="btn-probe" onclick="doAction('probe')">Probe Only</button>
+      <button class="btn btn-reset" id="btn-reset" onclick="doAction('reset')">Reset Network</button>
+    </div>
+  </div>
+
+  <!-- Row 3: Probes + Active Tunnel -->
+  <div class="row">
+    <div class="card" style="min-width:420px">
+      <div class="card-title">Protocol Probes</div>
+      <hr class="card-sep">
+      <div id="probes-container">
+        <!-- Populated by JS, with noscript fallback -->
+        <div class="probe-row"><span class="probe-name">DNS (UDP/53)</span><span class="probe-badge badge-pending" id="probe-dns">PENDING</span><span class="probe-detail" id="probe-dns-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">ICMP (ping)</span><span class="probe-badge badge-pending" id="probe-icmp">PENDING</span><span class="probe-detail" id="probe-icmp-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">IPv6</span><span class="probe-badge badge-pending" id="probe-ipv6">PENDING</span><span class="probe-detail" id="probe-ipv6-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">HTTPS (Cloudflare)</span><span class="probe-badge badge-pending" id="probe-cloudflare">PENDING</span><span class="probe-detail" id="probe-cloudflare-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">QUIC (UDP/443)</span><span class="probe-badge badge-pending" id="probe-quic">PENDING</span><span class="probe-detail" id="probe-quic-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">NTP (UDP/123)</span><span class="probe-badge badge-pending" id="probe-ntp">PENDING</span><span class="probe-detail" id="probe-ntp-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">DoH (HTTPS)</span><span class="probe-badge badge-pending" id="probe-doh">PENDING</span><span class="probe-detail" id="probe-doh-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">Whitelist domains</span><span class="probe-badge badge-pending" id="probe-whitelists">PENDING</span><span class="probe-detail" id="probe-whitelists-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">Open ports</span><span class="probe-badge badge-pending" id="probe-ports">PENDING</span><span class="probe-detail" id="probe-ports-detail"></span></div>
+        <div class="probe-row"><span class="probe-name">Tunnel server</span><span class="probe-badge badge-pending" id="probe-tunnel_server">PENDING</span><span class="probe-detail" id="probe-tunnel_server-detail"></span></div>
+      </div>
+    </div>
+
+    <div class="card tunnel-card">
+      <div class="card-title">Active Tunnel</div>
+      <hr class="card-sep">
+      <div id="tunnel-info">
+        <div class="tunnel-inactive">No active tunnel</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 4: Bypass Method Feasibility -->
+  <div class="card">
+    <div class="card-title">Bypass Method Feasibility</div>
+    <div class="card-subtitle">Read-only assessment -- nothing exploited</div>
+    <hr class="card-sep">
+    <div style="overflow-x:auto">
+      <table id="methods-table">
+        <thead>
+          <tr>
+            <th style="width:40px;text-align:right">#</th>
+            <th>Method</th>
+            <th style="text-align:center">Feasible</th>
+            <th style="text-align:center">Conf.</th>
+            <th>Reason</th>
+            <th>Risk</th>
+          </tr>
+        </thead>
+        <tbody id="methods-body">
+          <tr><td colspan="6" style="color:var(--text-muted);text-align:center;padding:24px">Run Diagnose or Audit to assess methods</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Row 5: Bypass Attempts -->
+  <div class="card" id="bypass-card" style="display:none">
+    <div class="card-title">Bypass Attempts</div>
+    <hr class="card-sep">
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Technique</th>
+            <th style="text-align:center">Result</th>
+            <th style="text-align:center">Severity</th>
+            <th>Impact / Details</th>
+          </tr>
+        </thead>
+        <tbody id="bypasses-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Row 6: Live Log -->
+  <div class="card">
+    <div class="card-title">Live Log</div>
+    <hr class="card-sep">
+    <div class="log-area" id="log-area"></div>
+  </div>
+
+</main>
+
+<script>
+// Status color map
+const STATUS_COLORS = {
+  idle: '#6b7280', probing: '#f59e0b', bypassing: '#8b5cf6',
+  diagnosing: '#3b82f6', active: '#22c55e', error: '#ef4444'
+};
+
+// Badge rendering
+function badgeHTML(status) {
+  const labels = {pending:'PENDING', running:'PROBING...', open:'OPEN', closed:'CLOSED'};
+  const cls = {pending:'badge-pending', running:'badge-running', open:'badge-open', closed:'badge-closed'};
+  return '<span class="probe-badge '+(cls[status]||'badge-pending')+'">'+(labels[status]||'?')+'</span>';
+}
+
+// Signal bars
+function signalHTML(rssi) {
+  const heights = [6,10,14,18];
+  let bars = 0, color = '#6b7280';
+  if (rssi >= -50) { bars=4; color='#22c55e'; }
+  else if (rssi >= -60) { bars=3; color='#84cc16'; }
+  else if (rssi >= -70) { bars=2; color='#f59e0b'; }
+  else if (rssi >= -80) { bars=1; color='#ef4444'; }
+  let html = '<span class="signal-bars">';
+  for (let i=0; i<4; i++) {
+    const c = i < bars ? color : '#334155';
+    html += '<span class="signal-bar" style="height:'+heights[i]+'px;background:'+c+'"></span>';
+  }
+  html += '</span><span class="signal-rssi">'+rssi+' dBm</span>';
+  return html;
+}
+
+// Confidence class
+function confClass(c) {
+  if (c === 'HIGH') return 'conf-high';
+  if (c === 'MEDIUM') return 'conf-medium';
+  return 'conf-low';
+}
+
+// Keep track of last log count to only append new lines
+let lastLogLen = 0;
+let polling = null;
+
+function updateUI(data) {
+  // Status indicator
+  const color = STATUS_COLORS[data.status] || '#6b7280';
+  document.getElementById('status-dot').style.background = color;
+  const lbl = document.getElementById('status-label');
+  lbl.textContent = (data.status || 'idle').toUpperCase();
+  lbl.style.color = color;
+
+  // Enable/disable buttons based on status
+  const busy = data.status !== 'idle' && data.status !== 'error';
+  document.getElementById('btn-audit').disabled = busy;
+  document.getElementById('btn-diagnose').disabled = busy;
+  document.getElementById('btn-probe').disabled = busy;
+
+  // WiFi info
+  if (data.ssid) document.getElementById('wifi-ssid').textContent = data.ssid;
+  if (data.bssid) document.getElementById('wifi-bssid').textContent = data.bssid;
+  if (data.channel) document.getElementById('wifi-channel').textContent = data.channel;
+  if (data.rssi && data.rssi !== -99) {
+    document.getElementById('signal-display').innerHTML = signalHTML(data.rssi);
+  }
+  if (data.gateway) document.getElementById('gateway').textContent = data.gateway;
+  if (data.current_mac) {
+    const macEl = document.getElementById('current-mac');
+    macEl.textContent = data.current_mac;
+    if (data.original_mac && data.current_mac !== data.original_mac) {
+      macEl.classList.add('spoofed');
+    } else {
+      macEl.classList.remove('spoofed');
+    }
+  }
+  if (data.original_mac) document.getElementById('original-mac').textContent = data.original_mac;
+
+  // Portal
+  if (data.portal) {
+    const det = document.getElementById('portal-detected');
+    if (data.portal.is_captive) {
+      det.textContent = 'CAPTIVE PORTAL';
+      det.className = 'info-value portal-captive';
+    } else {
+      det.textContent = 'No portal';
+      det.className = 'info-value portal-open';
+    }
+    document.getElementById('portal-type').textContent = data.portal.type || '--';
+    document.getElementById('portal-vendor').textContent = data.portal.vendor || 'Unknown';
+    const auth = data.portal.auth_methods;
+    document.getElementById('portal-auth').textContent = (auth && auth.length) ? auth.join(', ') : 'N/A';
+  }
+
+  // Probes
+  if (data.probes) {
+    const keys = ['dns','icmp','ipv6','cloudflare','quic','ntp','doh','whitelists','ports','tunnel_server'];
+    for (const key of keys) {
+      const p = data.probes[key];
+      const el = document.getElementById('probe-'+key);
+      const detEl = document.getElementById('probe-'+key+'-detail');
+      if (el && p) {
+        el.outerHTML = '<span class="probe-badge" id="probe-'+key+'">'+badgeHTML(p.status)+'</span>';
+        // Re-set the badge (outerHTML replaces element)
+        const newEl = document.getElementById('probe-'+key);
+        if (newEl) newEl.innerHTML = badgeHTML(p.status);
+      }
+      if (detEl && p) detEl.textContent = p.details || '';
+    }
+  }
+
+  // Active tunnel
+  const tunnelDiv = document.getElementById('tunnel-info');
+  if (data.active_tunnel) {
+    tunnelDiv.innerHTML =
+      '<div class="tunnel-method">'+data.active_tunnel.method+'</div>' +
+      '<div class="tunnel-proxy">SOCKS5 127.0.0.1:'+data.active_tunnel.port+'</div>';
+  } else {
+    tunnelDiv.innerHTML = '<div class="tunnel-inactive">No active tunnel</div>';
+  }
+
+  // Methods table
+  if (data.methods && data.methods.length > 0) {
+    let rows = '';
+    for (const m of data.methods) {
+      const fBadge = m.feasible
+        ? '<span class="badge-yes">YES</span>'
+        : '<span class="badge-no">NO</span>';
+      rows += '<tr>' +
+        '<td style="text-align:right;color:var(--text-muted)">'+m.number+'</td>' +
+        '<td>'+m.name+'</td>' +
+        '<td style="text-align:center">'+fBadge+'</td>' +
+        '<td style="text-align:center"><span class="'+confClass(m.confidence)+'">'+m.confidence+'</span></td>' +
+        '<td style="color:var(--text-dim)">'+m.reason+'</td>' +
+        '<td style="color:var(--text-muted)">'+m.risk+'</td>' +
+        '</tr>';
+    }
+    document.getElementById('methods-body').innerHTML = rows;
+  }
+
+  // Bypass results
+  if (data.bypasses && data.bypasses.length > 0) {
+    document.getElementById('bypass-card').style.display = '';
+    let rows = '';
+    for (const b of data.bypasses) {
+      const rBadge = b.success
+        ? '<span class="badge-success">SUCCESS</span>'
+        : '<span class="badge-fail">FAIL</span>';
+      const sevClass = 'sev-'+(b.severity||'low').toLowerCase();
+      rows += '<tr>' +
+        '<td>'+b.method+'</td>' +
+        '<td style="text-align:center">'+rBadge+'</td>' +
+        '<td style="text-align:center"><span class="'+sevClass+'">'+(b.severity||'')+'</span></td>' +
+        '<td style="color:var(--text-dim)">'+b.details+'</td>' +
+        '</tr>';
+    }
+    document.getElementById('bypasses-body').innerHTML = rows;
+  }
+
+  // Log
+  const logArea = document.getElementById('log-area');
+  if (data.log && data.log.length > 0) {
+    if (data.log.length !== lastLogLen) {
+      // Only append new lines for efficiency
+      const newLines = data.log.slice(lastLogLen);
+      for (const line of newLines) {
+        logArea.textContent += line + '\n';
+      }
+      lastLogLen = data.log.length;
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+  }
+}
+
+// Polling
+function startPolling() {
+  if (polling) return;
+  polling = setInterval(async () => {
+    try {
+      const resp = await fetch('/api/state');
+      if (resp.ok) {
+        const data = await resp.json();
+        updateUI(data);
+      }
+    } catch (e) {
+      // Server unreachable, ignore
+    }
+  }, 500);
+}
+
+// Action handler
+async function doAction(action) {
+  try {
+    const resp = await fetch('/api/'+action, {method: 'POST'});
+    if (!resp.ok && resp.status === 409) {
+      // Already busy
+    }
+  } catch (e) {
+    console.error('Action failed:', e);
+  }
+}
+
+// Start on load
+document.addEventListener('DOMContentLoaded', () => {
+  startPolling();
+  // Initial fetch
+  fetch('/api/state').then(r => r.json()).then(updateUI).catch(() => {});
+});
+</script>
+</body>
+</html>

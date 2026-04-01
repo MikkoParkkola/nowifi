@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -23,6 +25,8 @@ func TestMethodConstants(t *testing.T) {
 		{"Dictionary", Dictionary, "dictionary_attack"},
 		{"WPSPixie", WPSPixie, "wps_pixie_dust"},
 		{"WPSPin", WPSPin, "wps_pin_brute"},
+		{"OnlineBrute", OnlineBrute, "online_brute_force"},
+		{"SmartCrackM", SmartCrackM, "smart_crack"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -33,10 +37,10 @@ func TestMethodConstants(t *testing.T) {
 	}
 }
 
-func TestAllSixMethodsDefined(t *testing.T) {
-	methods := []Method{PMKID, Handshake, Hashcat, Dictionary, WPSPixie, WPSPin}
-	if len(methods) != 6 {
-		t.Fatalf("expected 6 method constants, got %d", len(methods))
+func TestAllMethodsDefined(t *testing.T) {
+	methods := []Method{PMKID, Handshake, Hashcat, Dictionary, WPSPixie, WPSPin, OnlineBrute, SmartCrackM}
+	if len(methods) != 8 {
+		t.Fatalf("expected 8 method constants, got %d", len(methods))
 	}
 	seen := make(map[Method]bool)
 	for _, m := range methods {
@@ -186,21 +190,29 @@ func TestRunCrackPipelineOrder(t *testing.T) {
 	// We verify this by inspecting the documented method order.
 	// The pipeline is:
 	//   1. PMKID first
-	//   2. WPS Pixie before hashcat
-	//   3. WPS PIN last
+	//   2. WPS Pixie before SmartCrack
+	//   3. SmartCrack on PMKID before handshake
+	//   4. Handshake capture
+	//   5. SmartCrack on handshake
+	//   6. Dictionary attack
+	//   7. WPS PIN brute force
+	//   8. Smart brute force (masks + rules)
+	//   9. Online brute force (last resort)
 	//
 	// We cannot run RunCrack (requires monitor mode, root, external tools),
-	// so we verify the ordering contract through the Method constants and
-	// the Result type structure.
+	// so we verify the ordering contract through the Method constants.
 
 	expectedOrder := []Method{
-		PMKID,     // Step 1: PMKID capture (client-less)
-		WPSPixie,  // Step 2: WPS Pixie-Dust (fast)
-		Hashcat,   // Step 3: Hashcat crack PMKID
-		Handshake, // Step 4: Handshake capture
-		Hashcat,   // Step 5: Hashcat crack handshake
-		WPSPin,    // Step 6: WPS PIN brute force (last resort)
-		Dictionary, // Step 7: Aircrack-ng (CPU fallback)
+		PMKID,       // Step 1: PMKID capture (client-less)
+		WPSPixie,    // Step 2: WPS Pixie-Dust (fast)
+		SmartCrackM, // Step 3: SmartCrack stages 1-3 on PMKID
+		Handshake,   // Step 4: Handshake capture
+		SmartCrackM, // Step 5: SmartCrack stages 1-3 on handshake
+		Hashcat,     // Step 6: Dictionary attack
+		Dictionary,  // Step 6b: Aircrack-ng CPU fallback
+		WPSPin,      // Step 7: WPS PIN brute force
+		SmartCrackM, // Step 8: Smart brute force (masks + rules)
+		OnlineBrute, // Step 9: Online brute force (last resort)
 	}
 
 	// Verify PMKID is first.
@@ -208,30 +220,47 @@ func TestRunCrackPipelineOrder(t *testing.T) {
 		t.Error("PMKID should be first in pipeline")
 	}
 
-	// Verify WPS Pixie comes before first Hashcat.
+	// Verify WPS Pixie comes before first SmartCrack.
 	pixieIdx := -1
-	firstHashcatIdx := -1
+	firstSmartIdx := -1
 	for i, m := range expectedOrder {
 		if m == WPSPixie && pixieIdx == -1 {
 			pixieIdx = i
 		}
-		if m == Hashcat && firstHashcatIdx == -1 {
-			firstHashcatIdx = i
+		if m == SmartCrackM && firstSmartIdx == -1 {
+			firstSmartIdx = i
 		}
 	}
-	if pixieIdx >= firstHashcatIdx {
-		t.Errorf("WPS Pixie (idx %d) should come before first Hashcat (idx %d)", pixieIdx, firstHashcatIdx)
+	if pixieIdx >= firstSmartIdx {
+		t.Errorf("WPS Pixie (idx %d) should come before first SmartCrack (idx %d)", pixieIdx, firstSmartIdx)
 	}
 
-	// Verify WPS PIN is last technique (before dictionary fallback).
+	// Verify Online brute force is last.
+	lastIdx := len(expectedOrder) - 1
+	if expectedOrder[lastIdx] != OnlineBrute {
+		t.Errorf("Online brute force should be last, got %s", expectedOrder[lastIdx])
+	}
+
+	// Verify WPS PIN comes after dictionary but before online brute.
 	wpsPinIdx := -1
+	dictIdx := -1
+	onlineIdx := -1
 	for i, m := range expectedOrder {
-		if m == WPSPin {
+		if m == WPSPin && wpsPinIdx == -1 {
 			wpsPinIdx = i
 		}
+		if m == Dictionary && dictIdx == -1 {
+			dictIdx = i
+		}
+		if m == OnlineBrute && onlineIdx == -1 {
+			onlineIdx = i
+		}
 	}
-	if wpsPinIdx < len(expectedOrder)-2 {
-		t.Error("WPS PIN should be near the end of the pipeline")
+	if wpsPinIdx < dictIdx {
+		t.Errorf("WPS PIN (idx %d) should come after dictionary (idx %d)", wpsPinIdx, dictIdx)
+	}
+	if wpsPinIdx > onlineIdx {
+		t.Errorf("WPS PIN (idx %d) should come before online brute (idx %d)", wpsPinIdx, onlineIdx)
 	}
 }
 
@@ -507,4 +536,325 @@ func TestParseWashOutput_Empty(t *testing.T) {
 func TestIsDarwin(t *testing.T) {
 	// This just verifies the function doesn't panic and returns a bool.
 	_ = isDarwin()
+}
+
+// ---------------------------------------------------------------------------
+// Common WiFi passwords list
+// ---------------------------------------------------------------------------
+
+func TestCommonPasswordsNotEmpty(t *testing.T) {
+	if len(commonWifiPasswords) == 0 {
+		t.Fatal("commonWifiPasswords is empty")
+	}
+	if len(commonWifiPasswords) < 500 {
+		t.Errorf("commonWifiPasswords has %d entries, expected >= 500", len(commonWifiPasswords))
+	}
+}
+
+func TestCommonPasswordsMinLength(t *testing.T) {
+	// WPA/WPA2 requires minimum 8 characters.
+	for i, pw := range commonWifiPasswords {
+		if len(pw) < 8 {
+			t.Errorf("commonWifiPasswords[%d] = %q has %d chars, WPA minimum is 8", i, pw, len(pw))
+		}
+	}
+}
+
+func TestCommonPasswordsNoDuplicates(t *testing.T) {
+	seen := make(map[string]int, len(commonWifiPasswords))
+	for i, pw := range commonWifiPasswords {
+		if prev, ok := seen[pw]; ok {
+			t.Errorf("duplicate password %q at indices %d and %d", pw, prev, i)
+		}
+		seen[pw] = i
+	}
+}
+
+func TestCommonPasswordsContainsExpected(t *testing.T) {
+	// Spot-check that well-known WiFi passwords are present.
+	expected := []string{
+		"password", "12345678", "password1", "qwerty123",
+		"88888888", "wifipassword", "netgear1",
+	}
+
+	set := make(map[string]bool, len(commonWifiPasswords))
+	for _, pw := range commonWifiPasswords {
+		set[pw] = true
+	}
+
+	for _, pw := range expected {
+		if !set[pw] {
+			t.Errorf("expected %q in commonWifiPasswords but not found", pw)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hashcat masks
+// ---------------------------------------------------------------------------
+
+func TestHashcatMasksNotEmpty(t *testing.T) {
+	if len(hashcatMasks) == 0 {
+		t.Fatal("hashcatMasks is empty")
+	}
+}
+
+func TestHashcatMasksHaveRequiredFields(t *testing.T) {
+	for i, m := range hashcatMasks {
+		if m.Mask == "" {
+			t.Errorf("hashcatMasks[%d].Mask is empty", i)
+		}
+		if m.Name == "" {
+			t.Errorf("hashcatMasks[%d].Name is empty", i)
+		}
+		if m.EstTime == "" {
+			t.Errorf("hashcatMasks[%d].EstTime is empty", i)
+		}
+		// Masks should contain hashcat placeholders.
+		if !strings.Contains(m.Mask, "?") {
+			t.Errorf("hashcatMasks[%d].Mask = %q has no hashcat placeholders", i, m.Mask)
+		}
+	}
+}
+
+func TestHashcatMasksNoDuplicateMasks(t *testing.T) {
+	seen := make(map[string]int, len(hashcatMasks))
+	for i, m := range hashcatMasks {
+		if prev, ok := seen[m.Mask]; ok {
+			t.Errorf("duplicate mask %q at indices %d and %d", m.Mask, prev, i)
+		}
+		seen[m.Mask] = i
+	}
+}
+
+func TestHashcatMasksMinLength8(t *testing.T) {
+	// WPA passwords are 8-63 chars; each mask should produce at least 8 chars.
+	for i, m := range hashcatMasks {
+		// Count output length: each ?X produces 1 char, literal chars produce 1 char.
+		outputLen := 0
+		mask := m.Mask
+		j := 0
+		for j < len(mask) {
+			if j+1 < len(mask) && mask[j] == '?' {
+				outputLen++
+				j += 2
+			} else {
+				outputLen++
+				j++
+			}
+		}
+		if outputLen < 8 {
+			t.Errorf("hashcatMasks[%d].Mask = %q produces %d chars, WPA minimum is 8", i, m.Mask, outputLen)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isNumericMask
+// ---------------------------------------------------------------------------
+
+func TestIsNumericMask(t *testing.T) {
+	tests := []struct {
+		mask string
+		want bool
+	}{
+		{"?d?d?d?d?d?d?d?d", true},
+		{"?d?d?d?d2024", true},
+		{"20?d?d?d?d?d?d", true},
+		{"?l?l?l?l?d?d?d?d", false},
+		{"?u?l?l?l?l?l?d?d", false},
+		{"?a?a?a?a?a?a?a?a", false},
+		{"", true}, // empty is vacuously numeric
+	}
+	for _, tt := range tests {
+		t.Run(tt.mask, func(t *testing.T) {
+			got := isNumericMask(tt.mask)
+			if got != tt.want {
+				t.Errorf("isNumericMask(%q) = %v, want %v", tt.mask, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SmartCrack with missing hash file
+// ---------------------------------------------------------------------------
+
+func TestSmartCrackMissingHashFile(t *testing.T) {
+	result, err := SmartCrack("/nonexistent/hash.22000", 10*time.Second, false)
+	if err != nil {
+		t.Fatalf("SmartCrack returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SmartCrack returned nil result")
+	}
+	if result.Success {
+		t.Error("SmartCrack should not succeed with missing hash file")
+	}
+	if result.Method != SmartCrackM {
+		t.Errorf("Method = %q, want %q", result.Method, SmartCrackM)
+	}
+	if !strings.Contains(result.Details, "not found") {
+		t.Errorf("Details = %q, should mention file not found", result.Details)
+	}
+}
+
+func TestSmartCrackNoHashcat(t *testing.T) {
+	// Create a dummy hash file.
+	tmpDir := t.TempDir()
+	hashFile := filepath.Join(tmpDir, "test.22000")
+	if err := os.WriteFile(hashFile, []byte("WPA*02*...\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// SmartCrack should handle missing hashcat gracefully.
+	result, err := SmartCrack(hashFile, 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("SmartCrack returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SmartCrack returned nil result")
+	}
+	// On CI/dev machine without hashcat, it should fail gracefully.
+	if result.Method != SmartCrackM {
+		t.Errorf("Method = %q, want %q", result.Method, SmartCrackM)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OnlineBruteForce
+// ---------------------------------------------------------------------------
+
+func TestOnlineBruteForceResultType(t *testing.T) {
+	target := WifiTarget{
+		SSID:     "TestNetwork",
+		BSSID:    "AA:BB:CC:DD:EE:FF",
+		Channel:  6,
+		Security: "WPA2",
+		Signal:   -50,
+	}
+
+	// OnlineBruteForce should return gracefully when tools are missing.
+	result, err := OnlineBruteForce(target, "wlan0", 2*time.Second)
+	if err != nil {
+		t.Fatalf("OnlineBruteForce returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("OnlineBruteForce returned nil result")
+	}
+	if result.Method != OnlineBrute {
+		t.Errorf("Method = %q, want %q", result.Method, OnlineBrute)
+	}
+	// Without wpa_supplicant installed, it should fail but not crash.
+	if result.Success {
+		t.Error("Expected failure without wpa_supplicant, got success")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OnlineBrute and SmartCrackM JSON round-trip
+// ---------------------------------------------------------------------------
+
+func TestNewMethodsJSON(t *testing.T) {
+	tests := []struct {
+		method Method
+	}{
+		{OnlineBrute},
+		{SmartCrackM},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.method), func(t *testing.T) {
+			r := Result{
+				Method:  tt.method,
+				Success: true,
+				Details: "test result",
+			}
+
+			data, err := json.Marshal(r)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+
+			var decoded Result
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			if decoded.Method != tt.method {
+				t.Errorf("decoded Method = %q, want %q", decoded.Method, tt.method)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildHashcatArgs
+// ---------------------------------------------------------------------------
+
+func TestBuildHashcatArgs(t *testing.T) {
+	args := buildHashcatArgs("/tmp/hash.22000", "-a", "3", "/tmp/hash.22000", "?d?d?d?d?d?d?d?d")
+
+	// Should start with -m 22000.
+	if len(args) < 2 || args[0] != "-m" || args[1] != "22000" {
+		t.Errorf("args should start with -m 22000, got %v", args[:min(2, len(args))])
+	}
+
+	// Should contain the extra args.
+	found := false
+	for _, a := range args {
+		if a == "-a" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("args should contain -a from extraArgs")
+	}
+
+	// Should have --potfile-disable.
+	found = false
+	for _, a := range args {
+		if a == "--potfile-disable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("args should contain --potfile-disable")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// findHashcatRuleByName
+// ---------------------------------------------------------------------------
+
+func TestFindHashcatRuleByName_NoExist(t *testing.T) {
+	// With a fake hashcat path, should return empty for nonexistent rule.
+	result := findHashcatRuleByName("/nonexistent/hashcat", "nonexistent.rule")
+	if result != "" {
+		t.Errorf("expected empty string for nonexistent rule, got %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// smartCrackTimeout helper
+// ---------------------------------------------------------------------------
+
+func TestSmartCrackTimeout(t *testing.T) {
+	start := time.Now()
+	result := smartCrackTimeout("/tmp/hash.22000", "Stage 2 (numeric)", start)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("timeout result should not be Success")
+	}
+	if result.Method != SmartCrackM {
+		t.Errorf("Method = %q, want %q", result.Method, SmartCrackM)
+	}
+	if !strings.Contains(result.Details, "Stage 2") {
+		t.Errorf("Details = %q, should mention the stage", result.Details)
+	}
+	if result.CaptureFile != "/tmp/hash.22000" {
+		t.Errorf("CaptureFile = %q, want /tmp/hash.22000", result.CaptureFile)
+	}
 }
