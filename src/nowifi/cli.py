@@ -487,6 +487,54 @@ def tools(download):
 
 
 @main.command()
+def ecosystem():
+    """Show complementary tools for capabilities beyond nowifi's scope.
+
+    \b
+    nowifi focuses on automated bypass + cracking. For deeper assessment,
+    use these proven tools alongside nowifi:
+    """
+    from rich.table import Table
+
+    console.print("\n[bold cyan]nowifi[/bold cyan] — Complementary Tool Ecosystem\n")
+    console.print("[dim]nowifi doesn't reimplement these — they're SOTA for their niche.[/dim]\n")
+
+    t = Table(border_style="dim")
+    t.add_column("Tool", style="bold cyan")
+    t.add_column("What it does")
+    t.add_column("When to use")
+    t.add_column("Install")
+
+    t.add_row("bettercap", "MITM, ARP spoofing, network topology, BLE/HID",
+              "After nowifi gets you on the network — deep MITM assessment",
+              "brew install bettercap")
+    t.add_row("wifiphisher", "Evil twin, rogue AP, credential phishing portals",
+              "When you need to clone a portal or create a fake AP",
+              "pip install wifiphisher (Linux only)")
+    t.add_row("eaphammer", "WPA2-Enterprise, 802.1X, GTC downgrade, RADIUS relay",
+              "Enterprise WiFi with RADIUS/EAP authentication",
+              "github.com/s0lst1c3/eaphammer")
+    t.add_row("kismet", "Passive WiFi/BT/Zigbee/SDR reconnaissance",
+              "Full spectrum passive monitoring without transmitting",
+              "brew install kismet")
+    t.add_row("Wireshark", "Deep packet capture and protocol analysis",
+              "Analyzing captured traffic after getting network access",
+              "brew install wireshark")
+    t.add_row("Responder", "LLMNR/NBT-NS/mDNS poisoning, NTLMv2 hash capture",
+              "On open/corporate WiFi to harvest Windows credentials",
+              "pip install Responder")
+    t.add_row("mitm6", "IPv6 RA attacks, DHCPv6 poisoning, WPAD abuse",
+              "When IPv6 is enabled — MITM via forged router advertisements",
+              "pip install mitm6")
+    t.add_row("Nmap", "Network scanning, service detection, NSE scripts",
+              "Mapping the network after gaining access",
+              "brew install nmap")
+
+    console.print(t)
+    console.print("\n[dim]Typical workflow: nowifi (get access) → nmap (map network) → bettercap (MITM) → Wireshark (analyze)[/dim]\n")
+
+
+@main.command()
 @click.option("--interface", "-i", default="en0", help="WiFi interface (monitor-capable for capture)")
 @click.option("--target", "-t", default="", help="Target SSID (empty = scan and pick strongest)")
 @click.option("--timeout", default=300, help="Max time for capture phase (seconds)")

