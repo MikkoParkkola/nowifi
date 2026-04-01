@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package server provisions tunnel infrastructure: Cloudflare Workers,
 // DigitalOcean droplets, and Hetzner Cloud servers.
 //

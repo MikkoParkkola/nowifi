@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package detect implements captive portal detection and vendor fingerprinting.
 //
 // It uses multiple canary URLs (Apple CNA, Google 204, Firefox, Microsoft NCSI)

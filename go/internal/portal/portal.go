@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package portal implements automatic captive portal login.
 //
 // It fetches the portal page, detects the form type (click-through, email

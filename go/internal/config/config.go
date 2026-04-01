@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package config manages persistent configuration stored in ~/.nowifi/config.json.
 //
 // When a CLI flag is not explicitly set by the user, the config value is used as

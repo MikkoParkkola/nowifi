@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Rate limiting and exponential backoff for brute force operations.
 //
 // WiFi access points and captive portals commonly rate-limit authentication:

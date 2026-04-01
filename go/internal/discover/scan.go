@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // scan.go implements WiFi network scanning with security assessment.
 //
 // On macOS it uses system_profiler SPAirPortDataType to enumerate nearby

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package crack orchestrates WPA/WPA2/WPA3 password cracking.
 //
 // It wraps proven external tools (hcxdumptool, hcxpcapngtool, hashcat,

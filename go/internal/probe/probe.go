@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package probe implements pre-authentication leak enumeration.
 //
 // It tests which protocols and ports are open before authenticating to a

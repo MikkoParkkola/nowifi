@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package toolchain manages external tool binaries: find, download, ensure.
 //
 // Three downloadable tools (chisel, hysteria, cloudflared) have GitHub release

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package capture provides an audit trail for nowifi sessions.
 //
 // Each audit record captures what was tested, which bypass (if any) succeeded,

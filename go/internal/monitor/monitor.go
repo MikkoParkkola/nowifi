@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package monitor manages WiFi monitor mode on macOS and Linux.
 //
 // Handles enabling/disabling monitor mode and reverts to managed mode

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package discover implements passive device observation on WiFi networks.
 // Identifies authorized devices by monitoring ARP broadcast traffic (shared GTK on WPA2).
 package discover

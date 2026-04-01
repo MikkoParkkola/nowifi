@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package clone implements Full Device Clone — spoofing MAC + IP + DHCP fingerprint
 // to become indistinguishable from the target device at every inspection layer.
 package clone

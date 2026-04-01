@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package guard provides the StateGuard, which saves and restores all
 // network state (MAC address, system proxy, DNS cache, tunnel processes)
 // on exit, ensuring the system returns to its pre-nowifi state.

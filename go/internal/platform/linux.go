@@ -1,5 +1,8 @@
 //go:build linux
 
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 package platform
 
 import (

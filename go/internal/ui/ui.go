@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package ui provides an embedded web dashboard and system tray for nowifi.
 //
 // The web dashboard uses Go's embed package to bundle a single-page HTML

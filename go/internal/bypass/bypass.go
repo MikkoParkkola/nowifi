@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package bypass implements 19 ordered captive portal bypass techniques.
 //
 // After a successful bypass, internet works system-wide (including browser)

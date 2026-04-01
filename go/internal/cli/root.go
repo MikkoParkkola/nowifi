@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package cli implements the nowifi command-line interface using cobra.
 //
 // The root command (bare `nowifi`) runs the full audit pipeline:

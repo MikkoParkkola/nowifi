@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Mikko Parkkola. All rights reserved.
+// Licensed under AGPL-3.0. See LICENSE file.
+
 // Package platform provides cross-platform network operations.
 //
 // Platform-specific implementations live in darwin.go and linux.go,
