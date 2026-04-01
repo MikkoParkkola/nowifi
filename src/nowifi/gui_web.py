@@ -9,7 +9,7 @@ from nicegui import ui
 
 from . import __version__
 from .detect import detect_portal, PortalInfo
-from .platform_mac import get_gateway, get_wifi_info
+from .platform import get_gateway, get_wifi_info
 from .probe import probe_all, ProbeResults
 from .bypass import AuditConfig, run_bypasses, BypassResult
 

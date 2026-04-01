@@ -17,8 +17,8 @@ from rich.console import Console
 from . import __version__
 from .bypass import AuditConfig, run_bypasses
 from .detect import detect_portal
-from . import platform_mac
-from .platform_mac import StateGuard, get_gateway, get_wifi_info
+from . import platform as platform_mac
+from .platform import StateGuard, get_gateway, get_wifi_info
 from .probe import probe_all
 from .report import print_terminal_report
 
@@ -281,6 +281,82 @@ def audit(interface, tunnel_server, dns_domain, icmp_server, cf_workers, quic_se
 
 
 @main.command()
+@click.option("--interface", "-i", default="en0", help="WiFi interface")
+@click.option("--stealth/--fast", default=True)
+@click.option("--report", "-r", "report_format", type=click.Choice(["terminal", "markdown", "json"]), default="terminal")
+@click.option("--output", "-o", type=click.Path(), default=None, help="Write report to file")
+def diagnose(interface, stealth, report_format, output):
+    """Diagnose network security without exploiting anything.
+
+    \b
+    Scans all protocols, detects portal, checks which of the 19 bypass
+    methods WOULD work — without changing any network settings.
+    No MAC changes. No tunnels. No proxy. Pure read-only assessment.
+    """
+    interface = _validate_interface(interface)
+    console.print(f"\n[bold cyan]nowifi v{__version__}[/bold cyan] — Diagnosis Mode (read-only)\n")
+
+    wifi = get_wifi_info(interface)
+    if not wifi:
+        console.print(f"[red]Not connected on {interface}[/red]")
+        sys.exit(1)
+    gateway = get_gateway(interface)
+    console.print(f"  SSID: [cyan]{wifi.ssid}[/cyan]  Gateway: {gateway}")
+
+    console.print("  Detecting portal...", highlight=False)
+    from .detect import detect_portal as _detect
+    portal = _detect(interface)
+    portal.ssid = wifi.ssid
+    portal.gateway = gateway
+
+    console.print("  Probing protocols...", highlight=False)
+    probes = probe_all(interface=interface, stealth=stealth)
+
+    console.print("  Assessing bypass methods...\n", highlight=False)
+    from .diagnose import assess_methods, print_diagnosis, _check_tools
+    tools = _check_tools()
+    methods = assess_methods(portal, probes, tools)
+
+    if report_format == "terminal":
+        print_diagnosis(portal, probes, methods, tools)
+    elif report_format == "markdown":
+        from datetime import datetime, timezone
+        feasible = sum(1 for m in methods if m.feasible)
+        lines = [
+            "# nowifi Network Diagnosis Report",
+            f"**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+            f"**SSID:** {portal.ssid}  **Gateway:** {portal.gateway}",
+            f"**Portal:** {'YES' if portal.is_captive else 'NO'} ({portal.portal_type.value})",
+            "", "## Bypass Feasibility", "",
+            "| # | Method | Feasible | Confidence | Reason |",
+            "|---|--------|----------|------------|--------|",
+        ]
+        for m in methods:
+            lines.append(f"| {m.number} | {m.name} | {'YES' if m.feasible else 'no'} | {m.confidence if m.feasible else '-'} | {m.reason} |")
+        lines += ["", f"**{feasible}/19 methods feasible.**"]
+        md = "\n".join(lines)
+        if output:
+            with open(output, "w") as f:
+                f.write(md)
+            console.print(f"Report written to {output}")
+        else:
+            console.print(md)
+    elif report_format == "json":
+        import json
+        data = {
+            "portal": {"captive": portal.is_captive, "type": portal.portal_type.value, "vendor": portal.vendor},
+            "methods": [{"name": m.name, "feasible": m.feasible, "confidence": m.confidence, "reason": m.reason} for m in methods],
+            "tools": tools,
+        }
+        js = json.dumps(data, indent=2)
+        if output:
+            with open(output, "w") as f:
+                f.write(js)
+        else:
+            console.print(js)
+
+
+@main.command()
 @click.option("--port", default=8321, help="Dashboard port")
 def ui(port):
     """Launch web dashboard in browser (cross-platform GUI)."""
@@ -375,6 +451,196 @@ def reset(interface):
             pass
 
     console.print("\n[bold green]Network reset complete.[/bold green] Try browsing now.\n")
+
+
+@main.command()
+@click.option("--download", "-d", is_flag=True, help="Auto-download missing tools that support it")
+def tools(download):
+    """List required external tools and their install status."""
+    from .toolchain import list_tools, download_tool
+
+    tool_status = list_tools()
+
+    console.print("\n[bold cyan]nowifi[/bold cyan] — External Tools\n")
+
+    for name, info in sorted(tool_status.items()):
+        if info["installed"]:
+            status = f"[green]installed[/green]  {info['path']}"
+        elif info["downloadable"]:
+            if download:
+                console.print(f"  [yellow]downloading {name}...[/yellow]", end="")
+                path = download_tool(name)
+                if path:
+                    status = f"[green]downloaded[/green]  {path}"
+                else:
+                    status = "[red]download failed[/red]"
+            else:
+                status = "[yellow]missing[/yellow] (auto-downloadable: nowifi tools -d)"
+        else:
+            hint = info.get("install_hint", "")
+            status = f"[red]missing[/red]  install: {hint}" if hint else "[red]missing[/red]"
+
+        desc = f"  [dim]{info['description']}[/dim]" if info.get("description") else ""
+        console.print(f"  {name:<20} {status}{desc}")
+
+    console.print()
+
+
+@main.command()
+@click.option("--interface", "-i", default="en0", help="WiFi interface (monitor-capable for capture)")
+@click.option("--target", "-t", default="", help="Target SSID (empty = scan and pick strongest)")
+@click.option("--timeout", default=300, help="Max time for capture phase (seconds)")
+@click.option("--wordlist", "-w", default="", help="Path to wordlist file")
+@click.option("--scan-only", is_flag=True, help="Only scan for targets, don't crack")
+def crack(interface, target, timeout, wordlist, scan_only):
+    """Crack WPA/WPA2 passwords (PMKID + handshake capture + hashcat).
+
+    \b
+    Pipeline (ordered by effectiveness):
+      1. PMKID capture     -- client-less, ~60% of APs vulnerable
+      2. Handshake capture -- deauth a client, capture 4-way handshake
+      3. Hashcat crack     -- GPU-accelerated dictionary/brute-force
+      4. Aircrack-ng       -- CPU fallback if hashcat unavailable
+
+    \b
+    On macOS, monitor mode requires an external USB WiFi adapter
+    (e.g., Alfa AWUS036ACH). The built-in card does not support it.
+
+    \b
+    Examples:
+      sudo nowifi crack                           # Scan + crack strongest WPA network
+      sudo nowifi crack -t "MyWiFi"               # Target a specific SSID
+      sudo nowifi crack --scan-only               # Just scan, don't attack
+      sudo nowifi crack -w ~/wordlists/rockyou.txt  # Use specific wordlist
+    """
+    interface = _validate_interface(interface)
+    if wordlist and not wordlist.strip():
+        wordlist = ""
+
+    console.print(f"\n[bold cyan]nowifi v{__version__}[/bold cyan] — WPA Cracking\n")
+
+    from .crack import scan_targets, run_crack, find_wordlists
+
+    # --- Scan phase ---
+    console.print("[bold]1. Scanning[/bold]", highlight=False, end="  ")
+    targets = scan_targets(interface)
+
+    if not targets:
+        console.print("[red]No WiFi networks found[/red]")
+        console.print("  Check that WiFi is enabled and interface is correct.")
+        sys.exit(1)
+
+    wpa_targets = [t for t in targets if "wpa" in t.security.lower()]
+    console.print(f"Found [cyan]{len(targets)}[/cyan] networks ({len(wpa_targets)} WPA/WPA2)")
+
+    # Show target list
+    from rich.table import Table
+    table = Table(border_style="blue", show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("SSID", style="bold")
+    table.add_column("BSSID", style="dim")
+    table.add_column("CH", justify="right")
+    table.add_column("Signal", justify="right")
+    table.add_column("Security")
+
+    for i, t in enumerate(targets[:20], 1):
+        signal_color = "green" if t.signal > -60 else "yellow" if t.signal > -75 else "red"
+        table.add_row(
+            str(i), t.ssid, t.bssid, str(t.channel),
+            f"[{signal_color}]{t.signal} dBm[/{signal_color}]",
+            t.security,
+        )
+
+    console.print(table)
+
+    if scan_only:
+        wordlists = find_wordlists()
+        if wordlists:
+            console.print(f"\n[dim]Available wordlists: {', '.join(wordlists[:3])}[/dim]")
+        else:
+            console.print("\n[dim]No wordlists found. Install rockyou.txt or use --wordlist[/dim]")
+        console.print()
+        return
+
+    # --- Crack phase ---
+    console.print("\n[bold]2. Cracking[/bold]", highlight=False)
+    if target:
+        console.print(f"  Target: [cyan]{target}[/cyan]")
+    else:
+        selected = wpa_targets[0] if wpa_targets else targets[0]
+        console.print(f"  Target: [cyan]{selected.ssid}[/cyan] ({selected.bssid}, {selected.signal} dBm)")
+
+    if wordlist:
+        console.print(f"  Wordlist: {wordlist}")
+    else:
+        wordlists = find_wordlists()
+        if wordlists:
+            console.print(f"  Wordlist: {wordlists[0]} (auto-detected)")
+        else:
+            console.print("  [yellow]No wordlist found -- hashcat brute-force only[/yellow]")
+
+    console.print()
+    results = run_crack(
+        interface=interface,
+        target_ssid=target,
+        timeout=timeout,
+        wordlist=wordlist,
+    )
+
+    # --- Results ---
+    console.print("\n[bold]3. Results[/bold]")
+
+    from rich.panel import Panel
+
+    cracked = [r for r in results if r.success and r.password]
+    captures = [r for r in results if r.success and r.capture_file and not r.password]
+
+    if cracked:
+        pw = cracked[0]
+        console.print(Panel(
+            f"[bold green]PASSWORD FOUND[/bold green]\n\n"
+            f"  [bold]{pw.password}[/bold]\n\n"
+            f"  Method: {pw.method.value}\n"
+            f"  Time: {pw.time_elapsed:.1f}s",
+            title="[bold green]Cracked[/bold green]",
+            border_style="green",
+        ))
+    elif captures:
+        cap = captures[0]
+        console.print(Panel(
+            f"[yellow]Capture successful but password not cracked[/yellow]\n\n"
+            f"  Method: {cap.method.value}\n"
+            f"  File: {cap.capture_file}\n"
+            f"  {cap.details}\n\n"
+            f"  Try a larger wordlist:\n"
+            f"  [bold]hashcat -m 22000 {cap.capture_file} /path/to/wordlist.txt[/bold]",
+            title="[yellow]Captured[/yellow]",
+            border_style="yellow",
+        ))
+    else:
+        console.print(Panel(
+            "[red]No password cracked and no captures obtained.[/red]\n\n"
+            + "\n".join(f"  {r.method.value}: {r.details}" for r in results),
+            title="[red]Failed[/red]",
+            border_style="red",
+        ))
+
+    # Show all steps
+    console.print()
+    step_table = Table(title="Crack Pipeline", border_style="blue")
+    step_table.add_column("Step", style="bold")
+    step_table.add_column("Result", justify="center")
+    step_table.add_column("Time", justify="right")
+    step_table.add_column("Details")
+
+    for r in results:
+        result_str = "[bold green]OK[/bold green]" if r.success else "[dim]fail[/dim]"
+        time_str = f"{r.time_elapsed:.1f}s" if r.time_elapsed > 0 else "-"
+        detail = r.password if r.password else r.details[:80]
+        step_table.add_row(r.method.value, result_str, time_str, detail)
+
+    console.print(step_table)
+    console.print()
 
 
 def _get_hardware_mac(interface: str) -> str:

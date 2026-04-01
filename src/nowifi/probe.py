@@ -236,7 +236,7 @@ def probe_ipv6(interface: str = "en0") -> Ipv6ProbeResult:
     result = Ipv6ProbeResult()
 
     # Check if we have a global IPv6 address
-    from . import platform_mac
+    from . import platform as platform_mac
     ipv6_addr = platform_mac.get_ipv6_address(interface)
 
     if not ipv6_addr:

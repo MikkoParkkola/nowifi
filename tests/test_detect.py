@@ -104,9 +104,12 @@ class TestDetectPortalTransparent:
     @patch("nowifi.detect._check_dns_hijack", return_value="")
     @patch("nowifi.detect._check_canary")
     def test_wrong_status_code(self, mock_canary, mock_dns):
-        """Canary returns wrong status code -> transparent proxy detected."""
+        """Majority of canaries return wrong status -> transparent proxy detected."""
         mock_canary.side_effect = [
-            (302, "", CANARY_URLS[0]["url"], {}),  # expected 200, got 302
+            (302, "", CANARY_URLS[0]["url"], {}),  # fail
+            (302, "", CANARY_URLS[1]["url"], {}),  # fail
+            (302, "", CANARY_URLS[2]["url"], {}),  # fail
+            (200, "Microsoft Connect Test", CANARY_URLS[3]["url"], {}),  # pass
         ]
         info = detect_portal()
         assert info.is_captive
@@ -115,9 +118,12 @@ class TestDetectPortalTransparent:
     @patch("nowifi.detect._check_dns_hijack", return_value="")
     @patch("nowifi.detect._check_canary")
     def test_wrong_body_content(self, mock_canary, mock_dns):
-        """Canary returns unexpected body content -> transparent proxy."""
+        """Majority of canaries return wrong body -> transparent proxy."""
         mock_canary.side_effect = [
-            (200, "<html>Login required</html>", CANARY_URLS[0]["url"], {}),
+            (200, "<html>Login required</html>", CANARY_URLS[0]["url"], {}),  # fail
+            (200, "<html>Login required</html>", CANARY_URLS[1]["url"], {}),  # fail
+            (200, "<html>Login required</html>", CANARY_URLS[2]["url"], {}),  # fail
+            (200, "Microsoft Connect Test", CANARY_URLS[3]["url"], {}),  # pass
         ]
         info = detect_portal()
         assert info.is_captive

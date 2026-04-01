@@ -96,48 +96,42 @@ class TestToolNotFound:
 
 class TestFindTools:
 
-    @patch("shutil.which", return_value="/usr/local/bin/chisel")
-    @patch("os.path.isfile", return_value=True)
-    @patch("os.access", return_value=True)
-    def test_find_chisel_success(self, mock_access, mock_isfile, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", return_value="/usr/local/bin/chisel")
+    def test_find_chisel_success(self, mock_ensure):
         path = find_chisel()
         assert path == "/usr/local/bin/chisel"
 
-    @patch("shutil.which", return_value=None)
-    @patch("os.path.isfile", return_value=False)
-    def test_find_chisel_not_found(self, mock_isfile, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", side_effect=FileNotFoundError("chisel not found"))
+    def test_find_chisel_not_found(self, mock_ensure):
         with pytest.raises(ToolNotFound) as exc_info:
             find_chisel()
         assert "chisel" in exc_info.value.tool
 
-    @patch("shutil.which", return_value="/usr/local/bin/iodine")
-    def test_find_iodine_success(self, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", return_value="/usr/local/bin/iodine")
+    def test_find_iodine_success(self, mock_ensure):
         assert find_iodine() == "/usr/local/bin/iodine"
 
-    @patch("shutil.which", return_value=None)
-    def test_find_iodine_not_found(self, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", side_effect=FileNotFoundError("iodine not found"))
+    def test_find_iodine_not_found(self, mock_ensure):
         with pytest.raises(ToolNotFound):
             find_iodine()
 
-    @patch("shutil.which", return_value="/usr/local/bin/hans")
-    def test_find_hans_success(self, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", return_value="/usr/local/bin/hans")
+    def test_find_hans_success(self, mock_ensure):
         assert find_hans() == "/usr/local/bin/hans"
 
-    @patch("shutil.which", return_value=None)
-    def test_find_hans_not_found(self, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", side_effect=FileNotFoundError("hans not found"))
+    def test_find_hans_not_found(self, mock_ensure):
         with pytest.raises(ToolNotFound):
             find_hans()
 
-    @patch("shutil.which", return_value="/usr/local/bin/hysteria")
-    @patch("os.path.isfile", return_value=True)
-    @patch("os.access", return_value=True)
-    def test_find_hysteria_success(self, mock_access, mock_isfile, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", return_value="/usr/local/bin/hysteria")
+    def test_find_hysteria_success(self, mock_ensure):
         path = find_hysteria()
         assert "hysteria" in path
 
-    @patch("shutil.which", return_value=None)
-    @patch("os.path.isfile", return_value=False)
-    def test_find_hysteria_not_found(self, mock_isfile, mock_which):
+    @patch("nowifi.toolchain.ensure_tool", side_effect=FileNotFoundError("hysteria not found"))
+    def test_find_hysteria_not_found(self, mock_ensure):
         with pytest.raises(ToolNotFound):
             find_hysteria()
 
@@ -310,11 +304,10 @@ class TestStartDohTunnel:
 
     @patch("nowifi.tunnel._port_listening", return_value=True)
     @patch("nowifi.tunnel.subprocess.Popen")
-    @patch("shutil.which", return_value="/usr/local/bin/cloudflared")
-    @patch("os.path.isfile", return_value=True)
+    @patch("nowifi.toolchain.find_tool", return_value="/usr/local/bin/cloudflared")
     @patch("nowifi.tunnel.time.sleep")
     @patch("nowifi.tunnel.time.monotonic")
-    def test_doh_tunnel_cloudflared(self, mock_mono, mock_sleep, mock_isfile, mock_which, mock_popen, mock_port):
+    def test_doh_tunnel_cloudflared(self, mock_mono, mock_sleep, mock_find, mock_popen, mock_port):
         mock_mono.side_effect = [0, 1]
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
@@ -324,9 +317,9 @@ class TestStartDohTunnel:
         assert handle.active is True
         assert handle.method == "doh_tunnel"
 
-    @patch("shutil.which", return_value=None)
-    @patch("os.path.isfile", return_value=False)
-    def test_doh_tunnel_no_tools(self, mock_isfile, mock_which):
+    @patch("nowifi.toolchain.download_tool", return_value=None)
+    @patch("nowifi.toolchain.find_tool", return_value=None)
+    def test_doh_tunnel_no_tools(self, mock_find, mock_download):
         with pytest.raises(ToolNotFound):
             start_doh_tunnel()
 

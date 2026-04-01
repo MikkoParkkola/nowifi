@@ -121,23 +121,28 @@ VENDOR_SIGNATURES: dict[str, dict[str, list[str]]] = {
 def detect_portal(interface: str = "en0") -> PortalInfo:
     """Detect if we're behind a captive portal and identify its type.
 
-    Tries multiple canary URLs in sequence. If any get redirected or return
-    unexpected content, we're behind a portal.
+    Uses multiple canary URLs for consensus. A single canary failure could be
+    a transparent proxy or network quirk — require EITHER a redirect to a
+    different domain (definitive) OR majority of canaries failing (consensus).
     """
     info = PortalInfo(is_captive=False, portal_type=PortalType.NONE)
+
+    redirects: list[tuple[str, str, dict[str, str]]] = []  # (url, body, headers)
+    failures = 0
+    successes = 0
 
     for canary in CANARY_URLS:
         result = _check_canary(canary)
         if result is None:
-            # Connection failed entirely -- likely firewall block
-            info.is_captive = True
-            info.portal_type = PortalType.FIREWALL_BLOCK
+            failures += 1
             continue
 
         status, body, final_url, headers = result
 
-        # Check for redirect (portal intercept)
-        if final_url != canary["url"]:
+        # Definitive redirect to a DIFFERENT domain = captive portal (instant verdict)
+        canary_host = urlparse(canary["url"]).hostname or ""
+        final_host = urlparse(final_url).hostname or ""
+        if final_host and canary_host and final_host != canary_host:
             info.is_captive = True
             info.portal_type = PortalType.HTTP_REDIRECT
             info.redirect_url = final_url
@@ -146,30 +151,34 @@ def detect_portal(interface: str = "en0") -> PortalInfo:
             _fingerprint_portal(info, body, final_url, headers)
             return info
 
-        # Check for content injection (transparent proxy)
+        # Check expected content
         expected = canary.get("expected_body")
         expected_status = canary.get("expected_status", 200)
 
-        if status != expected_status:
-            info.is_captive = True
-            info.portal_type = PortalType.TRANSPARENT
-            info.portal_url = canary["url"]
-            _fingerprint_portal(info, body, final_url, headers)
-            return info
+        if status == expected_status and (not expected or expected in body):
+            successes += 1
+        else:
+            failures += 1
+            redirects.append((final_url, body, headers))
 
-        if expected and expected not in body:
-            info.is_captive = True
+    # Consensus: majority of canaries fail = likely captive portal
+    # (avoids false positive from a single transparent proxy like Mikrotik)
+    if failures > successes and failures >= 2:
+        info.is_captive = True
+        if redirects:
             info.portal_type = PortalType.TRANSPARENT
-            info.portal_url = canary["url"]
-            _fingerprint_portal(info, body, final_url, headers)
-            return info
+            info.portal_url = redirects[0][0]
+            _fingerprint_portal(info, redirects[0][1], redirects[0][0], redirects[0][2])
+        else:
+            info.portal_type = PortalType.FIREWALL_BLOCK
 
     # Also check DNS hijacking
-    dns_hijack = _check_dns_hijack()
-    if dns_hijack:
-        info.is_captive = True
-        info.portal_type = PortalType.DNS_HIJACK
-        info.portal_ip = dns_hijack
+    if not info.is_captive:
+        dns_hijack = _check_dns_hijack()
+        if dns_hijack:
+            info.is_captive = True
+            info.portal_type = PortalType.DNS_HIJACK
+            info.portal_ip = dns_hijack
 
     return info
 

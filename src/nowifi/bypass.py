@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from . import platform_mac, tunnel
+from . import platform as platform_mac, tunnel
 from .probe import ProbeResults
 
 

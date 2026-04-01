@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import socket
 import subprocess
 import time
@@ -37,28 +36,30 @@ class ToolNotFound(Exception):
 
 
 def find_chisel() -> str:
-    """Find chisel binary or raise ToolNotFound."""
-    import os
-    for candidate in [shutil.which("chisel"), os.path.expanduser("~/bin/chisel"), "/usr/local/bin/chisel"]:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    raise ToolNotFound("chisel", "brew install chisel  OR  go install github.com/jpillora/chisel@latest")
+    """Find chisel binary (auto-downloads if missing) or raise ToolNotFound."""
+    from .toolchain import ensure_tool
+    try:
+        return ensure_tool("chisel")
+    except FileNotFoundError as e:
+        raise ToolNotFound("chisel", str(e))
 
 
 def find_iodine() -> str:
     """Find iodine client binary or raise ToolNotFound."""
-    path = shutil.which("iodine")
-    if path:
-        return path
-    raise ToolNotFound("iodine", "brew install iodine")
+    from .toolchain import ensure_tool
+    try:
+        return ensure_tool("iodine")
+    except FileNotFoundError as e:
+        raise ToolNotFound("iodine", str(e))
 
 
 def find_hans() -> str:
     """Find hans (ICMP tunnel) binary or raise ToolNotFound."""
-    path = shutil.which("hans")
-    if path:
-        return path
-    raise ToolNotFound("hans", "brew install hans  OR  build from https://github.com/friedrich/hans")
+    from .toolchain import ensure_tool
+    try:
+        return ensure_tool("hans")
+    except FileNotFoundError as e:
+        raise ToolNotFound("hans", str(e))
 
 
 def start_chisel_tunnel(
@@ -229,12 +230,12 @@ def verify_tunnel_direct() -> bool:
 
 
 def find_hysteria() -> str:
-    """Find hysteria2 binary or raise ToolNotFound."""
-    import os
-    for candidate in [shutil.which("hysteria"), os.path.expanduser("~/bin/hysteria"), "/usr/local/bin/hysteria"]:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    raise ToolNotFound("hysteria", "brew install hysteria  OR  https://v2.hysteria.network/docs/getting-started/Installation/")
+    """Find hysteria2 binary (auto-downloads if missing) or raise ToolNotFound."""
+    from .toolchain import ensure_tool
+    try:
+        return ensure_tool("hysteria")
+    except FileNotFoundError as e:
+        raise ToolNotFound("hysteria", str(e))
 
 
 def start_quic_tunnel(
@@ -278,11 +279,11 @@ def start_quic_tunnel(
 
 def find_ntpescape() -> str:
     """Find ntpescape binary or raise ToolNotFound."""
-    import os
-    for candidate in [shutil.which("ntpescape"), os.path.expanduser("~/bin/ntpescape"), "/usr/local/bin/ntpescape"]:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    raise ToolNotFound("ntpescape", "https://github.com/evallen/ntpescape")
+    from .toolchain import ensure_tool
+    try:
+        return ensure_tool("ntpescape")
+    except FileNotFoundError as e:
+        raise ToolNotFound("ntpescape", str(e))
 
 
 def start_ntp_tunnel(
@@ -331,11 +332,11 @@ def start_doh_tunnel(
     Unlike plain DNS tunneling (iodine), DoH goes over HTTPS to trusted
     endpoints (Cloudflare, Google) that are often whitelisted by portals.
     """
-    import os
+    from .toolchain import find_tool
 
     # Try cloudflared proxy-dns first (single binary, widely available)
-    cloudflared = shutil.which("cloudflared") or os.path.expanduser("~/bin/cloudflared")
-    if cloudflared and os.path.isfile(cloudflared):
+    cloudflared = find_tool("cloudflared")
+    if cloudflared:
         proc = subprocess.Popen(
             [cloudflared, "proxy-dns",
              "--port", str(local_port),
@@ -356,10 +357,33 @@ def start_doh_tunnel(
         proc.terminate()
 
     # Try dnscrypt-proxy
-    dnscrypt = shutil.which("dnscrypt-proxy")
+    dnscrypt = find_tool("dnscrypt-proxy")
     if dnscrypt:
         proc = subprocess.Popen(
             [dnscrypt, "--listen_addresses", f"127.0.0.1:{local_port}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        handle = TunnelHandle(process=proc, local_port=local_port, method="doh_tunnel")
+
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            if proc.poll() is not None:
+                break
+            if _port_listening(local_port):
+                handle.active = True
+                return handle
+            time.sleep(0.5)
+        proc.terminate()
+
+    # Last resort: try auto-downloading cloudflared
+    from .toolchain import download_tool
+    downloaded = download_tool("cloudflared")
+    if downloaded:
+        proc = subprocess.Popen(
+            [downloaded, "proxy-dns",
+             "--port", str(local_port),
+             "--upstream", doh_server],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

@@ -129,7 +129,7 @@ class TestProbeIcmp:
 class TestProbeIpv6:
 
     @patch("nowifi.probe.socket.socket")
-    @patch("nowifi.platform_mac.get_ipv6_address", return_value="2001:db8::1")
+    @patch("nowifi.platform.get_ipv6_address", return_value="2001:db8::1")
     def test_ipv6_connected(self, mock_ipv6, mock_socket_cls):
         """IPv6 socket connects -> ipv6.is_open=True."""
         mock_sock = MagicMock()
@@ -140,7 +140,7 @@ class TestProbeIpv6:
         assert result.is_open is True
         assert "2001:db8::1" in result.address
 
-    @patch("nowifi.platform_mac.get_ipv6_address", return_value="")
+    @patch("nowifi.platform.get_ipv6_address", return_value="")
     def test_ipv6_no_address(self, mock_ipv6):
         """No IPv6 address on interface -> not open."""
         result = probe_ipv6(interface="en0")
@@ -149,7 +149,7 @@ class TestProbeIpv6:
 
     @patch("requests.get")
     @patch("nowifi.probe.socket.socket")
-    @patch("nowifi.platform_mac.get_ipv6_address", return_value="2001:db8::1")
+    @patch("nowifi.platform.get_ipv6_address", return_value="2001:db8::1")
     def test_ipv6_connect_fails_http_fallback(self, mock_ipv6, mock_socket_cls, mock_get):
         """IPv6 socket fails but HTTP fallback works -> open."""
         mock_sock = MagicMock()
@@ -165,7 +165,7 @@ class TestProbeIpv6:
 
     @patch("requests.get")
     @patch("nowifi.probe.socket.socket")
-    @patch("nowifi.platform_mac.get_ipv6_address", return_value="2001:db8::1")
+    @patch("nowifi.platform.get_ipv6_address", return_value="2001:db8::1")
     def test_ipv6_all_fail(self, mock_ipv6, mock_socket_cls, mock_get):
         """Both socket and HTTP fallback fail -> not open."""
         mock_sock = MagicMock()
