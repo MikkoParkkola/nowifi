@@ -1,0 +1,22 @@
+version: 2
+
+builds:
+  - main: ./cmd/nowifi
+    binary: nowifi
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+
+brews:
+  - repository:
+      owner: MikkoParkkola
+      name: homebrew-tap
+    homepage: https://github.com/MikkoParkkola/nowifi
+    description: "WiFi security assessment tool — 23 bypass techniques"
+
+checksum:
+  name_template: checksums.txt
