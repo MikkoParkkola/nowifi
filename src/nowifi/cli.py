@@ -27,7 +27,7 @@ from .report import print_terminal_report
 
 console = Console()
 
-DEFAULT_TUNNEL = "https://spark.raxor.ai"
+DEFAULT_TUNNEL = "https://tun.raxor.ai"
 
 # --- Input validation ---
 

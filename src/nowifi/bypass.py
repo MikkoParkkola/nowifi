@@ -81,7 +81,7 @@ class BypassResult:
 @dataclass
 class AuditConfig:
     interface: str = "en0"
-    tunnel_server: str = "https://spark.raxor.ai"
+    tunnel_server: str = "https://tun.raxor.ai"
     dns_tunnel_domain: str = ""
     icmp_tunnel_server: str = ""
     vpn_port53_server: str = ""
