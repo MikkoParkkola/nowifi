@@ -909,6 +909,176 @@ def uninstall():
     console.print()
 
 
+@main.group()
+def server():
+    """Manage your tunnel server infrastructure.
+
+    \b
+    Three options for getting a tunnel endpoint:
+      A. Cloudflare Workers (FREE) — HTTPS proxy on CF edge, 100K req/day
+      B. Ephemeral VPS            — DigitalOcean ($0.007/hr) or Hetzner ($0.005/hr)
+      C. No server at all         — 10 of 23 techniques need no server
+    """
+
+
+@server.command("create")
+@click.option("--provider", "-p",
+              type=click.Choice(["cloudflare", "digitalocean", "hetzner"]),
+              default="cloudflare",
+              help="Infrastructure provider")
+@click.option("--token", "-t", default="", help="API token for cloud provider")
+@click.option("--ttl", default=24, help="Auto-destroy after N hours (VPS only)")
+def server_create(provider, token, ttl):
+    """Create a tunnel server (CF Worker or VPS).
+
+    \b
+    Examples:
+      nowifi server create                                  # Free CF Worker
+      nowifi server create -p digitalocean -t do_xxx        # DO droplet
+      nowifi server create -p hetzner -t htz_xxx --ttl 6    # Hetzner, 6h TTL
+    """
+    from .server import (
+        create_vps,
+        setup_cloudflare_worker,
+    )
+
+    if provider == "cloudflare":
+        console.print("\n[bold cyan]nowifi[/bold cyan] — Deploying Cloudflare Worker\n")
+        try:
+            url = setup_cloudflare_worker()
+            console.print(f"  [bold green]Deployed![/bold green]  {url}")
+            console.print(f"\n  Use it:  [bold]sudo nowifi --cf-workers {url}[/bold]")
+            console.print("  Free tier: 100,000 requests/day\n")
+        except RuntimeError as e:
+            console.print(f"  [red]Failed:[/red] {e}\n")
+            sys.exit(1)
+    else:
+        console.print(f"\n[bold cyan]nowifi[/bold cyan] — Creating {provider} VPS\n")
+        try:
+            info = create_vps(provider=provider, api_token=token, ttl_hours=ttl)
+            console.print("  [bold green]Created![/bold green]")
+            console.print(f"  IP:       {info.ip}")
+            console.print(f"  Chisel:   {info.url}")
+            console.print(f"  TTL:      {info.ttl_hours}h (auto-destroys)")
+            console.print(f"\n  Use it:   [bold]sudo nowifi -t {info.url}[/bold]")
+            console.print(f"  Destroy:  [bold]nowifi server destroy {info.server_id}[/bold]\n")
+        except (RuntimeError, ValueError) as e:
+            console.print(f"  [red]Failed:[/red] {e}\n")
+            sys.exit(1)
+
+
+@server.command("list")
+def server_list():
+    """List active tunnel servers."""
+    from .server import list_servers, check_expired_servers
+
+    servers = list_servers()
+    expired = check_expired_servers()
+
+    console.print("\n[bold cyan]nowifi[/bold cyan] — Tunnel Servers\n")
+
+    if not servers:
+        console.print("  No active servers.")
+        console.print("  Create one: [bold]nowifi server create[/bold]\n")
+        return
+
+    if expired:
+        console.print(f"  [yellow]Warning: {len(expired)} server(s) past TTL.[/yellow]")
+        console.print("  Run [bold]nowifi server destroy[/bold] to clean up.\n")
+
+    from rich.table import Table
+    table = Table(border_style="dim")
+    table.add_column("Provider", style="bold")
+    table.add_column("ID", style="dim")
+    table.add_column("IP")
+    table.add_column("URL", style="cyan")
+    table.add_column("TTL", justify="right")
+    table.add_column("Status")
+
+    for s in servers:
+        is_expired = s in expired
+        status_style = "red" if is_expired else "green"
+        status_text = "EXPIRED" if is_expired else s.status
+        table.add_row(
+            s.provider, s.server_id, s.ip or "-", s.url,
+            f"{s.ttl_hours}h" if s.ttl_hours > 0 else "forever",
+            f"[{status_style}]{status_text}[/{status_style}]",
+        )
+
+    console.print(table)
+    console.print()
+
+
+@server.command("destroy")
+@click.argument("server_id", required=False)
+@click.option("--all", "destroy_all", is_flag=True, help="Destroy all active servers")
+def server_destroy(server_id, destroy_all):
+    """Destroy a tunnel server.
+
+    \b
+    Examples:
+      nowifi server destroy 12345678          # Destroy specific server
+      nowifi server destroy nowifi-proxy      # Destroy CF Worker
+      nowifi server destroy --all             # Destroy everything
+    """
+    from .server import destroy_vps, list_servers
+
+    if not server_id and not destroy_all:
+        console.print("\n  Specify a server ID or use --all.")
+        console.print("  List servers: [bold]nowifi server list[/bold]\n")
+        sys.exit(1)
+
+    servers = list_servers()
+    if not servers:
+        console.print("\n  No active servers to destroy.\n")
+        return
+
+    console.print("\n[bold cyan]nowifi[/bold cyan] — Destroying Server(s)\n")
+
+    targets = servers if destroy_all else [s for s in servers if s.server_id == server_id]
+    if not targets:
+        console.print(f"  [yellow]Server {server_id!r} not found.[/yellow]")
+        console.print("  List servers: [bold]nowifi server list[/bold]\n")
+        sys.exit(1)
+
+    for s in targets:
+        console.print(f"  Destroying {s.provider}/{s.server_id}...", end=" ")
+        try:
+            ok = destroy_vps(s.provider, s.server_id)
+            if ok:
+                console.print("[green]done[/green]")
+            else:
+                console.print("[red]failed[/red]")
+        except (RuntimeError, ValueError) as e:
+            console.print(f"[red]error:[/red] {e}")
+
+    console.print()
+
+
+@server.command("info")
+def server_info():
+    """Show which techniques need a server and which don't.
+
+    \b
+    10 of 23 bypass techniques work without any server infrastructure.
+    The other 9 need a tunnel endpoint you control.
+    """
+    from .server import SERVERLESS_TECHNIQUES, SERVER_REQUIRED_TECHNIQUES
+
+    console.print("\n[bold cyan]nowifi[/bold cyan] — Server Requirements\n")
+
+    console.print(f"  [bold green]{len(SERVERLESS_TECHNIQUES)} techniques need NO server:[/bold green]")
+    for t in SERVERLESS_TECHNIQUES:
+        console.print(f"    [green]o[/green]  {t}")
+
+    console.print(f"\n  [bold yellow]{len(SERVER_REQUIRED_TECHNIQUES)} techniques NEED a server:[/bold yellow]")
+    for t in SERVER_REQUIRED_TECHNIQUES:
+        console.print(f"    [yellow]*[/yellow]  {t}")
+
+    console.print("\n  [dim]Get a free server: nowifi server create[/dim]")
+    console.print("  [dim]Or use your own:   sudo nowifi -t https://your-server.example.com[/dim]\n")
+
+
 def _get_hardware_mac(interface: str) -> str:
     """Get the real hardware MAC address (not the spoofed one)."""
     try:
