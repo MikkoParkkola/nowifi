@@ -88,6 +88,7 @@ func init() {
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(historyCmd)
 	rootCmd.AddCommand(watchCmd)
+	rootCmd.AddCommand(scoreCmd)
 }
 
 // Execute runs the root command. Called from main.
