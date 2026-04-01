@@ -332,10 +332,9 @@ class TestCheckTools:
     @patch("os.access", return_value=True)
     def test_checks_extra_dirs(self, mock_access, mock_isfile, mock_which):
         """_check_tools also checks ~/bin/ and ~/.nowifi/bin/."""
-        # The function checks shutil.which first, then ~/bin/ and ~/.nowifi/bin/
-        # Make shutil.which fail, but ~/bin/chisel exists
         import os
         home = os.path.expanduser("~")
+
         def _isfile_side_effect(path):
             if path == f"{home}/bin/chisel":
                 return True
