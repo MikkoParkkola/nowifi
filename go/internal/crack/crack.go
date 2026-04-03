@@ -25,6 +25,7 @@ package crack
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -39,6 +40,8 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 )
+
+var errCommandTimedOut = errors.New("command timed out")
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -990,7 +993,7 @@ func CrackWPSPin(target WifiTarget, iface string, timeout time.Duration) (*Resul
 		"-c", strconv.Itoa(target.Channel),
 		"-vv",
 		"-d", "2", // 2 second delay between PINs (avoid lockout)
-		"-N",       // Don't send NACK packets (more reliable)
+		"-N", // Don't send NACK packets (more reliable)
 	)
 
 	outputFile := filepath.Join(outputDir, "reaver_pin.log")
@@ -1067,11 +1070,11 @@ func parseReaverOutput(output string) (wpsPin, wpaPSK string) {
 // attackMode: "dictionary" (mode 0), "brute" (mode 3), or "rule" (mode 0 + rules).
 // wordlist: path to wordlist file. Auto-detected if empty.
 func CrackWithHashcat(hashFile string, wordlist string) (*Result, error) {
-	return crackWithHashcatMode(hashFile, "dictionary", wordlist)
+	return crackWithHashcatMode(hashFile, "dictionary", wordlist, 30*time.Minute)
 }
 
 // crackWithHashcatMode runs hashcat with a specific attack mode.
-func crackWithHashcatMode(hashFile, attackMode, wordlist string) (*Result, error) {
+func crackWithHashcatMode(hashFile, attackMode, wordlist string, timeout time.Duration) (*Result, error) {
 	start := time.Now()
 	result := &Result{Method: Hashcat, Success: false}
 
@@ -1126,8 +1129,8 @@ func crackWithHashcatMode(hashFile, attackMode, wordlist string) (*Result, error
 		"--potfile-disable",
 		"--status",
 		"--status-timer=10",
-		"-O",       // Optimized kernels
-		"--quiet",  // Suppress banner
+		"-O",      // Optimized kernels
+		"--quiet", // Suppress banner
 	)
 
 	if isDarwin() {
@@ -1135,7 +1138,7 @@ func crackWithHashcatMode(hashFile, attackMode, wordlist string) (*Result, error
 	}
 
 	cmd := exec.Command(hashcatPath, args...)
-	out, _ := cmd.CombinedOutput()
+	out, err := runCmdBytes(cmd, timeout)
 	stdoutText := string(out)
 
 	// Parse hashcat output for cracked password.
@@ -1145,19 +1148,28 @@ func crackWithHashcatMode(hashFile, attackMode, wordlist string) (*Result, error
 		result.Success = true
 		result.Password = password
 		result.Details = fmt.Sprintf("Password cracked: %s", password)
-	} else {
-		exitCode := cmd.ProcessState.ExitCode()
-		if exitCode == 1 {
-			result.Details = "Hashcat exhausted wordlist -- password not found"
-		} else if exitCode == 0 {
-			result.Details = "Hashcat completed but no password parsed from output"
-		} else {
-			tail := stdoutText
-			if len(tail) > 200 {
-				tail = tail[len(tail)-200:]
+	} else if errors.Is(err, errCommandTimedOut) {
+		result.Details = fmt.Sprintf("Hashcat timed out after %v", timeout.Round(time.Second))
+	} else if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode := exitErr.ExitCode()
+			if exitCode == 1 {
+				result.Details = "Hashcat exhausted wordlist -- password not found"
+			} else if exitCode == 0 {
+				result.Details = "Hashcat completed but no password parsed from output"
+			} else {
+				tail := stdoutText
+				if len(tail) > 200 {
+					tail = tail[len(tail)-200:]
+				}
+				result.Details = fmt.Sprintf("Hashcat exited with code %d. %s", exitCode, tail)
 			}
-			result.Details = fmt.Sprintf("Hashcat exited with code %d. %s", exitCode, tail)
+		} else {
+			result.Details = fmt.Sprintf("Hashcat failed: %v", err)
 		}
+	} else {
+		result.Details = "Hashcat completed but no password parsed from output"
 	}
 
 	result.CaptureFile = hashFile
@@ -1213,6 +1225,10 @@ func findHashcatRules(hashcatPath string) string {
 // This is a fallback when hashcat is not available. aircrack-ng is CPU-only
 // and significantly slower, but works on any system without GPU requirements.
 func CrackWithAircrack(captureFile, wordlist string) (*Result, error) {
+	return crackWithAircrackTimeout(captureFile, wordlist, 30*time.Minute)
+}
+
+func crackWithAircrackTimeout(captureFile, wordlist string, timeout time.Duration) (*Result, error) {
 	start := time.Now()
 	result := &Result{Method: Dictionary, Success: false}
 
@@ -1246,7 +1262,7 @@ func CrackWithAircrack(captureFile, wordlist string) (*Result, error) {
 	}
 
 	cmd := exec.Command(aircrackPath, "-w", wordlist, "-q", captureFile)
-	out, _ := cmd.CombinedOutput()
+	out, err := runCmdBytes(cmd, timeout)
 	stdoutText := string(out)
 
 	// Parse aircrack-ng output for "KEY FOUND! [ password ]".
@@ -1255,6 +1271,10 @@ func CrackWithAircrack(captureFile, wordlist string) (*Result, error) {
 		result.Success = true
 		result.Password = m[1]
 		result.Details = fmt.Sprintf("Password cracked: %s", result.Password)
+	} else if errors.Is(err, errCommandTimedOut) {
+		result.Details = fmt.Sprintf("Aircrack timed out after %v", timeout.Round(time.Second))
+	} else if err != nil {
+		result.Details = fmt.Sprintf("Aircrack failed: %v", err)
 	} else {
 		result.Details = "Password not found in wordlist"
 	}
@@ -1268,6 +1288,79 @@ func CrackWithAircrack(captureFile, wordlist string) (*Result, error) {
 // Smart cracking pipeline
 // ---------------------------------------------------------------------------
 
+type smartCrackStage int
+
+const (
+	smartCrackStageCommonPasswords smartCrackStage = 1 + iota
+	smartCrackStageNumericMasks
+	smartCrackStageWordNumberRules
+	smartCrackStageDictionary
+	smartCrackStageSmartBrute
+	smartCrackStageFullBrute
+)
+
+type smartCrackOptions struct {
+	startStage smartCrackStage
+	endStage   smartCrackStage
+	fullBrute  bool
+}
+
+func normalizeSmartCrackOptions(opts smartCrackOptions) smartCrackOptions {
+	if opts.startStage == 0 {
+		opts.startStage = smartCrackStageCommonPasswords
+	}
+	if opts.endStage == 0 {
+		opts.endStage = smartCrackStageSmartBrute
+		if opts.fullBrute {
+			opts.endStage = smartCrackStageFullBrute
+		}
+	}
+	if opts.endStage < opts.startStage {
+		opts.endStage = opts.startStage
+	}
+	return opts
+}
+
+func (opts smartCrackOptions) includes(stage smartCrackStage) bool {
+	opts = normalizeSmartCrackOptions(opts)
+	return stage >= opts.startStage && stage <= opts.endStage
+}
+
+func selectedSmartCrackStages(hasWordlists bool, opts smartCrackOptions) []smartCrackStage {
+	opts = normalizeSmartCrackOptions(opts)
+	allStages := []smartCrackStage{
+		smartCrackStageCommonPasswords,
+		smartCrackStageNumericMasks,
+		smartCrackStageWordNumberRules,
+		smartCrackStageDictionary,
+		smartCrackStageSmartBrute,
+		smartCrackStageFullBrute,
+	}
+
+	var stages []smartCrackStage
+	for _, stage := range allStages {
+		if !opts.includes(stage) {
+			continue
+		}
+		if stage == smartCrackStageDictionary && !hasWordlists {
+			continue
+		}
+		if stage == smartCrackStageFullBrute && !opts.fullBrute {
+			continue
+		}
+		stages = append(stages, stage)
+	}
+	return stages
+}
+
+func smartCrackScopeLabel(opts smartCrackOptions) string {
+	opts = normalizeSmartCrackOptions(opts)
+	if opts.startStage == opts.endStage {
+		return fmt.Sprintf("SmartCrack stage %d", opts.startStage)
+	}
+	return fmt.Sprintf("SmartCrack stages %d-%d", opts.startStage, opts.endStage)
+}
+
 // SmartCrack tries attacks in order of probability, from common passwords
 // to increasingly complex brute force patterns. Returns immediately on first
 // success. Each stage has its own timeout and moves to the next if not cracked.
@@ -1280,6 +1373,13 @@ func CrackWithAircrack(captureFile, wordlist string) (*Result, error) {
 //  5. Smart brute force (masks + rules for common patterns) - hours
 //  6. Full brute force (all printable ASCII, 8-12 chars) - days, only if fullBrute=true
 func SmartCrack(hashFile string, timeout time.Duration, fullBrute bool) (*Result, error) {
+	return smartCrackWithOptions(hashFile, timeout, smartCrackOptions{
+		fullBrute: fullBrute,
+	})
+}
+
+func smartCrackWithOptions(hashFile string, timeout time.Duration, opts smartCrackOptions) (*Result, error) {
+	opts = normalizeSmartCrackOptions(opts)
 	start := time.Now()
 
 	if _, err := os.Stat(hashFile); os.IsNotExist(err) {
@@ -1301,81 +1401,90 @@ func SmartCrack(hashFile string, timeout time.Duration, fullBrute bool) (*Result
 		}, nil
 	}
 
+	wordlists := FindWordlists()
+
 	// Stage 1: Common WiFi passwords (embedded list).
-	log.Printf("[smart-crack] Stage 1/6: Trying %d common WiFi passwords...", len(commonWifiPasswords))
-	stageTimeout := min(1*time.Minute, timeout)
-	if result := smartCrackCommonPasswords(hashFile, hashcatPath, stageTimeout, start); result != nil {
-		return result, nil
-	}
-	if time.Since(start) >= timeout {
-		return smartCrackTimeout(hashFile, "Stage 1 (common passwords)", start), nil
+	if opts.includes(smartCrackStageCommonPasswords) {
+		log.Printf("[smart-crack] Stage 1/6: Trying %d common WiFi passwords...", len(commonWifiPasswords))
+		stageTimeout := min(1*time.Minute, timeout-time.Since(start))
+		if result := smartCrackCommonPasswords(hashFile, hashcatPath, stageTimeout, start); result != nil {
+			return result, nil
+		}
+		if time.Since(start) >= timeout {
+			return smartCrackTimeout(hashFile, "Stage 1 (common passwords)", start), nil
+		}
 	}
 
 	// Stage 2: Numeric patterns (8-digit, dates, 9-digit, 10-digit).
-	log.Printf("[smart-crack] Stage 2/6: Trying numeric mask patterns...")
-	stageTimeout = min(5*time.Minute, timeout-time.Since(start))
-	if result := smartCrackNumericMasks(hashFile, hashcatPath, stageTimeout, start); result != nil {
-		return result, nil
-	}
-	if time.Since(start) >= timeout {
-		return smartCrackTimeout(hashFile, "Stage 2 (numeric patterns)", start), nil
+	if opts.includes(smartCrackStageNumericMasks) {
+		log.Printf("[smart-crack] Stage 2/6: Trying numeric mask patterns...")
+		stageTimeout := min(5*time.Minute, timeout-time.Since(start))
+		if result := smartCrackNumericMasks(hashFile, hashcatPath, stageTimeout, start); result != nil {
+			return result, nil
+		}
+		if time.Since(start) >= timeout {
+			return smartCrackTimeout(hashFile, "Stage 2 (numeric patterns)", start), nil
+		}
 	}
 
 	// Stage 3: Common word + number combos (rules on embedded wordlist).
-	log.Printf("[smart-crack] Stage 3/6: Trying word+number combos with rules...")
-	stageTimeout = min(10*time.Minute, timeout-time.Since(start))
-	if result := smartCrackWordNumberRules(hashFile, hashcatPath, stageTimeout, start); result != nil {
-		return result, nil
-	}
-	if time.Since(start) >= timeout {
-		return smartCrackTimeout(hashFile, "Stage 3 (word+number combos)", start), nil
+	if opts.includes(smartCrackStageWordNumberRules) {
+		log.Printf("[smart-crack] Stage 3/6: Trying word+number combos with rules...")
+		stageTimeout := min(10*time.Minute, timeout-time.Since(start))
+		if result := smartCrackWordNumberRules(hashFile, hashcatPath, stageTimeout, start); result != nil {
+			return result, nil
+		}
+		if time.Since(start) >= timeout {
+			return smartCrackTimeout(hashFile, "Stage 3 (word+number combos)", start), nil
+		}
 	}
 
 	// Stage 4: Dictionary attack (rockyou.txt if available).
-	wordlists := FindWordlists()
-	if len(wordlists) > 0 {
-		log.Printf("[smart-crack] Stage 4/6: Dictionary attack with %s...", filepath.Base(wordlists[0]))
-		stageTimeout = min(30*time.Minute, timeout-time.Since(start))
-		if result := smartCrackDictionary(hashFile, hashcatPath, wordlists[0], stageTimeout, start); result != nil {
-			return result, nil
+	if opts.includes(smartCrackStageDictionary) {
+		if len(wordlists) > 0 {
+			log.Printf("[smart-crack] Stage 4/6: Dictionary attack with %s...", filepath.Base(wordlists[0]))
+			stageTimeout := min(30*time.Minute, timeout-time.Since(start))
+			if result := smartCrackDictionary(hashFile, hashcatPath, wordlists[0], stageTimeout, start); result != nil {
+				return result, nil
+			}
+		} else {
+			log.Printf("[smart-crack] Stage 4/6: Skipped (no wordlist found)")
 		}
-	} else {
-		log.Printf("[smart-crack] Stage 4/6: Skipped (no wordlist found)")
-	}
-	if time.Since(start) >= timeout {
-		return smartCrackTimeout(hashFile, "Stage 4 (dictionary)", start), nil
+		if time.Since(start) >= timeout {
+			return smartCrackTimeout(hashFile, "Stage 4 (dictionary)", start), nil
+		}
 	}
 
 	// Stage 5: Smart brute force (alpha+digit masks, rules).
-	log.Printf("[smart-crack] Stage 5/6: Smart brute force with masks and rules...")
-	stageTimeout = timeout - time.Since(start)
-	if !fullBrute {
-		// Cap at 2 hours if full brute not requested.
-		stageTimeout = min(2*time.Hour, stageTimeout)
-	}
-	if result := smartCrackMasks(hashFile, hashcatPath, stageTimeout, start); result != nil {
-		return result, nil
-	}
-	if time.Since(start) >= timeout {
-		return smartCrackTimeout(hashFile, "Stage 5 (smart brute force)", start), nil
+	if opts.includes(smartCrackStageSmartBrute) {
+		log.Printf("[smart-crack] Stage 5/6: Smart brute force with masks and rules...")
+		stageTimeout := timeout - time.Since(start)
+		if !opts.fullBrute {
+			// Cap at 2 hours if full brute not requested.
+			stageTimeout = min(2*time.Hour, stageTimeout)
+		}
+		if result := smartCrackMasks(hashFile, hashcatPath, stageTimeout, start); result != nil {
+			return result, nil
+		}
+		if time.Since(start) >= timeout {
+			return smartCrackTimeout(hashFile, "Stage 5 (smart brute force)", start), nil
+		}
 	}
 
 	// Stage 6: Full brute force (only if explicitly requested).
-	if fullBrute {
+	if opts.includes(smartCrackStageFullBrute) && opts.fullBrute {
 		log.Printf("[smart-crack] Stage 6/6: Full brute force (all printable ASCII, 8-12 chars)...")
-		stageTimeout = timeout - time.Since(start)
+		stageTimeout := timeout - time.Since(start)
 		if result := smartCrackFullBrute(hashFile, hashcatPath, stageTimeout, start); result != nil {
 			return result, nil
 		}
-	} else {
-		log.Printf("[smart-crack] Stage 6/6: Skipped (full brute force not requested)")
 	}
 
 	return &Result{
 		Method:      SmartCrackM,
 		Success:     false,
 		CaptureFile: hashFile,
-		Details:     fmt.Sprintf("All SmartCrack stages exhausted in %v", time.Since(start).Round(time.Second)),
+		Details:     fmt.Sprintf("%s exhausted in %v", smartCrackScopeLabel(opts), time.Since(start).Round(time.Second)),
 		Elapsed:     time.Since(start),
 	}, nil
 }
@@ -2072,7 +2181,10 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 	for _, hashFile := range hashFiles {
 		log.Printf("[crack] Step 5: SmartCrack (stages 1-3) on PMKID hash...")
 		smartTimeout := min(15*time.Minute, timeout)
-		smartResult, _ := SmartCrack(hashFile, smartTimeout, false)
+		smartResult, _ := smartCrackWithOptions(hashFile, smartTimeout, smartCrackOptions{
+			startStage: smartCrackStageCommonPasswords,
+			endStage:   smartCrackStageWordNumberRules,
+		})
 		if smartResult != nil {
 			results = append(results, *smartResult)
 			if smartResult.Success {
@@ -2092,7 +2204,10 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 			// Step 7: SmartCrack stages 1-3 on handshake hash.
 			log.Printf("[crack] Step 7: SmartCrack (stages 1-3) on handshake hash...")
 			smartTimeout := min(15*time.Minute, timeout)
-			smartResult, _ := SmartCrack(hsResult.CaptureFile, smartTimeout, false)
+			smartResult, _ := smartCrackWithOptions(hsResult.CaptureFile, smartTimeout, smartCrackOptions{
+				startStage: smartCrackStageCommonPasswords,
+				endStage:   smartCrackStageWordNumberRules,
+			})
 			if smartResult != nil {
 				results = append(results, *smartResult)
 				if smartResult.Success {
@@ -2106,7 +2221,7 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 	if len(hashFiles) > 0 {
 		log.Printf("[crack] Step 8: Dictionary attack (rockyou.txt)...")
 		for _, hashFile := range hashFiles {
-			dictResult, _ := CrackWithHashcat(hashFile, wordlist)
+			dictResult, _ := crackWithHashcatMode(hashFile, "dictionary", wordlist, min(30*time.Minute, timeout))
 			if dictResult != nil {
 				results = append(results, *dictResult)
 				if dictResult.Success {
@@ -2114,7 +2229,7 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 				}
 			}
 			// Also try aircrack-ng as CPU fallback.
-			aircrackResult, _ := CrackWithAircrack(hashFile, wordlist)
+			aircrackResult, _ := crackWithAircrackTimeout(hashFile, wordlist, min(30*time.Minute, timeout))
 			if aircrackResult != nil {
 				results = append(results, *aircrackResult)
 				if aircrackResult.Success {
@@ -2145,7 +2260,10 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 		log.Printf("[crack] Step 10: Smart brute force (masks + rules)...")
 		for _, hashFile := range hashFiles {
 			bruteTimeout := min(2*time.Hour, timeout)
-			bruteResult, _ := SmartCrack(hashFile, bruteTimeout, false)
+			bruteResult, _ := smartCrackWithOptions(hashFile, bruteTimeout, smartCrackOptions{
+				startStage: smartCrackStageSmartBrute,
+				endStage:   smartCrackStageSmartBrute,
+			})
 			if bruteResult != nil {
 				results = append(results, *bruteResult)
 				if bruteResult.Success {
@@ -2215,7 +2333,7 @@ func runCmdBytes(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 			_ = cmd.Process.Kill()
 			<-done
 		}
-		return []byte(buf.String()), fmt.Errorf("command timed out after %v", timeout)
+		return []byte(buf.String()), fmt.Errorf("%w after %v", errCommandTimedOut, timeout)
 	}
 }
 

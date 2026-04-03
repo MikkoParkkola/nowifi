@@ -267,6 +267,84 @@ func TestRunCrackPipelineOrder(t *testing.T) {
 	}
 }
 
+func TestSelectedSmartCrackStages(t *testing.T) {
+	tests := []struct {
+		name         string
+		hasWordlists bool
+		opts         smartCrackOptions
+		want         []smartCrackStage
+	}{
+		{
+			name:         "early stages only",
+			hasWordlists: true,
+			opts: smartCrackOptions{
+				startStage: smartCrackStageCommonPasswords,
+				endStage:   smartCrackStageWordNumberRules,
+			},
+			want: []smartCrackStage{
+				smartCrackStageCommonPasswords,
+				smartCrackStageNumericMasks,
+				smartCrackStageWordNumberRules,
+			},
+		},
+		{
+			name:         "full pipeline without wordlists skips dictionary",
+			hasWordlists: false,
+			opts: smartCrackOptions{
+				fullBrute: true,
+			},
+			want: []smartCrackStage{
+				smartCrackStageCommonPasswords,
+				smartCrackStageNumericMasks,
+				smartCrackStageWordNumberRules,
+				smartCrackStageSmartBrute,
+				smartCrackStageFullBrute,
+			},
+		},
+		{
+			name:         "smart brute only",
+			hasWordlists: true,
+			opts: smartCrackOptions{
+				startStage: smartCrackStageSmartBrute,
+				endStage:   smartCrackStageSmartBrute,
+			},
+			want: []smartCrackStage{
+				smartCrackStageSmartBrute,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := selectedSmartCrackStages(tt.hasWordlists, tt.opts)
+			if len(got) != len(tt.want) {
+				t.Fatalf("selectedSmartCrackStages() len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("selectedSmartCrackStages()[%d] = %d, want %d", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSmartCrackScopeLabel(t *testing.T) {
+	if got := smartCrackScopeLabel(smartCrackOptions{
+		startStage: smartCrackStageCommonPasswords,
+		endStage:   smartCrackStageWordNumberRules,
+	}); got != "SmartCrack stages 1-3" {
+		t.Fatalf("smartCrackScopeLabel() = %q, want %q", got, "SmartCrack stages 1-3")
+	}
+
+	if got := smartCrackScopeLabel(smartCrackOptions{
+		startStage: smartCrackStageSmartBrute,
+		endStage:   smartCrackStageSmartBrute,
+	}); got != "SmartCrack stage 5" {
+		t.Fatalf("smartCrackScopeLabel() = %q, want %q", got, "SmartCrack stage 5")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ScanTargets / parseMacOSSystemProfiler with mock data
 // ---------------------------------------------------------------------------
