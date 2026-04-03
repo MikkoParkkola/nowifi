@@ -222,9 +222,13 @@ func GetCurrentMAC(iface string) (string, error) {
 
 		out, err := run(ctx, "ip", "link", "show", iface)
 		if err == nil {
-			re := regexp.MustCompile(`link/ether\s+([0-9a-f:]{17})`)
+			re := regexp.MustCompile(`link/ether\s+(\S+)`)
 			if m := re.FindStringSubmatch(out); m != nil {
-				return m[1], nil
+				mac, err := normalizeMAC(m[1])
+				if err != nil {
+					return "", fmt.Errorf("invalid MAC address found for %s: %w", iface, err)
+				}
+				return mac, nil
 			}
 		}
 	}
@@ -235,9 +239,9 @@ func GetCurrentMAC(iface string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read MAC for %s: %w", iface, err)
 	}
-	mac := strings.TrimSpace(string(data))
-	if !macRE.MatchString(mac) {
-		return "", fmt.Errorf("invalid MAC in sysfs for %s: %q", iface, mac)
+	mac, err := normalizeMAC(string(data))
+	if err != nil {
+		return "", fmt.Errorf("invalid MAC in sysfs for %s: %w", iface, err)
 	}
 	return mac, nil
 }
@@ -375,19 +379,8 @@ func GetARPTable() ([]ArpEntry, error) {
 
 		out, err := run(ctx, "ip", "neigh", "show")
 		if err == nil {
-			re := regexp.MustCompile(`(\S+)\s+dev\s+(\S+)\s+lladdr\s+([0-9a-f:]{17})`)
-			var entries []ArpEntry
-			for _, line := range strings.Split(out, "\n") {
-				m := re.FindStringSubmatch(line)
-				if m != nil {
-					entries = append(entries, ArpEntry{
-						IP:        m[1],
-						MAC:       m[3],
-						Interface: m[2],
-					})
-				}
-			}
-			return entries, nil
+			re := regexp.MustCompile(`(\S+)\s+dev\s+(\S+)\s+lladdr\s+(\S+)`)
+			return parseArpEntries(out, re, 1, 3, 2), nil
 		}
 	}
 
@@ -401,19 +394,8 @@ func GetARPTable() ([]ArpEntry, error) {
 			return nil, fmt.Errorf("arp -a: %w", err)
 		}
 
-		re := regexp.MustCompile(`\S+\s+\((\S+)\)\s+at\s+([0-9a-f:]+)\s+.*on\s+(\S+)`)
-		var entries []ArpEntry
-		for _, line := range strings.Split(out, "\n") {
-			m := re.FindStringSubmatch(line)
-			if m != nil && m[2] != "(incomplete)" {
-				entries = append(entries, ArpEntry{
-					IP:        m[1],
-					MAC:       m[2],
-					Interface: m[3],
-				})
-			}
-		}
-		return entries, nil
+		re := regexp.MustCompile(`\S+\s+\((\S+)\)\s+at\s+(\S+)\s+.*on\s+(\S+)`)
+		return parseArpEntries(out, re, 1, 2, 3), nil
 	}
 
 	return nil, fmt.Errorf("no arp command available")

@@ -218,12 +218,16 @@ func GetCurrentMAC(iface string) (string, error) {
 		return "", fmt.Errorf("ifconfig %s: %w", iface, err)
 	}
 
-	re := regexp.MustCompile(`ether\s+([0-9a-f:]{17})`)
+	re := regexp.MustCompile(`ether\s+(\S+)`)
 	m := re.FindSubmatch(out)
 	if m == nil {
 		return "", fmt.Errorf("no MAC address found for %s", iface)
 	}
-	return string(m[1]), nil
+	mac, err := normalizeMAC(string(m[1]))
+	if err != nil {
+		return "", fmt.Errorf("invalid MAC address found for %s: %w", iface, err)
+	}
+	return mac, nil
 }
 
 // SetMAC sets the MAC address on the given interface (requires sudo).
@@ -312,24 +316,8 @@ func GetARPTable() ([]ArpEntry, error) {
 		return nil, fmt.Errorf("arp -a: %w", err)
 	}
 
-	re := regexp.MustCompile(`\S+\s+\((\S+)\)\s+at\s+([0-9a-f:]+)\s+on\s+(\S+)`)
-	var entries []ArpEntry
-	for _, line := range strings.Split(string(out), "\n") {
-		m := re.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		mac := m[2]
-		if mac == "(incomplete)" {
-			continue
-		}
-		entries = append(entries, ArpEntry{
-			IP:        m[1],
-			MAC:       mac,
-			Interface: m[3],
-		})
-	}
-	return entries, nil
+	re := regexp.MustCompile(`\S+\s+\((\S+)\)\s+at\s+(\S+)\s+on\s+(\S+)`)
+	return parseArpEntries(string(out), re, 1, 2, 3), nil
 }
 
 // RenewDHCP renews the DHCP lease on the given interface (requires sudo).

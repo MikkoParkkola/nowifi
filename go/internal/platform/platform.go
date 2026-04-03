@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // WifiInfo holds current WiFi connection details.
@@ -51,6 +52,30 @@ func ValidateMAC(mac string) (string, error) {
 		}
 	}
 	return string(result), nil
+}
+
+func normalizeMAC(mac string) (string, error) {
+	return ValidateMAC(strings.TrimSpace(mac))
+}
+
+func parseArpEntries(output string, re *regexp.Regexp, ipIndex, macIndex, ifaceIndex int) []ArpEntry {
+	var entries []ArpEntry
+	for _, line := range strings.Split(output, "\n") {
+		m := re.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		mac, err := normalizeMAC(m[macIndex])
+		if err != nil {
+			continue
+		}
+		entries = append(entries, ArpEntry{
+			IP:        m[ipIndex],
+			MAC:       mac,
+			Interface: m[ifaceIndex],
+		})
+	}
+	return entries
 }
 
 // ValidateInterface validates an interface name to prevent command injection.
