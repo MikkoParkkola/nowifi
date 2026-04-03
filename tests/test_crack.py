@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 
@@ -13,9 +14,11 @@ from nowifi.crack import (
     CrackResult,
     ToolNotFound,
     WifiTarget,
+    _communicate_with_timeout,
     _find_tool,
     _parse_reaver_output,
     _parse_wash_output,
+    _wait_for_process,
     capture_handshake,
     capture_pmkid,
     crack_with_hashcat,
@@ -229,6 +232,62 @@ class TestFindTools:
         with pytest.raises(ToolNotFound) as exc_info:
             find_wash()
         assert exc_info.value.tool == "wash"
+
+
+class TestProcessTimeoutHelpers:
+
+    def test_wait_for_process_returns_without_cleanup_when_process_exits(self):
+        proc = MagicMock()
+        proc.wait.return_value = 0
+
+        _wait_for_process(proc, timeout=30)
+
+        proc.wait.assert_called_once_with(timeout=30)
+        proc.terminate.assert_not_called()
+        proc.kill.assert_not_called()
+
+    def test_wait_for_process_terminates_then_exits(self):
+        proc = MagicMock()
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="capture", timeout=30),
+            0,
+        ]
+
+        _wait_for_process(proc, timeout=30)
+
+        assert [call.kwargs for call in proc.wait.call_args_list] == [
+            {"timeout": 30},
+            {"timeout": 5},
+        ]
+        proc.terminate.assert_called_once_with()
+        proc.kill.assert_not_called()
+
+    def test_wait_for_process_kills_when_terminate_timeout_expires(self):
+        proc = MagicMock()
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="capture", timeout=30),
+            subprocess.TimeoutExpired(cmd="capture", timeout=5),
+        ]
+
+        _wait_for_process(proc, timeout=30)
+
+        proc.terminate.assert_called_once_with()
+        proc.kill.assert_called_once_with()
+
+    def test_communicate_with_timeout_terminates_and_returns_buffered_stdout(self):
+        proc = MagicMock()
+        proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="reaver", timeout=60)
+        proc.wait.return_value = 0
+        proc.stdout = MagicMock()
+        proc.stdout.read.return_value = b"partial output"
+        proc.stderr = None
+
+        stdout_data, stderr_data = _communicate_with_timeout(proc, timeout=60, terminate_timeout=10)
+
+        assert stdout_data == b"partial output"
+        assert stderr_data == b""
+        proc.terminate.assert_called_once_with()
+        proc.wait.assert_called_once_with(timeout=10)
 
 
 # ---------------------------------------------------------------------------

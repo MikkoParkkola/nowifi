@@ -210,6 +210,46 @@ def _is_macos() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Subprocess timeout helpers
+# ---------------------------------------------------------------------------
+
+def _terminate_process(proc: subprocess.Popen, wait_timeout: int = 5) -> None:
+    """Terminate a subprocess and force-kill it if it does not exit promptly."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=wait_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def _wait_for_process(
+    proc: subprocess.Popen,
+    timeout: int,
+    terminate_timeout: int = 5,
+) -> None:
+    """Wait for a subprocess, terminating it on timeout."""
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process(proc, wait_timeout=terminate_timeout)
+
+
+def _communicate_with_timeout(
+    proc: subprocess.Popen,
+    timeout: int,
+    terminate_timeout: int = 5,
+) -> tuple[bytes, bytes]:
+    """Read subprocess output, terminating it on timeout."""
+    try:
+        stdout_data, stderr_data = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process(proc, wait_timeout=terminate_timeout)
+        stdout_data = proc.stdout.read() if proc.stdout else b""
+        stderr_data = proc.stderr.read() if proc.stderr else b""
+    return stdout_data or b"", stderr_data or b""
+
+
+# ---------------------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------------------
 
@@ -508,15 +548,8 @@ def capture_pmkid(
         stderr=subprocess.PIPE,
     )
 
-    try:
-        # Wait for PMKID capture or timeout
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    # Wait for PMKID capture or timeout
+    _wait_for_process(proc, timeout=timeout)
 
     stderr_output = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
 
@@ -651,14 +684,7 @@ def _capture_handshake_hcx(
         stderr=subprocess.PIPE,
     )
 
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    _wait_for_process(proc, timeout=timeout)
 
     stderr_output = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
 
@@ -745,14 +771,7 @@ def _capture_handshake_aircrack(
 
     # Wait for handshake
     remaining = max(1, timeout - int(time.monotonic() - start_time))
-    try:
-        airodump_proc.wait(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        airodump_proc.terminate()
-        try:
-            airodump_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            airodump_proc.kill()
+    _wait_for_process(airodump_proc, timeout=remaining)
 
     # Look for the capture file (airodump adds -01.cap suffix)
     cap_file = None
@@ -826,14 +845,7 @@ def scan_wps_targets(interface: str, timeout: int = 15) -> list[WifiTarget]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        _wait_for_process(proc, timeout=timeout)
 
         stdout_data = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
         targets = _parse_wash_output(stdout_data)
@@ -851,14 +863,7 @@ def scan_wps_targets(interface: str, timeout: int = 15) -> list[WifiTarget]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    _wait_for_process(proc, timeout=timeout)
 
     stdout_data = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
     targets = _parse_wash_output(stdout_data)
@@ -991,15 +996,7 @@ def crack_wps_pixie(
         stderr=subprocess.STDOUT,
     )
 
-    try:
-        stdout_data, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        stdout_data = proc.stdout.read() if proc.stdout else b""
+    stdout_data, _ = _communicate_with_timeout(proc, timeout=timeout, terminate_timeout=10)
 
     stdout_text = stdout_data.decode(errors="replace") if stdout_data else ""
 
@@ -1109,15 +1106,7 @@ def crack_wps_pin(
         stderr=subprocess.STDOUT,
     )
 
-    try:
-        stdout_data, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        stdout_data = proc.stdout.read() if proc.stdout else b""
+    stdout_data, _ = _communicate_with_timeout(proc, timeout=timeout, terminate_timeout=10)
 
     stdout_text = stdout_data.decode(errors="replace") if stdout_data else ""
 
