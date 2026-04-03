@@ -178,6 +178,75 @@ func TestFingerprintPortal_Unknown(t *testing.T) {
 	}
 }
 
+func TestFingerprintPortal_UnknownClearsExistingVendor(t *testing.T) {
+	info := &PortalInfo{
+		Vendor:      "stale",
+		VendorScore: 7,
+	}
+	body := `<html><body>Please connect to the network</body></html>`
+	fingerprintPortal(info, body, "http://portal.example.com/connect", http.Header{})
+
+	if info.Vendor != "" {
+		t.Errorf("Vendor = %q, want empty for unknown portal", info.Vendor)
+	}
+	if info.VendorScore != 0 {
+		t.Errorf("VendorScore = %d, want 0 for unknown portal", info.VendorScore)
+	}
+}
+
+func TestFingerprintPortal_PrefersHighestScore(t *testing.T) {
+	originalSignatures := vendorSignatures
+	vendorSignatures = map[string]vendorSignature{
+		"weak": {
+			URLPatterns: []string{"/login"},
+		},
+		"strong": {
+			URLPatterns: []string{"/login"},
+			HTMLMarkers: []string{"portal"},
+		},
+	}
+	defer func() {
+		vendorSignatures = originalSignatures
+	}()
+
+	for i := 0; i < 50; i++ {
+		info := &PortalInfo{}
+		fingerprintPortal(info, `<html><body>Portal</body></html>`, "http://portal.example.com/login", http.Header{})
+		if info.Vendor != "strong" {
+			t.Fatalf("iteration %d: Vendor = %q, want %q", i, info.Vendor, "strong")
+		}
+		if info.VendorScore != 3 {
+			t.Fatalf("iteration %d: VendorScore = %d, want %d", i, info.VendorScore, 3)
+		}
+	}
+}
+
+func TestFingerprintPortal_BreaksTiesDeterministically(t *testing.T) {
+	originalSignatures := vendorSignatures
+	vendorSignatures = map[string]vendorSignature{
+		"beta": {
+			URLPatterns: []string{"/login"},
+		},
+		"alpha": {
+			URLPatterns: []string{"/login"},
+		},
+	}
+	defer func() {
+		vendorSignatures = originalSignatures
+	}()
+
+	for i := 0; i < 50; i++ {
+		info := &PortalInfo{}
+		fingerprintPortal(info, `<html><body>login</body></html>`, "http://portal.example.com/login", http.Header{})
+		if info.Vendor != "alpha" {
+			t.Fatalf("iteration %d: Vendor = %q, want %q", i, info.Vendor, "alpha")
+		}
+		if info.VendorScore != 2 {
+			t.Fatalf("iteration %d: VendorScore = %d, want %d", i, info.VendorScore, 2)
+		}
+	}
+}
+
 func TestDetectAuthMethods(t *testing.T) {
 	tests := []struct {
 		name string

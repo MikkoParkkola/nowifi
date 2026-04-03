@@ -35,16 +35,16 @@ const (
 
 // PortalInfo holds the results of captive portal detection.
 type PortalInfo struct {
-	IsCaptive    bool       `json:"is_captive"`
-	Type         PortalType `json:"portal_type"`
-	PortalURL    string     `json:"portal_url,omitempty"`
-	RedirectURL  string     `json:"redirect_url,omitempty"`
-	Vendor       string     `json:"vendor,omitempty"`
-	VendorScore  int        `json:"vendor_score,omitempty"`
-	AuthMethods  []string   `json:"auth_methods,omitempty"`
-	PortalIP     string     `json:"portal_ip,omitempty"`
-	SSID         string     `json:"ssid,omitempty"`
-	Gateway      string     `json:"gateway,omitempty"`
+	IsCaptive   bool       `json:"is_captive"`
+	Type        PortalType `json:"portal_type"`
+	PortalURL   string     `json:"portal_url,omitempty"`
+	RedirectURL string     `json:"redirect_url,omitempty"`
+	Vendor      string     `json:"vendor,omitempty"`
+	VendorScore int        `json:"vendor_score,omitempty"`
+	AuthMethods []string   `json:"auth_methods,omitempty"`
+	PortalIP    string     `json:"portal_ip,omitempty"`
+	SSID        string     `json:"ssid,omitempty"`
+	Gateway     string     `json:"gateway,omitempty"`
 }
 
 // canary is an OS-level connectivity-check URL and its expected response.
@@ -320,6 +320,8 @@ func checkDNSHijack() string {
 func fingerprintPortal(info *PortalInfo, body, rawURL string, headers http.Header) {
 	bodyLower := strings.ToLower(body)
 	urlLower := strings.ToLower(rawURL)
+	info.Vendor = ""
+	info.VendorScore = 0
 
 	// Build a single header string for matching.
 	var headerParts []string
@@ -330,34 +332,46 @@ func fingerprintPortal(info *PortalInfo, body, rawURL string, headers http.Heade
 	}
 	headerStr := strings.Join(headerParts, " ")
 
+	bestVendor := ""
+	bestMatchCount := 0
 	for vendor, sig := range vendorSignatures {
-		score := 0
-
-		for _, pattern := range sig.URLPatterns {
-			if strings.Contains(urlLower, strings.ToLower(pattern)) {
-				score += 2
-			}
+		score, matchCount := scoreVendorSignature(urlLower, bodyLower, headerStr, sig)
+		if score < 2 {
+			continue
 		}
-		for _, marker := range sig.HTMLMarkers {
-			if strings.Contains(bodyLower, strings.ToLower(marker)) {
-				score++
-			}
-		}
-		for _, pattern := range sig.HeaderPatterns {
-			if strings.Contains(headerStr, strings.ToLower(pattern)) {
-				score += 2
-			}
-		}
-
-		if score >= 2 {
+		if score > info.VendorScore ||
+			(score == info.VendorScore && matchCount > bestMatchCount) ||
+			(score == info.VendorScore && matchCount == bestMatchCount &&
+				(bestVendor == "" || vendor < bestVendor)) {
+			bestVendor = vendor
+			bestMatchCount = matchCount
 			info.Vendor = vendor
 			info.VendorScore = score
-			break
 		}
 	}
 
 	// Detect auth methods from form fields.
 	info.AuthMethods = detectAuthMethods(body)
+}
+
+func scoreVendorSignature(urlLower, bodyLower, headerStr string, sig vendorSignature) (score, matchCount int) {
+	urlMatches := countVendorPatternMatches(urlLower, sig.URLPatterns)
+	htmlMatches := countVendorPatternMatches(bodyLower, sig.HTMLMarkers)
+	headerMatches := countVendorPatternMatches(headerStr, sig.HeaderPatterns)
+
+	score = urlMatches*2 + htmlMatches + headerMatches*2
+	matchCount = urlMatches + htmlMatches + headerMatches
+	return score, matchCount
+}
+
+func countVendorPatternMatches(haystack string, patterns []string) int {
+	matchCount := 0
+	for _, pattern := range patterns {
+		if strings.Contains(haystack, strings.ToLower(pattern)) {
+			matchCount++
+		}
+	}
+	return matchCount
 }
 
 // authPattern maps an authentication method name to a list of regexes
