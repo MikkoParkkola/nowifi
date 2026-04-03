@@ -548,10 +548,9 @@ def capture_pmkid(
         stderr=subprocess.PIPE,
     )
 
-    # Wait for PMKID capture or timeout
-    _wait_for_process(proc, timeout=timeout)
-
-    stderr_output = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+    # Wait for PMKID capture or timeout and drain buffered output safely.
+    _, stderr_data = _communicate_with_timeout(proc, timeout=timeout)
+    stderr_output = stderr_data.decode(errors="replace")
 
     # Check if we got a capture file
     if not capture_file.exists() or capture_file.stat().st_size == 0:
@@ -684,9 +683,8 @@ def _capture_handshake_hcx(
         stderr=subprocess.PIPE,
     )
 
-    _wait_for_process(proc, timeout=timeout)
-
-    stderr_output = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+    _, stderr_data = _communicate_with_timeout(proc, timeout=timeout)
+    stderr_output = stderr_data.decode(errors="replace")
 
     if not capture_file.exists() or capture_file.stat().st_size == 0:
         result.details = f"No handshake captured within {timeout}s. {stderr_output[:200]}"
@@ -845,9 +843,8 @@ def scan_wps_targets(interface: str, timeout: int = 15) -> list[WifiTarget]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        _wait_for_process(proc, timeout=timeout)
-
-        stdout_data = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+        stdout_data, _ = _communicate_with_timeout(proc, timeout=timeout)
+        stdout_data = stdout_data.decode(errors="replace")
         targets = _parse_wash_output(stdout_data)
         if targets:
             return targets
@@ -863,9 +860,8 @@ def scan_wps_targets(interface: str, timeout: int = 15) -> list[WifiTarget]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    _wait_for_process(proc, timeout=timeout)
-
-    stdout_data = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+    stdout_data, _ = _communicate_with_timeout(proc, timeout=timeout)
+    stdout_data = stdout_data.decode(errors="replace")
     targets = _parse_wash_output(stdout_data)
     return targets
 

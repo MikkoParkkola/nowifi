@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 
@@ -15,6 +16,7 @@ from nowifi.crack import (
     ToolNotFound,
     WifiTarget,
     _communicate_with_timeout,
+    _capture_handshake_hcx,
     _find_tool,
     _parse_reaver_output,
     _parse_wash_output,
@@ -34,6 +36,7 @@ from nowifi.crack import (
     find_wordlists,
     run_crack,
     scan_targets,
+    scan_wps_targets,
 )
 
 
@@ -335,7 +338,7 @@ class TestCapturePmkid:
         mock_proc = MagicMock()
         mock_proc.stderr = MagicMock()
         mock_proc.stderr.read.return_value = b""
-        mock_proc.wait.return_value = 0
+        mock_proc.communicate.return_value = (b"", b"")
         mock_popen.return_value = mock_proc
 
         capture_pmkid(self._make_target(), "wlan0mon", output_dir=tmp_path, timeout=30)
@@ -348,6 +351,29 @@ class TestCapturePmkid:
         assert "wlan0mon" in cmd
         assert "--filtermode=2" in cmd
         assert "--enable_status=1" in cmd
+
+    @patch("nowifi.crack._check_monitor_mode", return_value=True)
+    @patch("nowifi.crack.find_hcxpcapngtool", return_value="/usr/bin/hcxpcapngtool")
+    @patch("nowifi.crack.find_hcxdumptool", return_value="/usr/bin/hcxdumptool")
+    @patch("nowifi.crack._communicate_with_timeout", return_value=(b"", b"timed out"))
+    @patch("nowifi.crack.subprocess.Popen")
+    def test_timeout_reads_stderr_via_helper(
+        self,
+        mock_popen,
+        mock_communicate,
+        mock_hcx,
+        mock_pcap,
+        mock_mon,
+        tmp_path,
+    ):
+        mock_proc = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        result = capture_pmkid(self._make_target(), "wlan0mon", output_dir=tmp_path, timeout=30)
+
+        assert result.success is False
+        assert "timed out" in result.details
+        mock_communicate.assert_called_once_with(mock_proc, timeout=30)
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +404,33 @@ class TestCaptureHandshake:
         result = capture_handshake(self._make_target(), "wlan0mon")
         assert result.success is False
         assert "No capture tools" in result.details
+
+    @patch("nowifi.crack.find_hcxpcapngtool", return_value="/usr/bin/hcxpcapngtool")
+    @patch("nowifi.crack.find_hcxdumptool", return_value="/usr/bin/hcxdumptool")
+    @patch("nowifi.crack._communicate_with_timeout", return_value=(b"", b"capture status"))
+    @patch("nowifi.crack.subprocess.Popen")
+    def test_hcx_timeout_reads_stderr_via_helper(
+        self,
+        mock_popen,
+        mock_communicate,
+        mock_hcx,
+        mock_pcap,
+        tmp_path,
+    ):
+        mock_proc = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        result = _capture_handshake_hcx(
+            self._make_target(),
+            "wlan0mon",
+            tmp_path,
+            30,
+            time.monotonic(),
+        )
+
+        assert result.success is False
+        assert "capture status" in result.details
+        mock_communicate.assert_called_once_with(mock_proc, timeout=30)
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +625,48 @@ class TestParseWashOutput:
         assert targets[0].wps_locked is False
         assert targets[0].wps_version == "1.0"
         assert targets[1].wps_locked is True
+
+
+class TestScanWpsTargets:
+
+    WASH_OUTPUT = (
+        "BSSID               Ch  dBm  WPS  Lck  Vendor    ESSID\n"
+        "-----------------------------------------------------------\n"
+        "AA:BB:CC:DD:EE:FF    6  -45  1.0  No   RalinkTe  MyNetwork\n"
+    )
+
+    @patch("nowifi.crack.find_wash", return_value="/usr/bin/wash")
+    @patch("nowifi.crack._communicate_with_timeout", return_value=(WASH_OUTPUT.encode(), b""))
+    @patch("nowifi.crack.subprocess.Popen")
+    def test_uses_helper_for_wash_output(self, mock_popen, mock_communicate, mock_wash):
+        mock_proc = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        targets = scan_wps_targets("wlan0mon", timeout=15)
+
+        assert len(targets) == 1
+        assert targets[0].bssid == "AA:BB:CC:DD:EE:FF"
+        mock_communicate.assert_called_once_with(mock_proc, timeout=15)
+
+    @patch("nowifi.crack.find_reaver", return_value="/usr/bin/reaver")
+    @patch("nowifi.crack.find_wash", side_effect=ToolNotFound("wash", "install"))
+    @patch("nowifi.crack._communicate_with_timeout", return_value=(WASH_OUTPUT.encode(), b""))
+    @patch("nowifi.crack.subprocess.Popen")
+    def test_fallback_reaver_uses_helper(
+        self,
+        mock_popen,
+        mock_communicate,
+        mock_wash,
+        mock_reaver,
+    ):
+        mock_proc = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        targets = scan_wps_targets("wlan0mon", timeout=20)
+
+        assert len(targets) == 1
+        assert targets[0].ssid == "MyNetwork"
+        mock_communicate.assert_called_once_with(mock_proc, timeout=20)
 
 
 # ---------------------------------------------------------------------------
