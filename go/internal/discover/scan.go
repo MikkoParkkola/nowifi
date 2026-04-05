@@ -11,6 +11,7 @@ package discover
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -18,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/MikkoParkkola/nowifi/internal/platform"
 )
 
 // ScannedNetwork represents a nearby WiFi network with security metadata.
@@ -35,6 +38,11 @@ type ScannedNetwork struct {
 // ScanNetworks enumerates nearby WiFi networks on the given interface.
 // Results are sorted by signal strength (strongest first).
 func ScanNetworks(iface string) ([]ScannedNetwork, error) {
+	// Validate interface name before passing to exec.Command.
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("scan networks: %w", err)
+	}
+
 	var networks []ScannedNetwork
 	var err error
 

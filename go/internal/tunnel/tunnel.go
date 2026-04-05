@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 )
 
@@ -60,6 +61,12 @@ func (h *Handle) Stop() {
 // a local SOCKS5 proxy on the given port. Blocks until the proxy is ready
 // or the timeout expires.
 func StartChisel(serverURL string, localPort int, timeout time.Duration) (*Handle, error) {
+	// Validate server URL before passing to exec.Command.
+	serverURL, err := platform.ValidateURL(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("chisel server: %w", err)
+	}
+
 	chiselPath, err := toolchain.EnsureTool("chisel")
 	if err != nil {
 		return nil, err
@@ -101,6 +108,19 @@ func StartChisel(serverURL string, localPort int, timeout time.Duration) (*Handl
 // StartDNSTunnel starts an iodine DNS tunnel. Requires sudo. Creates a TUN
 // interface (dns0). Blocks until the interface has an IP address or timeout.
 func StartDNSTunnel(domain string, serverIP string, timeout time.Duration) (*Handle, error) {
+	// Validate domain before passing to exec.Command.
+	domain, err := platform.ValidateDomain(domain)
+	if err != nil {
+		return nil, fmt.Errorf("dns tunnel domain: %w", err)
+	}
+	// Validate server IP if provided.
+	if serverIP != "" {
+		serverIP, err = platform.ValidateIP(serverIP)
+		if err != nil {
+			return nil, fmt.Errorf("dns tunnel server: %w", err)
+		}
+	}
+
 	iodinePath, err := toolchain.EnsureTool("iodine")
 	if err != nil {
 		return nil, err
@@ -143,6 +163,12 @@ func StartDNSTunnel(domain string, serverIP string, timeout time.Duration) (*Han
 // StartICMPTunnel starts a hans ICMP tunnel. Requires sudo. Creates a TUN
 // interface (tun0). Blocks until the interface has an IP address or timeout.
 func StartICMPTunnel(serverIP string, timeout time.Duration) (*Handle, error) {
+	// Validate server IP before passing to exec.Command.
+	serverIP, err := platform.ValidateIP(serverIP)
+	if err != nil {
+		return nil, fmt.Errorf("icmp tunnel server: %w", err)
+	}
+
 	hansPath, err := toolchain.EnsureTool("hans")
 	if err != nil {
 		return nil, err
@@ -179,6 +205,12 @@ func StartICMPTunnel(serverIP string, timeout time.Duration) (*Handle, error) {
 // StartQUICTunnel starts a Hysteria2 QUIC tunnel on UDP/443, creating a
 // local SOCKS5 proxy. Most captive portals only inspect TCP, not UDP.
 func StartQUICTunnel(server string, localPort int, timeout time.Duration) (*Handle, error) {
+	// Validate server address before passing to exec.Command.
+	server, err := platform.ValidateServerAddr(server)
+	if err != nil {
+		return nil, fmt.Errorf("quic tunnel server: %w", err)
+	}
+
 	hysteriaPath, err := toolchain.EnsureTool("hysteria")
 	if err != nil {
 		return nil, err
@@ -222,6 +254,12 @@ func StartQUICTunnel(server string, localPort int, timeout time.Duration) (*Hand
 // StartNTPTunnel starts an NTP tunnel over UDP/123 using ntpescape.
 // Very low bandwidth (~1-10 Kbps) but NTP is almost never blocked.
 func StartNTPTunnel(serverIP string, localPort int, timeout time.Duration) (*Handle, error) {
+	// Validate server IP before passing to exec.Command.
+	serverIP, err := platform.ValidateIP(serverIP)
+	if err != nil {
+		return nil, fmt.Errorf("ntp tunnel server: %w", err)
+	}
+
 	ntpPath, err := toolchain.EnsureTool("ntpescape")
 	if err != nil {
 		return nil, err
@@ -273,6 +311,11 @@ func StartDoHTunnel(localPort int, dohServer string, timeout time.Duration) (*Ha
 	}
 	if dohServer == "" {
 		dohServer = "https://cloudflare-dns.com/dns-query"
+	}
+	// Validate DoH server URL before passing to exec.Command.
+	dohServer, err := platform.ValidateURL(dohServer)
+	if err != nil {
+		return nil, fmt.Errorf("doh tunnel server: %w", err)
 	}
 
 	// Strategy 1: cloudflared (already installed)
@@ -449,6 +492,11 @@ func waitForPort(cmd *exec.Cmd, stderrPipe io.Reader, port int, timeout time.Dur
 // waitForTunInterface polls until a TUN interface has an IPv4 address,
 // the process exits, or the timeout expires.
 func waitForTunInterface(cmd *exec.Cmd, stderrPipe io.Reader, ifaceName string, timeout time.Duration) error {
+	// Validate interface name before passing to exec.Command.
+	if _, err := platform.ValidateInterface(ifaceName); err != nil {
+		return fmt.Errorf("tunnel interface: %w", err)
+	}
+
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()

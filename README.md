@@ -12,6 +12,10 @@ One command. 27 techniques. Browser works immediately.
 sudo ./nowifi
 ```
 
+<p align="center">
+  <img src="demo.gif" alt="nowifi demo" width="700">
+</p>
+
 Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 19 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs a multi-step WPA cracking pipeline with 4 more techniques.

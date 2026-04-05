@@ -274,3 +274,224 @@ func TestIfaceRegex(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// normalizeMAC
+// ---------------------------------------------------------------------------
+
+func TestNormalizeMAC(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"trims whitespace", "  aa:bb:cc:dd:ee:ff  ", "aa:bb:cc:dd:ee:ff", false},
+		{"trims tabs", "\tAA:BB:CC:DD:EE:FF\t", "aa:bb:cc:dd:ee:ff", false},
+		{"trims newline", "aa:bb:cc:dd:ee:ff\n", "aa:bb:cc:dd:ee:ff", false},
+		{"already clean", "aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff", false},
+		{"invalid after trim", "  not-a-mac  ", "", true},
+		{"empty after trim", "   ", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeMAC(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("normalizeMAC(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("normalizeMAC(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseArpEntries — additional cases
+// ---------------------------------------------------------------------------
+
+func TestParseArpEntries_MacOSFormat(t *testing.T) {
+	re := regexp.MustCompile(`\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-fA-F:]+) on (\w+)`)
+
+	tests := []struct {
+		name      string
+		output    string
+		wantCount int
+		wantFirst *ArpEntry
+	}{
+		{
+			"two entries",
+			"? (192.168.1.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]\n? (192.168.1.2) at 11:22:33:44:55:66 on en0 ifscope [ethernet]",
+			2,
+			&ArpEntry{IP: "192.168.1.1", MAC: "aa:bb:cc:dd:ee:ff", Interface: "en0"},
+		},
+		{
+			"empty output",
+			"",
+			0,
+			nil,
+		},
+		{
+			"no matching lines",
+			"some random text\nanother line",
+			0,
+			nil,
+		},
+		{
+			"mixed valid and invalid",
+			"? (10.0.0.1) at aa:bb:cc:dd:ee:ff on wlan0 [ethernet]\nskip this line\n? (10.0.0.2) at 11:22:33:44:55:66 on wlan0 [ethernet]",
+			2,
+			&ArpEntry{IP: "10.0.0.1", MAC: "aa:bb:cc:dd:ee:ff", Interface: "wlan0"},
+		},
+		{
+			"uppercase MAC normalized",
+			"? (192.168.0.1) at AA:BB:CC:DD:EE:FF on en1 [ethernet]",
+			1,
+			&ArpEntry{IP: "192.168.0.1", MAC: "aa:bb:cc:dd:ee:ff", Interface: "en1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entries := parseArpEntries(tt.output, re, 1, 2, 3)
+			if len(entries) != tt.wantCount {
+				t.Errorf("parseArpEntries() returned %d entries, want %d", len(entries), tt.wantCount)
+				return
+			}
+			if tt.wantFirst != nil && len(entries) > 0 {
+				e := entries[0]
+				if e.IP != tt.wantFirst.IP {
+					t.Errorf("first entry IP = %q, want %q", e.IP, tt.wantFirst.IP)
+				}
+				if e.MAC != tt.wantFirst.MAC {
+					t.Errorf("first entry MAC = %q, want %q", e.MAC, tt.wantFirst.MAC)
+				}
+				if e.Interface != tt.wantFirst.Interface {
+					t.Errorf("first entry Interface = %q, want %q", e.Interface, tt.wantFirst.Interface)
+				}
+			}
+		})
+	}
+}
+
+func TestParseArpEntries_SkipsInvalidMAC(t *testing.T) {
+	re := regexp.MustCompile(`\((\d+\.\d+\.\d+\.\d+)\) at (\S+) on (\w+)`)
+	output := "? (10.0.0.1) at not-a-mac on en0 [ethernet]\n? (10.0.0.2) at aa:bb:cc:dd:ee:ff on en0 [ethernet]"
+	entries := parseArpEntries(output, re, 1, 2, 3)
+
+	if len(entries) != 1 {
+		t.Errorf("expected 1 valid entry, got %d", len(entries))
+	}
+	if len(entries) > 0 && entries[0].IP != "10.0.0.2" {
+		t.Errorf("expected entry for 10.0.0.2, got %q", entries[0].IP)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GenerateRandomMAC — first octet distribution
+// ---------------------------------------------------------------------------
+
+func TestGenerateRandomMAC_FirstOctetValues(t *testing.T) {
+	validFirst := map[byte]bool{0x02: true, 0x06: true, 0x0A: true, 0x0E: true}
+	seen := make(map[byte]int)
+
+	for i := 0; i < 200; i++ {
+		mac := GenerateRandomMAC()
+		parts := strings.Split(mac, ":")
+		b := hexToByte(parts[0])
+		if !validFirst[b] {
+			t.Fatalf("first octet %02x not in {02, 06, 0a, 0e}", b)
+		}
+		seen[b]++
+	}
+
+	// With 200 iterations and 4 choices, each should appear at least once.
+	for b := range validFirst {
+		if seen[b] == 0 {
+			t.Errorf("first octet %02x never appeared in 200 generations", b)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateMAC — additional boundary cases
+// ---------------------------------------------------------------------------
+
+func TestValidateMAC_AllZeros(t *testing.T) {
+	mac, err := ValidateMAC("00:00:00:00:00:00")
+	if err != nil {
+		t.Errorf("all-zeros MAC should be valid: %v", err)
+	}
+	if mac != "00:00:00:00:00:00" {
+		t.Errorf("got %q, want 00:00:00:00:00:00", mac)
+	}
+}
+
+func TestValidateMAC_AllFs(t *testing.T) {
+	mac, err := ValidateMAC("FF:FF:FF:FF:FF:FF")
+	if err != nil {
+		t.Errorf("all-FF MAC should be valid: %v", err)
+	}
+	if mac != "ff:ff:ff:ff:ff:ff" {
+		t.Errorf("got %q, want ff:ff:ff:ff:ff:ff", mac)
+	}
+}
+
+func TestValidateMAC_MixedHexDigits(t *testing.T) {
+	mac, err := ValidateMAC("0A:1B:2C:3D:4E:5F")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mac != "0a:1b:2c:3d:4e:5f" {
+		t.Errorf("got %q, want 0a:1b:2c:3d:4e:5f", mac)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateInterface — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestValidateInterface_SingleChar(t *testing.T) {
+	got, err := ValidateInterface("a")
+	if err != nil {
+		t.Errorf("single char should be valid: %v", err)
+	}
+	if got != "a" {
+		t.Errorf("got %q, want a", got)
+	}
+}
+
+func TestValidateInterface_MaxLength(t *testing.T) {
+	name := "a123456789012345" // 16 chars: 1 alpha + 15 alnum = max allowed
+	got, err := ValidateInterface(name)
+	if err != nil {
+		t.Errorf("16-char interface should be valid: %v", err)
+	}
+	if got != name {
+		t.Errorf("got %q, want %q", got, name)
+	}
+}
+
+func TestValidateInterface_OverMaxLength(t *testing.T) {
+	name := "a1234567890123456" // 17 chars
+	_, err := ValidateInterface(name)
+	if err == nil {
+		t.Error("17-char interface should be invalid")
+	}
+}
+
+func TestValidateInterface_Underscore(t *testing.T) {
+	_, err := ValidateInterface("wlan_0")
+	if err == nil {
+		t.Error("underscore in interface name should be invalid")
+	}
+}
+
+func TestValidateInterface_Hyphen(t *testing.T) {
+	_, err := ValidateInterface("wlan-0")
+	if err == nil {
+		t.Error("hyphen in interface name should be invalid")
+	}
+}

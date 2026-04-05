@@ -22,6 +22,9 @@ import (
 // Tries, in order: system_profiler (JSON), the legacy airport command,
 // networksetup, and finally ifconfig as a last resort.
 func GetWifiInfo(iface string) (*WifiInfo, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("wifi info: %w", err)
+	}
 	// Strategy 1: system_profiler SPAirPortDataType -json
 	if info := getWifiInfoSystemProfiler(); info != nil {
 		return info, nil
@@ -329,6 +332,10 @@ func getWifiInfoWdutil() *WifiInfo {
 
 // GetCurrentMAC returns the current MAC address of the given interface.
 func GetCurrentMAC(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get MAC: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -390,6 +397,10 @@ func GetGateway(iface string) (string, error) {
 
 // GetLocalIP returns the local IPv4 address of the given interface.
 func GetLocalIP(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get local IP: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -407,6 +418,10 @@ func GetLocalIP(iface string) (string, error) {
 
 // GetIPv6Address returns the global IPv6 address of the given interface, if any.
 func GetIPv6Address(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get IPv6: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -441,6 +456,10 @@ func GetARPTable() ([]ArpEntry, error) {
 
 // RenewDHCP renews the DHCP lease on the given interface (requires sudo).
 func RenewDHCP(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("DHCP renew: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -467,6 +486,10 @@ func FlushDNS() error {
 
 // SetSystemProxy configures a system-wide SOCKS proxy on the given interface.
 func SetSystemProxy(iface string, port int) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("set proxy: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -485,6 +508,10 @@ func SetSystemProxy(iface string, port int) error {
 
 // ClearSystemProxy removes the system-wide SOCKS proxy on the given interface.
 func ClearSystemProxy(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("clear proxy: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -497,6 +524,10 @@ func ClearSystemProxy(iface string) error {
 
 // DisconnectWifi turns off WiFi on the given interface.
 func DisconnectWifi(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("disconnect wifi: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -509,6 +540,10 @@ func DisconnectWifi(iface string) error {
 
 // ConnectWifi turns on WiFi on the given interface.
 func ConnectWifi(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("connect wifi: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -527,6 +562,10 @@ func ConnectWifi(iface string) error {
 // It adjusts TTL and enables PF rules that normalize outbound traffic.
 // Returns a StealthState for later restoration via DisableStealth.
 func EnableStealth(iface string) (*StealthState, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("stealth: %w", err)
+	}
+
 	state := &StealthState{}
 
 	// 1. Save and set TTL.

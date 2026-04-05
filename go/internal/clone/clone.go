@@ -7,6 +7,8 @@ package clone
 
 import (
 	"fmt"
+	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -109,11 +111,24 @@ func ProfileForOS(os string) DeviceProfile {
 // FullClone performs MAC clone + DHCP fingerprint spoofing.
 // It sets the MAC, then does a DHCP request with options matching the target's OS.
 func FullClone(iface, targetMAC, targetIP string) error {
+	// Validate all inputs before any exec.Command calls.
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		return fmt.Errorf("clone: %w", err)
+	}
+	if _, err := platform.ValidateMAC(targetMAC); err != nil {
+		return fmt.Errorf("clone: %w", err)
+	}
+	if targetIP != "" {
+		if ip := net.ParseIP(targetIP); ip == nil {
+			return fmt.Errorf("clone: invalid target IP: %q", targetIP)
+		}
+	}
+
 	// 1. Detect target OS
 	targetOS := DetectTargetOS(targetMAC)
 	profile := ProfileForOS(targetOS)
 
-	// 2. Set MAC
+	// 2. Set MAC (SetMAC also validates internally)
 	if err := platform.SetMAC(iface, targetMAC); err != nil {
 		return fmt.Errorf("MAC clone failed: %w", err)
 	}
@@ -128,29 +143,47 @@ func FullClone(iface, targetMAC, targetIP string) error {
 
 // dhcpWithProfileLinux writes a temporary dhclient.conf and runs dhclient.
 func dhcpWithProfileLinux(iface, requestIP string, profile DeviceProfile) error {
+	// Validate interface (already validated by caller, but defense in depth).
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		return fmt.Errorf("dhcp profile: %w", err)
+	}
+	// Validate IP if provided (already validated by caller, but defense in depth).
+	if requestIP != "" {
+		if ip := net.ParseIP(requestIP); ip == nil {
+			return fmt.Errorf("dhcp profile: invalid request IP: %q", requestIP)
+		}
+	}
+
+	// Sanitize profile fields to prevent injection into dhclient config.
+	// Hostname: alphanumeric + hyphens only (RFC 952/1123).
+	hostname := sanitizeHostname(profile.Hostname)
+	// DHCP options: comma-separated alphanumeric option names with hyphens.
+	dhcpOpts := sanitizeDHCPOptions(profile.DHCPOptions55)
+
 	// Build dhclient config
 	conf := fmt.Sprintf(`# nowifi Full Device Clone — DHCP fingerprint spoofing
 interface "%s" {
   send host-name "%s";
   request %s;
-`, iface, profile.Hostname, profile.DHCPOptions55)
+`, iface, hostname, dhcpOpts)
 
 	if profile.DHCPOption60 != "" {
-		conf += fmt.Sprintf("  send vendor-class-identifier \"%s\";\n", profile.DHCPOption60)
+		vendorClass := sanitizeVendorClass(profile.DHCPOption60)
+		conf += fmt.Sprintf("  send vendor-class-identifier \"%s\";\n", vendorClass)
 	}
 	if requestIP != "" {
 		conf += fmt.Sprintf("  request-ip %s;\n", requestIP)
 	}
 	conf += "}\n"
 
-	// Write temp config
+	// Write temp config using os.WriteFile (no shell needed).
 	confPath := "/tmp/nowifi-dhclient.conf"
 	if err := writeFile(confPath, conf); err != nil {
 		return fmt.Errorf("failed to write dhclient config: %w", err)
 	}
 
 	// Release existing lease
-	exec.Command("sudo", "dhclient", "-r", iface).Run()
+	_ = exec.Command("sudo", "dhclient", "-r", iface).Run()
 	time.Sleep(500 * time.Millisecond)
 
 	// Request with spoofed fingerprint
@@ -163,6 +196,42 @@ interface "%s" {
 	return nil
 }
 
+// sanitizeHostname ensures the hostname only contains safe characters (RFC 952/1123).
+func sanitizeHostname(h string) string {
+	var b strings.Builder
+	for _, c := range h {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' {
+			b.WriteRune(c)
+		}
+	}
+	if b.Len() == 0 {
+		return "localhost"
+	}
+	return b.String()
+}
+
+// sanitizeDHCPOptions ensures only valid DHCP option names (alphanumeric + hyphens + commas).
+func sanitizeDHCPOptions(opts string) string {
+	var b strings.Builder
+	for _, c := range opts {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == ',' {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// sanitizeVendorClass ensures vendor class identifier only contains printable ASCII without quotes.
+func sanitizeVendorClass(vc string) string {
+	var b strings.Builder
+	for _, c := range vc {
+		if c >= ' ' && c <= '~' && c != '"' && c != '\\' && c != ';' {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
 func writeFile(path, content string) error {
-	return exec.Command("sh", "-c", fmt.Sprintf("cat > %s << 'NOWIFI_EOF'\n%sNOWIFI_EOF", path, content)).Run()
+	return os.WriteFile(path, []byte(content), 0600)
 }

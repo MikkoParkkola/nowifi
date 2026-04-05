@@ -11,6 +11,8 @@ package platform
 import (
 	"crypto/rand"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -91,6 +93,75 @@ func ValidateInterface(iface string) (string, error) {
 		return "", fmt.Errorf("invalid interface name: %q", iface)
 	}
 	return iface, nil
+}
+
+// ValidateIP validates an IPv4 or IPv6 address string.
+// Prevents command injection through parameters expected to be IP addresses.
+func ValidateIP(ip string) (string, error) {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return "", fmt.Errorf("empty IP address")
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return "", fmt.Errorf("invalid IP address: %q", ip)
+	}
+	// Return the canonical string form (prevents any embedded shell metacharacters).
+	return parsed.String(), nil
+}
+
+// ValidateURL validates a URL string and ensures it has an http or https scheme.
+// Prevents command injection through parameters expected to be URLs.
+func ValidateURL(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", fmt.Errorf("empty URL")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL %q: %w", rawURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("invalid URL scheme %q: must be http or https", u.Scheme)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("invalid URL %q: missing host", rawURL)
+	}
+	// Rebuild the URL from parsed components to eliminate any embedded shell metacharacters.
+	return u.String(), nil
+}
+
+// ValidateServerAddr validates a server address (IP, host:port, or hostname).
+// Ensures the address does not contain shell metacharacters.
+var serverAddrRE = regexp.MustCompile(`^[a-zA-Z0-9._:\[\]-]+$`)
+
+func ValidateServerAddr(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", fmt.Errorf("empty server address")
+	}
+	if !serverAddrRE.MatchString(addr) {
+		return "", fmt.Errorf("invalid server address: %q (contains disallowed characters)", addr)
+	}
+	return addr, nil
+}
+
+// ValidateDomain validates a DNS domain name.
+// Prevents command injection through parameters expected to be domain names.
+var domainRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`)
+
+func ValidateDomain(domain string) (string, error) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return "", fmt.Errorf("empty domain")
+	}
+	if len(domain) > 253 {
+		return "", fmt.Errorf("domain too long: %q", domain)
+	}
+	if !domainRE.MatchString(domain) {
+		return "", fmt.Errorf("invalid domain: %q", domain)
+	}
+	return domain, nil
 }
 
 // GenerateRandomMAC generates a random locally-administered unicast MAC address.

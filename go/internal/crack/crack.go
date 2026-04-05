@@ -38,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 )
 
@@ -169,6 +170,11 @@ func findTool(name, installHint string) (string, error) {
 var bssidRE = regexp.MustCompile(`([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}`)
 
 func checkMonitorMode(iface string) bool {
+	// Validate interface name before passing to exec.Command.
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		return false
+	}
+
 	// Check via ifconfig.
 	out, err := exec.Command("ifconfig", iface).CombinedOutput()
 	if err == nil && strings.Contains(strings.ToLower(string(out)), "monitor") {
@@ -202,6 +208,11 @@ func monitorModeError(iface string) string {
 // Uses system_profiler on macOS (passive, no monitor mode needed) and iw on Linux.
 // Returns a list of WifiTarget sorted by signal strength (strongest first).
 func ScanTargets(iface string, duration int) ([]WifiTarget, error) {
+	// Validate interface name before passing to exec.Command.
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("scan targets: %w", err)
+	}
+
 	var targets []WifiTarget
 
 	if isDarwin() {
@@ -484,6 +495,13 @@ func CapturePMKID(target WifiTarget, iface string, timeout time.Duration) (*Resu
 	start := time.Now()
 	result := &Result{Method: PMKID, Success: false}
 
+	// Validate interface name before passing to exec.Command.
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		result.Details = fmt.Sprintf("invalid interface: %v", err)
+		result.Elapsed = time.Since(start)
+		return result, nil
+	}
+
 	outputDir := timestampedDir("pmkid")
 
 	if !checkMonitorMode(iface) {
@@ -589,6 +607,13 @@ func CapturePMKID(target WifiTarget, iface string, timeout time.Duration) (*Resu
 func CaptureHandshake(target WifiTarget, iface string, timeout time.Duration) (*Result, error) {
 	start := time.Now()
 	result := &Result{Method: Handshake, Success: false}
+
+	// Validate interface name before passing to exec.Command.
+	if _, err := platform.ValidateInterface(iface); err != nil {
+		result.Details = fmt.Sprintf("invalid interface: %v", err)
+		result.Elapsed = time.Since(start)
+		return result, nil
+	}
 
 	outputDir := timestampedDir("handshake")
 

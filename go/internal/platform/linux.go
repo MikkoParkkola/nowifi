@@ -33,6 +33,10 @@ func run(ctx context.Context, args ...string) (string, error) {
 //
 // Tries, in order: nmcli, iw dev link, iwgetid+iwconfig, and ip addr (last resort).
 func GetWifiInfo(iface string) (*WifiInfo, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("wifi info: %w", err)
+	}
+
 	// Strategy 1: nmcli (NetworkManager, most common on desktop Linux)
 	if info := getWifiInfoNmcli(iface); info != nil {
 		return info, nil
@@ -216,6 +220,10 @@ func getWifiInfoIPAddr(iface string) *WifiInfo {
 
 // GetCurrentMAC returns the current MAC address of the given interface.
 func GetCurrentMAC(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get MAC: %w", err)
+	}
+
 	if hasCmd("ip") {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -331,6 +339,10 @@ func parseHexGateway(hex string) (string, error) {
 
 // GetLocalIP returns the local IPv4 address of the given interface.
 func GetLocalIP(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get local IP: %w", err)
+	}
+
 	if !hasCmd("ip") {
 		return "", fmt.Errorf("ip command not found")
 	}
@@ -351,6 +363,10 @@ func GetLocalIP(iface string) (string, error) {
 
 // GetIPv6Address returns the global IPv6 address of the given interface, if any.
 func GetIPv6Address(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get IPv6: %w", err)
+	}
+
 	if !hasCmd("ip") {
 		return "", nil
 	}
@@ -403,6 +419,10 @@ func GetARPTable() ([]ArpEntry, error) {
 
 // RenewDHCP renews the DHCP lease on the given interface.
 func RenewDHCP(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("DHCP renew: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -514,6 +534,10 @@ func ClearSystemProxy(iface string) error {
 
 // DisconnectWifi disconnects from WiFi or brings the interface down.
 func DisconnectWifi(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("disconnect wifi: %w", err)
+	}
+
 	if hasCmd("nmcli") {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -538,6 +562,10 @@ func DisconnectWifi(iface string) error {
 
 // ConnectWifi reconnects WiFi or brings the interface up.
 func ConnectWifi(iface string) error {
+	if _, err := ValidateInterface(iface); err != nil {
+		return fmt.Errorf("connect wifi: %w", err)
+	}
+
 	if hasCmd("nmcli") {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -566,6 +594,10 @@ func ConnectWifi(iface string) error {
 
 // EnableStealth applies traffic normalization to avoid portal detection on Linux.
 func EnableStealth(iface string) (*StealthState, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("stealth: %w", err)
+	}
+
 	state := &StealthState{}
 
 	// 1. Save and set TTL.

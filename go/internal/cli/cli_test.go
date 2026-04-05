@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/MikkoParkkola/nowifi/internal/probe"
 )
 
 // ---------------------------------------------------------------------------
@@ -353,5 +355,188 @@ func TestRootLongDescription(t *testing.T) {
 				t.Errorf("rootCmd.Long should contain %q", tt.substr)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// extractHost (audit.go helper)
+// ---------------------------------------------------------------------------
+
+func TestExtractHost(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"bare hostname no scheme", "example.com", ""},          // url.Parse puts this in Path, not Host
+		{"https URL", "https://tunnel.example.com:8443/path", "tunnel.example.com"},
+		{"http URL", "http://192.168.1.1:8080", "192.168.1.1"},
+		{"URL with path", "https://host.com/some/path?q=1", "host.com"},
+		{"scheme only host", "https://myserver", "myserver"},
+		{"IP address URL", "https://10.0.0.1:443", "10.0.0.1"},
+		{"no scheme with port", "myserver:8080", ""},         // parsed as scheme:opaque by url.Parse
+		{"IPv6 URL", "https://[::1]:443/path", "::1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractHost(tt.input)
+			if got != tt.want {
+				t.Errorf("extractHost(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// countOpenPorts (audit.go helper)
+// ---------------------------------------------------------------------------
+
+func TestCountOpenPorts(t *testing.T) {
+	tests := []struct {
+		name  string
+		ports []probe.PortProbeResult
+		want  int
+	}{
+		{"nil ports", nil, 0},
+		{"empty ports", []probe.PortProbeResult{}, 0},
+		{"all closed", []probe.PortProbeResult{
+			{Port: 80, IsOpen: false},
+			{Port: 443, IsOpen: false},
+		}, 0},
+		{"all open", []probe.PortProbeResult{
+			{Port: 80, IsOpen: true},
+			{Port: 443, IsOpen: true},
+			{Port: 53, IsOpen: true},
+		}, 3},
+		{"mixed", []probe.PortProbeResult{
+			{Port: 80, IsOpen: true},
+			{Port: 443, IsOpen: false},
+			{Port: 53, IsOpen: true},
+			{Port: 22, IsOpen: false},
+			{Port: 8080, IsOpen: true},
+		}, 3},
+		{"single open", []probe.PortProbeResult{
+			{Port: 443, IsOpen: true},
+		}, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probes := &probe.ProbeResults{OpenPorts: tt.ports}
+			got := countOpenPorts(probes)
+			if got != tt.want {
+				t.Errorf("countOpenPorts() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// mapProbeResults (audit.go helper)
+// ---------------------------------------------------------------------------
+
+func TestMapProbeResults_Basic(t *testing.T) {
+	p := &probe.ProbeResults{
+		DNS:        probe.DnsProbeResult{IsOpen: true, Details: "dns-details"},
+		ICMP:       probe.IcmpProbeResult{IsOpen: false, Details: "icmp-details"},
+		IPv6:       probe.Ipv6ProbeResult{IsOpen: true, Details: "ipv6-details"},
+		Cloudflare: probe.HttpsProbeResult{IsOpen: true, Details: "cf-details"},
+		QUIC:       probe.PortProbeResult{IsOpen: false, Details: "quic-details"},
+		NTP:        probe.PortProbeResult{IsOpen: true, Details: "ntp-details"},
+		DoH:        probe.PortProbeResult{IsOpen: false, Details: "doh-details"},
+	}
+
+	bp := mapProbeResults(p)
+
+	if bp.DNS.IsOpen != true || bp.DNS.Details != "dns-details" {
+		t.Errorf("DNS mapping: got IsOpen=%v Details=%q", bp.DNS.IsOpen, bp.DNS.Details)
+	}
+	if bp.ICMP.IsOpen != false || bp.ICMP.Details != "icmp-details" {
+		t.Errorf("ICMP mapping: got IsOpen=%v Details=%q", bp.ICMP.IsOpen, bp.ICMP.Details)
+	}
+	if bp.IPv6.IsOpen != true {
+		t.Error("IPv6 mapping: expected IsOpen=true")
+	}
+	if bp.Cloudflare.IsOpen != true {
+		t.Error("Cloudflare mapping: expected IsOpen=true")
+	}
+	if bp.QUIC.IsOpen != false {
+		t.Error("QUIC mapping: expected IsOpen=false")
+	}
+	if bp.NTP.IsOpen != true {
+		t.Error("NTP mapping: expected IsOpen=true")
+	}
+	if bp.DoH.IsOpen != false {
+		t.Error("DoH mapping: expected IsOpen=false")
+	}
+}
+
+func TestMapProbeResults_Whitelists(t *testing.T) {
+	p := &probe.ProbeResults{
+		Whitelists: []probe.WhitelistResult{
+			{Domain: "apple.com", IsOpen: true, Details: "200 OK"},
+			{Domain: "google.com", IsOpen: false, Details: "timeout"},
+		},
+	}
+
+	bp := mapProbeResults(p)
+
+	if len(bp.Whitelists) != 2 {
+		t.Fatalf("Whitelists len = %d, want 2", len(bp.Whitelists))
+	}
+	if bp.Whitelists[0].Domain != "apple.com" || !bp.Whitelists[0].IsOpen {
+		t.Errorf("Whitelist[0] = %+v, want apple.com/open", bp.Whitelists[0])
+	}
+	if bp.Whitelists[1].Domain != "google.com" || bp.Whitelists[1].IsOpen {
+		t.Errorf("Whitelist[1] = %+v, want google.com/closed", bp.Whitelists[1])
+	}
+}
+
+func TestMapProbeResults_OpenPorts(t *testing.T) {
+	p := &probe.ProbeResults{
+		OpenPorts: []probe.PortProbeResult{
+			{Port: 80, Service: "HTTP", IsOpen: true},
+			{Port: 443, Service: "HTTPS", IsOpen: false},
+		},
+	}
+
+	bp := mapProbeResults(p)
+
+	if len(bp.OpenPorts) != 2 {
+		t.Fatalf("OpenPorts len = %d, want 2", len(bp.OpenPorts))
+	}
+	if bp.OpenPorts[0].Port != 80 || bp.OpenPorts[0].Service != "HTTP" || !bp.OpenPorts[0].IsOpen {
+		t.Errorf("OpenPorts[0] = %+v", bp.OpenPorts[0])
+	}
+}
+
+func TestMapProbeResults_TunnelServerPorts(t *testing.T) {
+	p := &probe.ProbeResults{
+		TunnelServerPorts: []probe.PortProbeResult{
+			{Port: 51820, Service: "WireGuard", IsOpen: true},
+		},
+	}
+
+	bp := mapProbeResults(p)
+
+	if len(bp.TunnelServerPorts) != 1 {
+		t.Fatalf("TunnelServerPorts len = %d, want 1", len(bp.TunnelServerPorts))
+	}
+	if bp.TunnelServerPorts[0].Port != 51820 {
+		t.Errorf("TunnelServerPorts[0].Port = %d, want 51820", bp.TunnelServerPorts[0].Port)
+	}
+}
+
+func TestMapProbeResults_Empty(t *testing.T) {
+	p := &probe.ProbeResults{}
+	bp := mapProbeResults(p)
+
+	if bp.DNS.IsOpen || bp.ICMP.IsOpen || bp.IPv6.IsOpen {
+		t.Error("empty probes should map to all closed")
+	}
+	if len(bp.Whitelists) != 0 || len(bp.OpenPorts) != 0 || len(bp.TunnelServerPorts) != 0 {
+		t.Error("empty probes should have no whitelists/ports")
 	}
 }
