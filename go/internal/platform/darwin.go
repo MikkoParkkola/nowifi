@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -516,4 +517,110 @@ func ConnectWifi(iface string) error {
 		return fmt.Errorf("connect WiFi %s: %w: %s", iface, err, string(out))
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Post-bypass traffic stealth — anti-tethering detection
+// ---------------------------------------------------------------------------
+
+// EnableStealth applies traffic normalization to avoid portal detection.
+// It adjusts TTL and enables PF rules that normalize outbound traffic.
+// Returns a StealthState for later restoration via DisableStealth.
+func EnableStealth(iface string) (*StealthState, error) {
+	state := &StealthState{}
+
+	// 1. Save and set TTL.
+	// Default macOS TTL is 64. Set to 65 so after one hop it appears as 64
+	// (indistinguishable from a directly-connected device).
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "sysctl", "-n", "net.inet.ip.ttl").Output()
+	if err == nil {
+		fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &state.OriginalTTL)
+	} else {
+		state.OriginalTTL = 64
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	if err := exec.CommandContext(ctx2, "sysctl", "-w", "net.inet.ip.ttl=65").Run(); err != nil {
+		return state, fmt.Errorf("failed to set TTL: %w", err)
+	}
+
+	// 2. Enable PF rules for traffic normalization.
+	// Scrub normalizes fragmented packets and randomizes IP ID,
+	// preventing OS fingerprinting via IP ID sequencing.
+	pfRules := fmt.Sprintf("scrub out on %s all random-id min-ttl 64 max-mss 1460\n", iface)
+
+	// Write to a temporary anchor file.
+	pfFile := "/tmp/nowifi-stealth.conf"
+	if err := os.WriteFile(pfFile, []byte(pfRules), 0600); err != nil {
+		return state, fmt.Errorf("failed to write PF rules: %w", err)
+	}
+
+	// Check if PF is currently enabled.
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel3()
+	pfStatus, _ := exec.CommandContext(ctx3, "pfctl", "-s", "info").Output()
+	state.PFWasEnabled = strings.Contains(string(pfStatus), "Status: Enabled")
+
+	// Load the anchor.
+	ctx4, cancel4 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel4()
+	if err := exec.CommandContext(ctx4, "pfctl", "-a", "nowifi-stealth", "-f", pfFile).Run(); err != nil {
+		return state, fmt.Errorf("failed to load PF rules: %w", err)
+	}
+	state.PFRulesAdded = true
+
+	// Enable PF if it wasn't already.
+	if !state.PFWasEnabled {
+		ctx5, cancel5 := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel5()
+		_ = exec.CommandContext(ctx5, "pfctl", "-e").Run()
+	}
+
+	// 3. Set IPv6 hop limit to match (prevents IPv6 TTL leak).
+	ctx6, cancel6 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel6()
+	_ = exec.CommandContext(ctx6, "sysctl", "-w", "net.inet6.ip6.hlim=65").Run()
+
+	// Cleanup temp file.
+	os.Remove(pfFile)
+
+	return state, nil
+}
+
+// DisableStealth restores original TTL and removes PF stealth rules.
+func DisableStealth(state *StealthState) {
+	if state == nil {
+		return
+	}
+
+	// Restore original TTL.
+	if state.OriginalTTL > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "sysctl", "-w",
+			fmt.Sprintf("net.inet.ip.ttl=%d", state.OriginalTTL)).Run()
+	}
+
+	// Restore IPv6 hop limit.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	_ = exec.CommandContext(ctx2, "sysctl", "-w", "net.inet6.ip6.hlim=64").Run()
+
+	// Remove PF anchor.
+	if state.PFRulesAdded {
+		ctx3, cancel3 := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel3()
+		_ = exec.CommandContext(ctx3, "pfctl", "-a", "nowifi-stealth", "-F", "all").Run()
+
+		// Disable PF if we enabled it.
+		if !state.PFWasEnabled {
+			ctx4, cancel4 := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel4()
+			_ = exec.CommandContext(ctx4, "pfctl", "-d").Run()
+		}
+	}
 }

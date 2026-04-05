@@ -191,6 +191,17 @@ func runAudit(cmd *cobra.Command, args []string) {
 			}
 		}
 
+		// Enable post-bypass traffic stealth (TTL normalization, PF scrub).
+		// Makes bypassed connection indistinguishable from a direct device.
+		stealthState, stealthErr := platform.EnableStealth(flagInterface)
+		if stealthErr != nil {
+			fmt.Printf("  %s  Stealth partially enabled: %v\n", yellow("WARN"), stealthErr)
+		} else {
+			fmt.Printf("5. Stealth  TTL normalized, traffic scrubbed\n")
+		}
+		if stealthState != nil {
+			g.RegisterStealth(stealthState)
+		}
 
 		// Handle Ctrl+C gracefully.
 		ctx, cancel := context.WithCancel(context.Background())

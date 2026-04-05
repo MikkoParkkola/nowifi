@@ -559,3 +559,81 @@ func ConnectWifi(iface string) error {
 
 	return fmt.Errorf("no tool available to connect %s", iface)
 }
+
+// ---------------------------------------------------------------------------
+// Post-bypass traffic stealth — anti-tethering detection
+// ---------------------------------------------------------------------------
+
+// EnableStealth applies traffic normalization to avoid portal detection on Linux.
+func EnableStealth(iface string) (*StealthState, error) {
+	state := &StealthState{}
+
+	// 1. Save and set TTL.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "sysctl", "-n", "net.ipv4.ip_default_ttl").Output()
+	if err == nil {
+		fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &state.OriginalTTL)
+	} else {
+		state.OriginalTTL = 64
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	if err := exec.CommandContext(ctx2, "sysctl", "-w", "net.ipv4.ip_default_ttl=65").Run(); err != nil {
+		return state, fmt.Errorf("failed to set TTL: %w", err)
+	}
+
+	// 2. Add iptables rules for traffic normalization.
+	// Mangle table: set TTL to 64 on all outbound packets (normalizes tethered traffic).
+	rules := [][]string{
+		{"iptables", "-t", "mangle", "-A", "POSTROUTING", "-o", iface, "-j", "TTL", "--ttl-set", "64"},
+		{"ip6tables", "-t", "mangle", "-A", "POSTROUTING", "-o", iface, "-j", "HL", "--hl-set", "64"},
+	}
+	for _, rule := range rules {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = exec.CommandContext(ctx, rule[0], rule[1:]...).Run()
+		cancel()
+	}
+	state.PFRulesAdded = true // Reuse field name for iptables rules.
+
+	// 3. Set IPv6 hop limit.
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel3()
+	_ = exec.CommandContext(ctx3, "sysctl", "-w", "net.ipv6.conf.all.hop_limit=65").Run()
+
+	return state, nil
+}
+
+// DisableStealth restores original TTL and removes iptables stealth rules on Linux.
+func DisableStealth(state *StealthState) {
+	if state == nil {
+		return
+	}
+
+	// Restore original TTL.
+	if state.OriginalTTL > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "sysctl", "-w",
+			fmt.Sprintf("net.ipv4.ip_default_ttl=%d", state.OriginalTTL)).Run()
+	}
+
+	// Restore IPv6 hop limit.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	_ = exec.CommandContext(ctx2, "sysctl", "-w", "net.ipv6.conf.all.hop_limit=64").Run()
+
+	// Remove iptables rules.
+	if state.PFRulesAdded {
+		rules := [][]string{
+			{"iptables", "-t", "mangle", "-D", "POSTROUTING", "-j", "TTL", "--ttl-set", "64"},
+			{"ip6tables", "-t", "mangle", "-D", "POSTROUTING", "-j", "HL", "--hl-set", "64"},
+		}
+		for _, rule := range rules {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = exec.CommandContext(ctx, rule[0], rule[1:]...).Run()
+			cancel()
+		}
+	}
+}

@@ -31,6 +31,13 @@ type ArpEntry struct {
 	Interface string
 }
 
+// StealthState holds the original system settings for stealth restoration.
+type StealthState struct {
+	OriginalTTL  int
+	PFRulesAdded bool // On Linux, reused for iptables rules.
+	PFWasEnabled bool
+}
+
 var (
 	macRE   = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
 	ifaceRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]{0,15}$`)

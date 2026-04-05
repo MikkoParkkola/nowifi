@@ -32,8 +32,9 @@ import (
 type Guard struct {
 	iface       string
 	originalMAC string
-	tunnels     []io.Closer
-	restored    bool
+	tunnels      []io.Closer
+	stealthState *platform.StealthState
+	restored     bool
 	mu          sync.Mutex
 	sigCh       chan os.Signal
 }
@@ -56,6 +57,13 @@ func (g *Guard) RegisterTunnel(t io.Closer) {
 	g.tunnels = append(g.tunnels, t)
 }
 
+// RegisterStealth records a StealthState for restoration on exit.
+func (g *Guard) RegisterStealth(state *platform.StealthState) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.stealthState = state
+}
+
 // StartSignalHandler spawns a goroutine that calls Restore() and exits
 // on SIGINT or SIGTERM. Call this once from main().
 func (g *Guard) StartSignalHandler() {
@@ -73,9 +81,10 @@ func (g *Guard) StartSignalHandler() {
 //
 // Restore order:
 //  1. Stop all registered tunnel processes
-//  2. Clear system SOCKS proxy
-//  3. Restore original MAC address (+ DHCP renewal if changed)
-//  4. Flush DNS cache
+//  2. Disable traffic stealth (restore TTL, remove PF/iptables rules)
+//  3. Clear system SOCKS proxy
+//  4. Restore original MAC address (+ DHCP renewal if changed)
+//  5. Flush DNS cache
 func (g *Guard) Restore() {
 	g.mu.Lock()
 	if g.restored {
@@ -98,12 +107,17 @@ func (g *Guard) Restore() {
 		}
 	}
 
-	// 2. Clear system SOCKS proxy.
+	// 2. Disable traffic stealth (restore TTL, remove PF rules).
+	if g.stealthState != nil {
+		platform.DisableStealth(g.stealthState)
+	}
+
+	// 3. Clear system SOCKS proxy.
 	if err := platform.ClearSystemProxy(g.iface); err != nil {
 		fmt.Fprintf(os.Stderr, "nowifi: warning: failed to clear SOCKS proxy: %v\n", err)
 	}
 
-	// 3. Restore original MAC address if it was changed.
+	// 4. Restore original MAC address if it was changed.
 	if g.originalMAC != "" {
 		current, err := platform.GetCurrentMAC(g.iface)
 		if err == nil && current != g.originalMAC {
@@ -118,7 +132,7 @@ func (g *Guard) Restore() {
 		}
 	}
 
-	// 4. Flush DNS cache.
+	// 5. Flush DNS cache.
 	_ = platform.FlushDNS()
 }
 
