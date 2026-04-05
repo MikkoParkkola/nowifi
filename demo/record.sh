@@ -36,13 +36,13 @@ sleep 0.3
 # Phase 1
 echo -ne "1. WiFi  "
 sleep 0.4
-echo -e "Nordic Sky (Finnair) on en0 (ch 116, -64dBm)"
+echo -e "Inflight WiFi on en0 (ch 116, -64dBm)"
 sleep 0.3
 
 # Phase 2
 echo -ne "2. Portal  "
 sleep 0.6
-echo -e "http_redirect portal detected (${BOLD}panasonic_avionics${NC})"
+echo -e "captive portal detected (${BOLD}inflight_portal${NC})"
 sleep 0.3
 
 # Phase 3
