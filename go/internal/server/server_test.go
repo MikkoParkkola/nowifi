@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,70 @@ func TestServerRequiredTechniquesNonEmpty(t *testing.T) {
 		if tech == "" {
 			t.Errorf("ServerRequiredTechniques[%d] is empty", i)
 		}
+	}
+}
+
+func TestNoDuplicateTechniques(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, tech := range ServerlessTechniques {
+		if seen[tech] {
+			t.Errorf("duplicate in ServerlessTechniques: %q", tech)
+		}
+		seen[tech] = true
+	}
+	seen = make(map[string]bool)
+	for _, tech := range ServerRequiredTechniques {
+		if seen[tech] {
+			t.Errorf("duplicate in ServerRequiredTechniques: %q", tech)
+		}
+		seen[tech] = true
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Path construction: nowifiDir / serversFile / configFile
+// ---------------------------------------------------------------------------
+
+func TestNowifiDir_ContainsDotNowifi(t *testing.T) {
+	dir := nowifiDir()
+	if !strings.HasSuffix(dir, ".nowifi") {
+		t.Errorf("nowifiDir() = %q, want suffix .nowifi", dir)
+	}
+}
+
+func TestServersFile_ContainsServersJSON(t *testing.T) {
+	f := serversFile()
+	if !strings.HasSuffix(f, "servers.json") {
+		t.Errorf("serversFile() = %q, want suffix servers.json", f)
+	}
+	if !strings.Contains(f, ".nowifi") {
+		t.Errorf("serversFile() = %q, want to contain .nowifi", f)
+	}
+}
+
+func TestConfigFile_ContainsConfigJSON(t *testing.T) {
+	f := configFile()
+	if !strings.HasSuffix(f, "config.json") {
+		t.Errorf("configFile() = %q, want suffix config.json", f)
+	}
+	if !strings.Contains(f, ".nowifi") {
+		t.Errorf("configFile() = %q, want to contain .nowifi", f)
+	}
+}
+
+func TestServersFileIsUnderNowifiDir(t *testing.T) {
+	dir := nowifiDir()
+	sf := serversFile()
+	if filepath.Dir(sf) != dir {
+		t.Errorf("serversFile dir = %q, want %q", filepath.Dir(sf), dir)
+	}
+}
+
+func TestConfigFileIsUnderNowifiDir(t *testing.T) {
+	dir := nowifiDir()
+	cf := configFile()
+	if filepath.Dir(cf) != dir {
+		t.Errorf("configFile dir = %q, want %q", filepath.Dir(cf), dir)
 	}
 }
 
@@ -161,6 +226,29 @@ func TestSaveServer_UpdatesExisting(t *testing.T) {
 	}
 }
 
+func TestSaveServer_DifferentProvidersSameID(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	info1 := &Info{Provider: "digitalocean", ServerID: "1", Status: "active"}
+	info2 := &Info{Provider: "hetzner", ServerID: "1", Status: "active"}
+
+	if err := SaveServer(info1); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveServer(info2); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, err := LoadServers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers (different providers, same ID), got %d", len(servers))
+	}
+}
+
 func TestLoadServers_FileNotExist(t *testing.T) {
 	_, cleanup := setupTestDir(t)
 	defer cleanup()
@@ -189,6 +277,24 @@ func TestLoadServers_CorruptFile(t *testing.T) {
 	}
 	if servers != nil {
 		t.Errorf("expected nil for corrupt file, got %d servers", len(servers))
+	}
+}
+
+func TestLoadServers_EmptyJSON(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	if err := os.WriteFile(serversFile(), []byte("[]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, err := LoadServers()
+	if err != nil {
+		t.Fatalf("LoadServers: %v", err)
+	}
+	if len(servers) != 0 {
+		t.Errorf("expected 0 servers for empty array, got %d", len(servers))
 	}
 }
 
@@ -254,6 +360,39 @@ func TestListServers_AllDestroyed(t *testing.T) {
 	}
 }
 
+func TestListServers_EmptyFile(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	// No file exists: ListServers should return nil, nil.
+	active, err := ListServers()
+	if err != nil {
+		t.Fatalf("ListServers on empty: %v", err)
+	}
+	if active != nil {
+		t.Errorf("expected nil for no servers, got %d", len(active))
+	}
+}
+
+func TestListServers_KeepsCreatingStatus(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	servers := []Info{
+		{Provider: "do", ServerID: "1", Status: "creating"},
+		{Provider: "do", ServerID: "2", Status: "active"},
+		{Provider: "do", ServerID: "3", Status: "destroyed"},
+	}
+	ensureDir()
+	data, _ := json.MarshalIndent(servers, "", "  ")
+	os.WriteFile(serversFile(), data, 0o644)
+
+	active, _ := ListServers()
+	if len(active) != 2 {
+		t.Fatalf("expected 2 non-destroyed (creating + active), got %d", len(active))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Embedded assets
 // ---------------------------------------------------------------------------
@@ -273,12 +412,24 @@ func TestCloudflareWorkerJS_ContainsExportDefault(t *testing.T) {
 	}
 }
 
+func TestCloudflareWorkerJS_ContainsFetch(t *testing.T) {
+	if !contains(CloudflareWorkerJS, "fetch") {
+		t.Error("CloudflareWorkerJS should contain 'fetch'")
+	}
+}
+
 func TestCloudInitScript_NonEmpty(t *testing.T) {
 	if CloudInitScript == "" {
 		t.Error("CloudInitScript is empty")
 	}
 	if len(CloudInitScript) < 50 {
 		t.Errorf("CloudInitScript is suspiciously short: %d bytes", len(CloudInitScript))
+	}
+}
+
+func TestCloudInitScript_StartsWithShebang(t *testing.T) {
+	if !strings.HasPrefix(CloudInitScript, "#!/bin/bash") {
+		t.Error("CloudInitScript should start with #!/bin/bash")
 	}
 }
 
@@ -404,6 +555,75 @@ func TestCreateVPS_DigitalOcean_Mock(t *testing.T) {
 	}
 }
 
+func TestCreateVPS_Hetzner_Mock(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "POST" {
+			w.WriteHeader(201)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"server": map[string]interface{}{
+					"id": 789,
+					"public_net": map[string]interface{}{
+						"ipv4": map[string]interface{}{
+							"ip": "95.216.1.2",
+						},
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/servers", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		Server struct {
+			ID        int `json:"id"`
+			PublicNet struct {
+				IPv4 struct {
+					IP string `json:"ip"`
+				} `json:"ipv4"`
+			} `json:"public_net"`
+		} `json:"server"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Server.ID != 789 {
+		t.Errorf("server ID = %d, want 789", data.Server.ID)
+	}
+	if data.Server.PublicNet.IPv4.IP != "95.216.1.2" {
+		t.Errorf("IP = %q, want 95.216.1.2", data.Server.PublicNet.IPv4.IP)
+	}
+}
+
+func TestCreateVPS_UnknownProvider(t *testing.T) {
+	_, err := CreateVPS("openstack", "token123", 1)
+	if err == nil {
+		t.Error("CreateVPS with unknown provider should return error")
+	}
+	if !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("error = %q, want to contain 'unknown provider'", err.Error())
+	}
+}
+
+func TestCreateVPS_NoToken(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	_, err := CreateVPS("digitalocean", "", 1)
+	if err == nil {
+		t.Error("CreateVPS without token should return error")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // DestroyServer with mock HTTP server
 // ---------------------------------------------------------------------------
@@ -455,6 +675,80 @@ func TestDestroyServer_UnknownProvider(t *testing.T) {
 	}
 }
 
+func TestDestroyServer_DONoToken(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	info := &Info{Provider: "digitalocean", ServerID: "1"}
+	err := DestroyServer(info, "")
+	if err == nil {
+		t.Error("DestroyServer(DO) without token should return error")
+	}
+}
+
+func TestDestroyServer_HetznerNoToken(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	info := &Info{Provider: "hetzner", ServerID: "1"}
+	err := DestroyServer(info, "")
+	if err == nil {
+		t.Error("DestroyServer(Hetzner) without token should return error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// markDestroyed
+// ---------------------------------------------------------------------------
+
+func TestMarkDestroyed(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	info := &Info{Provider: "digitalocean", ServerID: "42", Status: "active"}
+	if err := SaveServer(info); err != nil {
+		t.Fatal(err)
+	}
+
+	markDestroyed("digitalocean", "42")
+
+	servers, _ := LoadServers()
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+	if servers[0].Status != "destroyed" {
+		t.Errorf("Status = %q, want destroyed", servers[0].Status)
+	}
+}
+
+func TestMarkDestroyed_NonExistent(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	// Should not panic on non-existent server.
+	markDestroyed("digitalocean", "9999")
+}
+
+func TestMarkDestroyed_OnlyMatchingServer(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	SaveServer(&Info{Provider: "do", ServerID: "1", Status: "active"})
+	SaveServer(&Info{Provider: "do", ServerID: "2", Status: "active"})
+
+	markDestroyed("do", "1")
+
+	servers, _ := LoadServers()
+	for _, s := range servers {
+		if s.ServerID == "1" && s.Status != "destroyed" {
+			t.Errorf("server 1 status = %q, want destroyed", s.Status)
+		}
+		if s.ServerID == "2" && s.Status != "active" {
+			t.Errorf("server 2 status = %q, want active (should be unchanged)", s.Status)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Config persistence
 // ---------------------------------------------------------------------------
@@ -494,6 +788,52 @@ func TestLoadConfig_FileNotExist(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_CorruptFile(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	os.WriteFile(configFile(), []byte("{invalid json"), 0o644)
+
+	cfg := LoadConfig()
+	if cfg == nil {
+		t.Fatal("LoadConfig on corrupt file should return non-nil map")
+	}
+	if len(cfg) != 0 {
+		t.Errorf("LoadConfig on corrupt file: len = %d, want 0", len(cfg))
+	}
+}
+
+func TestSaveConfig_OverwritesPrevious(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	SaveConfig(map[string]string{"key1": "val1"})
+	SaveConfig(map[string]string{"key2": "val2"})
+
+	loaded := LoadConfig()
+	if _, ok := loaded["key1"]; ok {
+		t.Error("key1 should not exist after overwrite")
+	}
+	if loaded["key2"] != "val2" {
+		t.Errorf("key2 = %q, want val2", loaded["key2"])
+	}
+}
+
+func TestSaveConfig_EmptyMap(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	if err := SaveConfig(map[string]string{}); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadConfig()
+	if len(loaded) != 0 {
+		t.Errorf("expected empty config, got %d entries", len(loaded))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // CheckExpiredServers
 // ---------------------------------------------------------------------------
@@ -521,6 +861,69 @@ func TestCheckExpiredServers(t *testing.T) {
 	}
 	if expired[0].ServerID != "1" {
 		t.Errorf("expired server ID = %q, want 1", expired[0].ServerID)
+	}
+}
+
+func TestCheckExpiredServers_NoServers(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	expired := CheckExpiredServers()
+	if len(expired) != 0 {
+		t.Errorf("expected 0 expired, got %d", len(expired))
+	}
+}
+
+func TestCheckExpiredServers_BadTimestamp(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	servers := []Info{
+		{Provider: "do", ServerID: "1", CreatedAt: "not-a-date", TTLHours: 1, Status: "active"},
+	}
+	ensureDir()
+	data, _ := json.MarshalIndent(servers, "", "  ")
+	os.WriteFile(serversFile(), data, 0o644)
+
+	expired := CheckExpiredServers()
+	if len(expired) != 0 {
+		t.Errorf("bad timestamp should be skipped, got %d expired", len(expired))
+	}
+}
+
+func TestCheckExpiredServers_ISO8601NoTZ(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	// Tests the fallback time.Parse path for ISO 8601 without timezone.
+	servers := []Info{
+		{Provider: "do", ServerID: "1", CreatedAt: "2020-01-01T00:00:00", TTLHours: 1, Status: "active"},
+	}
+	ensureDir()
+	data, _ := json.MarshalIndent(servers, "", "  ")
+	os.WriteFile(serversFile(), data, 0o644)
+
+	expired := CheckExpiredServers()
+	if len(expired) != 1 {
+		t.Errorf("expected 1 expired (ISO 8601 no TZ), got %d", len(expired))
+	}
+}
+
+func TestCheckExpiredServers_NegativeTTL(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	servers := []Info{
+		{Provider: "do", ServerID: "1", CreatedAt: "2020-01-01T00:00:00Z", TTLHours: -1, Status: "active"},
+	}
+	ensureDir()
+	data, _ := json.MarshalIndent(servers, "", "  ")
+	os.WriteFile(serversFile(), data, 0o644)
+
+	// Negative TTL should be treated like 0 (skip).
+	expired := CheckExpiredServers()
+	if len(expired) != 0 {
+		t.Errorf("negative TTL should be skipped, got %d expired", len(expired))
 	}
 }
 
@@ -554,6 +957,55 @@ func TestInfoJSON(t *testing.T) {
 	}
 	if decoded.Status != "creating" {
 		t.Errorf("Status = %q, want creating", decoded.Status)
+	}
+}
+
+func TestInfoJSON_AllFields(t *testing.T) {
+	info := Info{
+		Provider:  "cloudflare_worker",
+		ServerID:  "nowifi-proxy",
+		IP:        "",
+		URL:       "https://nowifi-proxy.workers.dev",
+		CreatedAt: "2026-04-01T08:30:00Z",
+		TTLHours:  0,
+		Status:    "active",
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := string(data)
+	// Verify all JSON keys are present.
+	for _, key := range []string{"provider", "server_id", "ip", "url", "created_at", "ttl_hours", "status"} {
+		if !strings.Contains(s, `"`+key+`"`) {
+			t.Errorf("JSON missing key %q", key)
+		}
+	}
+
+	var decoded Info
+	json.Unmarshal(data, &decoded)
+	if decoded.IP != "" {
+		t.Errorf("IP should be empty for CF worker, got %q", decoded.IP)
+	}
+	if decoded.TTLHours != 0 {
+		t.Errorf("TTLHours should be 0, got %d", decoded.TTLHours)
+	}
+}
+
+func TestInfoJSON_ZeroValue(t *testing.T) {
+	var info Info
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Info
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Provider != "" || decoded.ServerID != "" || decoded.Status != "" {
+		t.Error("zero value Info should round-trip with empty strings")
 	}
 }
 
@@ -627,6 +1079,34 @@ func TestGetToken_Missing(t *testing.T) {
 	}
 }
 
+func TestGetToken_ExplicitTakesPrecedence(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	SaveConfig(map[string]string{"hetzner_token": "from-config"})
+
+	token, err := getToken("hetzner", "explicit-wins")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "explicit-wins" {
+		t.Errorf("token = %q, want explicit-wins", token)
+	}
+}
+
+func TestGetToken_ErrorMessageContainsProvider(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	_, err := getToken("hetzner", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "hetzner") {
+		t.Errorf("error = %q, want to mention 'hetzner'", err.Error())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Multiple servers
 // ---------------------------------------------------------------------------
@@ -652,5 +1132,101 @@ func TestSaveMultipleServers(t *testing.T) {
 	}
 	if len(servers) != 3 {
 		t.Errorf("expected 3 servers, got %d", len(servers))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ensureDir
+// ---------------------------------------------------------------------------
+
+func TestEnsureDir_CreatesDirectory(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	dir := nowifiDir()
+	stat, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("ensureDir did not create %q: %v", dir, err)
+	}
+	if !stat.IsDir() {
+		t.Errorf("%q is not a directory", dir)
+	}
+}
+
+func TestEnsureDir_Idempotent(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	ensureDir() // should not error on second call
+	dir := nowifiDir()
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("dir missing after double ensureDir: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadServers — read error (not IsNotExist)
+// ---------------------------------------------------------------------------
+
+func TestLoadServers_ReadError(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	// Create .nowifi dir, then make servers.json a directory instead of a file.
+	// ReadFile on a directory returns a non-IsNotExist error.
+	ensureDir()
+	sf := serversFile()
+	os.MkdirAll(sf, 0o755) // servers.json as a directory
+
+	_, err := LoadServers()
+	if err == nil {
+		t.Error("LoadServers should return error when servers.json is a directory")
+	}
+}
+
+func TestListServers_PropagatesLoadError(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	os.MkdirAll(serversFile(), 0o755)
+
+	_, err := ListServers()
+	if err == nil {
+		t.Error("ListServers should propagate LoadServers error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// writeServers — used via SaveServer, verify file contents
+// ---------------------------------------------------------------------------
+
+func TestWriteServers_FileContents(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	servers := []Info{
+		{Provider: "test", ServerID: "1", Status: "active"},
+	}
+
+	if err := writeServers(servers); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(serversFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify it's valid JSON.
+	var loaded []Info
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("servers file is not valid JSON: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Provider != "test" {
+		t.Errorf("unexpected contents: %+v", loaded)
 	}
 }

@@ -7,8 +7,11 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/signal"
 	"sync"
 	"testing"
+
+	"github.com/MikkoParkkola/nowifi/internal/platform"
 )
 
 // mockCloser is a test double for io.Closer that tracks Close() calls.
@@ -216,5 +219,147 @@ func TestRestore_ConcurrentCalls(t *testing.T) {
 	}
 	if !g.restored {
 		t.Error("guard should be marked restored")
+	}
+}
+
+func TestRegisterStealth(t *testing.T) {
+	g := &Guard{
+		iface: "en0",
+		sigCh: make(chan os.Signal, 1),
+	}
+
+	if g.stealthState != nil {
+		t.Fatal("stealthState should be nil initially")
+	}
+
+	state := &platform.StealthState{
+		OriginalTTL:  64,
+		PFRulesAdded: true,
+		PFWasEnabled: false,
+	}
+	g.RegisterStealth(state)
+
+	g.mu.Lock()
+	got := g.stealthState
+	g.mu.Unlock()
+
+	if got != state {
+		t.Error("stealthState not stored")
+	}
+	if got.OriginalTTL != 64 {
+		t.Errorf("OriginalTTL = %d, want 64", got.OriginalTTL)
+	}
+}
+
+func TestRegisterStealth_Overwrite(t *testing.T) {
+	g := &Guard{
+		iface: "en0",
+		sigCh: make(chan os.Signal, 1),
+	}
+
+	state1 := &platform.StealthState{OriginalTTL: 64}
+	state2 := &platform.StealthState{OriginalTTL: 128}
+
+	g.RegisterStealth(state1)
+	g.RegisterStealth(state2)
+
+	g.mu.Lock()
+	got := g.stealthState
+	g.mu.Unlock()
+
+	if got != state2 {
+		t.Error("stealthState should be overwritten to state2")
+	}
+}
+
+func TestStartSignalHandler_NoPanic(t *testing.T) {
+	g := &Guard{
+		iface: "en0",
+		sigCh: make(chan os.Signal, 1),
+	}
+
+	// StartSignalHandler should not panic.
+	g.StartSignalHandler()
+
+	// Clean up: stop signal notification and drain channel.
+	signal.Stop(g.sigCh)
+}
+
+func TestNew_EmptyInterface(t *testing.T) {
+	// New with empty interface should still create a guard.
+	g := New("")
+	if g == nil {
+		t.Fatal("New('') returned nil")
+	}
+	if g.iface != "" {
+		t.Errorf("iface = %q, want empty", g.iface)
+	}
+	if g.sigCh == nil {
+		t.Error("sigCh should be initialized")
+	}
+}
+
+func TestGuard_RestoreWithoutTunnels(t *testing.T) {
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	// Restore with no tunnels should not panic.
+	g.Restore()
+
+	if !g.restored {
+		t.Error("guard should be marked restored")
+	}
+}
+
+func TestRegisterTunnel_AfterRestore(t *testing.T) {
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	g.Restore()
+
+	// Registering after restore should still work (no panic),
+	// but the tunnel won't be closed by a subsequent Restore.
+	tunnel := &mockCloser{}
+	g.RegisterTunnel(tunnel)
+
+	g.mu.Lock()
+	count := len(g.tunnels)
+	g.mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("tunnel count = %d, want 1", count)
+	}
+}
+
+func TestRestore_MultipleTunnelsWithMixedErrors(t *testing.T) {
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	t1 := &mockCloser{}
+	t2 := &mockCloser{closeErr: errors.New("err1")}
+	t3 := &mockCloser{closeErr: errors.New("err2")}
+	t4 := &mockCloser{}
+
+	g.RegisterTunnel(t1)
+	g.RegisterTunnel(t2)
+	g.RegisterTunnel(t3)
+	g.RegisterTunnel(t4)
+
+	g.Restore()
+
+	// All tunnels should have Close() called regardless of errors.
+	for i, tun := range []*mockCloser{t1, t2, t3, t4} {
+		if !tun.isClosed() {
+			t.Errorf("tunnel[%d] not closed", i)
+		}
 	}
 }
