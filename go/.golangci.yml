@@ -1,0 +1,30 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - bodyclose
+    - noctx
+  disable:
+    - exhaustruct  # Too noisy for this codebase
+
+linters-settings:
+  gosec:
+    excludes:
+      - G204  # Subprocess launched with variable — we validate all inputs
+      - G304  # File path provided as taint input — we validate paths
+      - G402  # TLS InsecureSkipVerify — intentional for LAN portal admin
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck

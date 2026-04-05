@@ -1,6 +1,7 @@
 # nowifi
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![CI](https://github.com/MikkoParkkola/nowifi/actions/workflows/ci.yml/badge.svg)](https://github.com/MikkoParkkola/nowifi/actions/workflows/ci.yml)
 
 ### No WiFi? Now WiFi.
 
