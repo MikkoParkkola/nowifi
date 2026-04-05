@@ -137,3 +137,116 @@ func TestColorPreservesInput(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Color functions — forced color ON: ANSI codes must be present
+// ---------------------------------------------------------------------------
+
+func TestColorFunctions_ColorEnabled(t *testing.T) {
+	// Save and restore.
+	orig := useColor
+	t.Cleanup(func() { useColor = orig })
+	useColor = true
+
+	tests := []struct {
+		name   string
+		fn     func(string) string
+		ansi   string // expected ANSI prefix
+		input  string
+	}{
+		{"green", green, "\033[32m", "OK"},
+		{"red", red, "\033[31m", "FAIL"},
+		{"yellow", yellow, "\033[33m", "WARN"},
+		{"bold", bold, "\033[1m", "text"},
+		{"dim", dim, "\033[2m", "stamp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.fn(tt.input)
+			if !strings.HasPrefix(result, tt.ansi) {
+				t.Errorf("%s(%q) = %q, want prefix %q", tt.name, tt.input, result, tt.ansi)
+			}
+			if !strings.HasSuffix(result, "\033[0m") {
+				t.Errorf("%s(%q) = %q, want suffix \\033[0m", tt.name, tt.input, result)
+			}
+			if !strings.Contains(result, tt.input) {
+				t.Errorf("%s(%q) = %q, does not contain input", tt.name, tt.input, result)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Color functions — forced color OFF: plain text, no ANSI codes
+// ---------------------------------------------------------------------------
+
+func TestColorFunctions_ColorDisabled(t *testing.T) {
+	orig := useColor
+	t.Cleanup(func() { useColor = orig })
+	useColor = false
+
+	fns := []struct {
+		name string
+		fn   func(string) string
+	}{
+		{"green", green},
+		{"red", red},
+		{"yellow", yellow},
+		{"bold", bold},
+		{"dim", dim},
+	}
+
+	for _, fn := range fns {
+		t.Run(fn.name, func(t *testing.T) {
+			result := fn.fn("test")
+			if result != "test" {
+				t.Errorf("%s(%q) with color off = %q, want plain %q", fn.name, "test", result, "test")
+			}
+			if strings.Contains(result, "\033[") {
+				t.Errorf("%s(%q) with color off contains ANSI escape", fn.name, "test")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// status — with color on and off
+// ---------------------------------------------------------------------------
+
+func TestStatus_ColorEnabled(t *testing.T) {
+	orig := useColor
+	t.Cleanup(func() { useColor = orig })
+	useColor = true
+
+	open := status(true)
+	if !strings.Contains(open, "\033[32m") {
+		t.Errorf("status(true) with color = %q, want green ANSI", open)
+	}
+	if !strings.Contains(open, "OPEN") {
+		t.Errorf("status(true) = %q, missing OPEN", open)
+	}
+
+	closed := status(false)
+	if !strings.Contains(closed, "\033[31m") {
+		t.Errorf("status(false) with color = %q, want red ANSI", closed)
+	}
+	if !strings.Contains(closed, "CLOSED") {
+		t.Errorf("status(false) = %q, missing CLOSED", closed)
+	}
+}
+
+func TestStatus_ColorDisabled(t *testing.T) {
+	orig := useColor
+	t.Cleanup(func() { useColor = orig })
+	useColor = false
+
+	open := status(true)
+	if open != "OPEN" {
+		t.Errorf("status(true) with color off = %q, want %q", open, "OPEN")
+	}
+
+	closed := status(false)
+	if closed != "CLOSED" {
+		t.Errorf("status(false) with color off = %q, want %q", closed, "CLOSED")
+	}
+}

@@ -23,7 +23,7 @@ WPS-enabled networks may be vulnerable to Pixie-Dust or PIN brute-force.`,
 }
 
 func runScan(cmd *cobra.Command, args []string) {
-	fmt.Printf("\nnowifi v%s — WiFi Scanner\n\n", version)
+	printBanner("WiFi Scanner")
 
 	iface := flagInterface
 	fmt.Printf("  Scanning on %s...\n\n", iface)

@@ -22,7 +22,7 @@ whether it succeeded, and the session duration.`,
 }
 
 func runHistory(cmd *cobra.Command, args []string) {
-	fmt.Printf("\nnowifi v%s — Audit History\n\n", version)
+	printBanner("Audit History")
 
 	records, err := capture.ListAudits()
 	if err != nil {

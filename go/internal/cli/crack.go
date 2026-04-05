@@ -53,7 +53,7 @@ func init() {
 }
 
 func runCrack(cmd *cobra.Command, args []string) {
-	fmt.Printf("\nnowifi v%s — WPA Cracking\n\n", version)
+	printBanner("WPA Cracking")
 
 	iface := flagInterface
 

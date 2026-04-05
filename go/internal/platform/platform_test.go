@@ -495,3 +495,374 @@ func TestValidateInterface_Hyphen(t *testing.T) {
 		t.Error("hyphen in interface name should be invalid")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GenerateRandomMAC — comprehensive batch validation
+// ---------------------------------------------------------------------------
+
+func TestGenerateRandomMAC_BatchProperties(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		mac := GenerateRandomMAC()
+
+		// Format: xx:xx:xx:xx:xx:xx with lowercase hex.
+		if !macRE.MatchString(mac) {
+			t.Fatalf("iteration %d: %q does not match MAC format", i, mac)
+		}
+		if mac != strings.ToLower(mac) {
+			t.Fatalf("iteration %d: %q is not lowercase", i, mac)
+		}
+
+		parts := strings.Split(mac, ":")
+		if len(parts) != 6 {
+			t.Fatalf("iteration %d: %q has %d octets, want 6", i, mac, len(parts))
+		}
+
+		first := hexToByte(parts[0])
+
+		// Locally-administered bit (bit 1) must be set.
+		if first&0x02 == 0 {
+			t.Errorf("iteration %d: %q first octet %02x missing locally-administered bit", i, mac, first)
+		}
+		// Unicast bit (bit 0) must be clear.
+		if first&0x01 != 0 {
+			t.Errorf("iteration %d: %q first octet %02x is multicast", i, mac, first)
+		}
+
+		// No duplicates in batch.
+		if seen[mac] {
+			t.Errorf("duplicate MAC in 100 generations: %s", mac)
+		}
+		seen[mac] = true
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateMAC — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestValidateMAC_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		// Short-format octets from arp output (e.g. "0:a0:bc:c0:84:40").
+		{"short octet from arp", "0:a0:bc:c0:84:40", true},
+		{"all single-char octets", "0:0:0:0:0:0", true},
+		// Consecutive colons.
+		{"consecutive colons", "aa::cc:dd:ee:ff", true},
+		{"triple colon", "aa:::dd:ee:ff:00", true},
+		// Wrong number of octets.
+		{"7 octets", "aa:bb:cc:dd:ee:ff:00", true},
+		{"5 octets", "aa:bb:cc:dd:ee", true},
+		{"4 octets", "aa:bb:cc:dd", true},
+		{"1 octet", "aa", true},
+		// Whitespace variants.
+		{"leading space", " aa:bb:cc:dd:ee:ff", true},
+		{"trailing space", "aa:bb:cc:dd:ee:ff ", true},
+		{"tab inside", "aa:bb\t:cc:dd:ee:ff", true},
+		// Null byte.
+		{"null byte", "aa:bb:cc:dd:ee:\x00f", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateMAC(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateMAC(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateInterface — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestValidateInterface_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"starts with digit", "0eth", true},
+		{"all digits", "1234", true},
+		{"special chars", "en0!", true},
+		{"unicode", "en\u00e90", true},
+		{"newline", "en0\n", true},
+		{"null byte", "en\x000", true},
+		{"17 chars (max+1)", "a12345678901234567", true},
+		{"16 chars (max)", "a123456789012345", false},
+		{"pipe injection", "en0|id", true},
+		{"backtick injection", "en0`id`", true},
+		{"dollar injection", "en0$HOME", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateInterface(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateInterface(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateIP
+// ---------------------------------------------------------------------------
+
+func TestValidateIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"IPv4 normal", "192.168.1.1", "192.168.1.1", false},
+		{"IPv4 loopback", "127.0.0.1", "127.0.0.1", false},
+		{"IPv4 broadcast", "255.255.255.255", "255.255.255.255", false},
+		{"IPv4 zeros", "0.0.0.0", "0.0.0.0", false},
+		{"IPv6 loopback", "::1", "::1", false},
+		{"IPv6 full", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", "2001:db8:85a3::8a2e:370:7334", false},
+		{"IPv6 link-local", "fe80::1", "fe80::1", false},
+		{"IPv4-mapped IPv6", "::ffff:192.168.1.1", "192.168.1.1", false},
+		{"empty", "", "", true},
+		{"whitespace only", "   ", "", true},
+		{"garbage", "not-an-ip", "", true},
+		{"hostname", "example.com", "", true},
+		{"IPv4 with port", "192.168.1.1:80", "", true},
+		{"IPv4 overflow", "256.256.256.256", "", true},
+		{"IPv4 leading zeros trimmed", " 10.0.0.1 ", "10.0.0.1", false},
+		{"shell injection", "127.0.0.1; rm -rf /", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidateIP(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateIP(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ValidateIP(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateURL
+// ---------------------------------------------------------------------------
+
+func TestValidateURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"http", "http://example.com", "http://example.com", false},
+		{"https", "https://example.com", "https://example.com", false},
+		{"https with path", "https://example.com/path?q=1", "https://example.com/path?q=1", false},
+		{"https with fragment", "https://example.com/page#section", "https://example.com/page#section", false},
+		{"https with auth", "https://user:pass@example.com", "https://user:pass@example.com", false},
+		{"ftp rejected", "ftp://example.com", "", true},
+		{"no scheme", "example.com", "", true},
+		{"just hostname", "//example.com", "", true},
+		{"empty", "", "", true},
+		{"whitespace only", "   ", "", true},
+		{"no host", "http://", "", true},
+		{"shell injection", "https://example.com; rm -rf /", "", true},
+		{"data scheme", "data:text/html,<h1>hi</h1>", "", true},
+		{"javascript scheme", "javascript:alert(1)", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidateURL(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateURL(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ValidateURL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateServerAddr
+// ---------------------------------------------------------------------------
+
+func TestValidateServerAddr(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"host:port", "example.com:8080", "example.com:8080", false},
+		{"IP:port", "192.168.1.1:443", "192.168.1.1:443", false},
+		{"IPv6 brackets", "[::1]:8080", "[::1]:8080", false},
+		{"hostname only", "example.com", "example.com", false},
+		{"IP only", "10.0.0.1", "10.0.0.1", false},
+		{"empty", "", "", true},
+		{"whitespace only", "   ", "", true},
+		{"port only", ":8080", ":8080", false},
+		{"shell injection semicolon", "host; rm -rf /", "", true},
+		{"shell injection pipe", "host | cat /etc/passwd", "", true},
+		{"shell injection backtick", "host`id`", "", true},
+		{"shell injection dollar", "host$(id)", "", true},
+		{"spaces", "host name:80", "", true},
+		{"newline", "host\n:80", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidateServerAddr(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateServerAddr(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ValidateServerAddr(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateDomain
+// ---------------------------------------------------------------------------
+
+func TestValidateDomain(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"simple", "example.com", "example.com", false},
+		{"subdomain", "sub.example.com", "sub.example.com", false},
+		{"deep subdomain", "a.b.c.example.com", "a.b.c.example.com", false},
+		{"single label", "localhost", "localhost", false},
+		{"trailing dot", "example.com.", "", true},
+		{"starts with hyphen", "-example.com", "", true},
+		{"ends with hyphen", "example-", "", true},
+		{"single char", "a", "a", false},
+		{"empty", "", "", true},
+		{"whitespace only", "   ", "", true},
+		{"too long (254 chars)", strings.Repeat("a", 254), "", true},
+		{"max length (253 chars)", strings.Repeat("a", 253), strings.Repeat("a", 253), false},
+		{"underscore", "ex_ample.com", "", true},
+		{"space inside", "example .com", "", true},
+		{"starts with dot", ".example.com", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidateDomain(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDomain(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ValidateDomain(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseArpEntries — Linux format and more edge cases
+// ---------------------------------------------------------------------------
+
+func TestParseArpEntries_LinuxFormat(t *testing.T) {
+	// Linux arp -a output format: hostname (IP) at MAC [ether] on iface
+	re := regexp.MustCompile(`\S+\s+\((\S+)\)\s+at\s+(\S+)\s+\[ether\]\s+on\s+(\S+)`)
+
+	tests := []struct {
+		name      string
+		output    string
+		wantCount int
+	}{
+		{
+			"standard linux entry",
+			"gateway (192.168.1.1) at aa:bb:cc:dd:ee:ff [ether] on eth0",
+			1,
+		},
+		{
+			"multiple entries",
+			"gw (10.0.0.1) at 11:22:33:44:55:66 [ether] on eth0\nhost (10.0.0.2) at aa:bb:cc:dd:ee:ff [ether] on eth0",
+			2,
+		},
+		{
+			"incomplete entry skipped",
+			"? (10.0.0.1) at <incomplete> on eth0\ngw (10.0.0.2) at aa:bb:cc:dd:ee:ff [ether] on eth0",
+			1,
+		},
+		{
+			"garbage lines mixed in",
+			"some header line\ngw (10.0.0.1) at aa:bb:cc:dd:ee:ff [ether] on wlan0\n\nanother junk",
+			1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entries := parseArpEntries(tt.output, re, 1, 2, 3)
+			if len(entries) != tt.wantCount {
+				t.Errorf("got %d entries, want %d", len(entries), tt.wantCount)
+			}
+		})
+	}
+}
+
+func TestParseArpEntries_MacOSRealRegex(t *testing.T) {
+	// Use the same regex as GetARPTable in darwin.go.
+	re := regexp.MustCompile(`\S+\s+\((\S+)\)\s+at\s+(\S+)\s+on\s+(\S+)`)
+
+	output := "? (192.168.1.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]\n" +
+		"? (192.168.1.255) at ff:ff:ff:ff:ff:ff on en0 ifscope [ethernet]\n" +
+		"? (224.0.0.251) at 01:00:5e:00:00:fb on en0 ifscope permanent [ethernet]"
+
+	entries := parseArpEntries(output, re, 1, 2, 3)
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	if entries[0].IP != "192.168.1.1" {
+		t.Errorf("first entry IP = %q, want 192.168.1.1", entries[0].IP)
+	}
+	if entries[1].MAC != "ff:ff:ff:ff:ff:ff" {
+		t.Errorf("second entry MAC = %q, want ff:ff:ff:ff:ff:ff", entries[1].MAC)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// normalizeMAC — whitespace edge cases
+// ---------------------------------------------------------------------------
+
+func TestNormalizeMAC_WhitespaceVariants(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"carriage return", "aa:bb:cc:dd:ee:ff\r", "aa:bb:cc:dd:ee:ff", false},
+		{"CRLF", "aa:bb:cc:dd:ee:ff\r\n", "aa:bb:cc:dd:ee:ff", false},
+		{"tab and spaces", "\t  aa:bb:cc:dd:ee:ff  \t", "aa:bb:cc:dd:ee:ff", false},
+		{"mixed whitespace", " \t\r\nAA:BB:CC:DD:EE:FF\r\n\t ", "aa:bb:cc:dd:ee:ff", false},
+		{"only whitespace", " \t\r\n ", "", true},
+		{"embedded newline", "aa:bb:cc\n:dd:ee:ff", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeMAC(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("normalizeMAC(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("normalizeMAC(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

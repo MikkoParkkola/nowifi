@@ -39,7 +39,7 @@ func init() {
 }
 
 func runDiagnose(cmd *cobra.Command, args []string) {
-	fmt.Printf("\nnowifi v%s — Diagnosis Mode (read-only)\n\n", version)
+	printBanner("Diagnosis Mode (read-only)")
 
 	// Validate interface.
 	iface := flagInterface

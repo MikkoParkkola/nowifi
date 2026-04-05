@@ -37,7 +37,8 @@ func runAudit(cmd *cobra.Command, args []string) {
 		stealth = false
 	}
 
-	fmt.Printf("\nnowifi v%s — No WiFi? Now WiFi.\n\n", version)
+	matrixRain()
+	printBanner("No WiFi? Now WiFi.")
 
 	// Check for root — many techniques need it.
 	if os.Geteuid() != 0 && !flagProbeOnly {

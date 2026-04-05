@@ -43,7 +43,7 @@ func init() {
 func runWatch(cmd *cobra.Command, args []string) {
 	iface := flagInterface
 
-	fmt.Printf("\nnowifi v%s — Watch Mode\n\n", version)
+	printBanner("Watch Mode")
 
 	if os.Geteuid() != 0 {
 		fmt.Println("  Warning: Running without sudo. MAC rotation will not work.")
