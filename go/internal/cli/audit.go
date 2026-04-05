@@ -5,15 +5,19 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/capture"
 	"github.com/MikkoParkkola/nowifi/internal/detect"
+	"github.com/MikkoParkkola/nowifi/internal/guard"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
 	"github.com/MikkoParkkola/nowifi/internal/report"
@@ -103,21 +107,21 @@ func runAudit(cmd *cobra.Command, args []string) {
 
 	// --- Phase 4: Bypass ---
 	var bypassResults []bypass.Result
+	bpConfig := &bypass.Config{
+		Interface:    flagInterface,
+		TunnelServer: flagTunnelServer,
+		DNSDomain:    flagDNSDomain,
+		ICMPServer:   flagICMPServer,
+		QUICServer:   flagQUICServer,
+		NTPServer:    flagNTPServer,
+		CFWorkersURL: flagCFWorkers,
+		Stealth:      stealth,
+	}
 	if !flagProbeOnly {
 		if !portalInfo.IsCaptive || flagAutoBypass {
 			fmt.Printf("4. Bypass  ")
 		}
 
-		bpConfig := &bypass.Config{
-			Interface:    flagInterface,
-			TunnelServer: flagTunnelServer,
-			DNSDomain:    flagDNSDomain,
-			ICMPServer:   flagICMPServer,
-			QUICServer:   flagQUICServer,
-			NTPServer:    flagNTPServer,
-			CFWorkersURL: flagCFWorkers,
-			Stealth:      stealth,
-		}
 
 		bpProbes := mapProbeResults(probes)
 		bypassResults = bypass.RunBypasses(bpProbes, bpConfig, nil)
@@ -172,7 +176,175 @@ func runAudit(cmd *cobra.Command, args []string) {
 		fmt.Printf("  (warning: failed to save audit record: %v)\n", err)
 	}
 
+	// --- Phase 7: Session persistence ---
+	// If bypass succeeded, automatically maintain the connection.
+	// The user runs `sudo nowifi` once; we stay connected until Ctrl+C.
+	if !flagProbeOnly && record.Success {
+		// Create state guard — restores MAC, proxy, DNS on ANY exit.
+		g := guard.New(flagInterface)
+		defer g.Restore()
+
+		// Register tunnel cleanup if bypass used a tunnel.
+		for _, r := range bypassResults {
+			if r.Success && r.Tunnel != nil && r.Tunnel.Active {
+				g.RegisterTunnel(tunnelCloser{r.Tunnel})
+			}
+		}
+
+
+		// Handle Ctrl+C gracefully.
+		ctx, cancel := context.WithCancel(context.Background())
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			fmt.Printf("\n\n  %s Stopping — restoring original network state...\n", yellow("STOP"))
+			cancel()
+		}()
+
+		maintainSession(ctx, flagInterface, bypassResults, bpConfig, probes, stealth)
+
+		fmt.Println("  All changes restored. Network is back to original state.")
+		fmt.Println()
+		return
+	}
+
 	fmt.Println()
+}
+
+// tunnelCloser adapts tunnel.Handle (which has Stop()) to io.Closer for guard.
+type tunnelCloser struct {
+	h interface{ Stop() }
+}
+
+func (tc tunnelCloser) Close() error {
+	tc.h.Stop()
+	return nil
+}
+
+// maintainSession keeps the connection alive after a successful bypass.
+// It monitors connectivity, predicts session timeout, and auto-renews.
+func maintainSession(ctx context.Context, iface string, results []bypass.Result, bpConfig *bypass.Config, probes *probe.ProbeResults, stealth bool) {
+	// Find the technique that worked.
+	var successMethod string
+	for _, r := range results {
+		if r.Success {
+			successMethod = string(r.Method)
+			break
+		}
+	}
+
+	// Adaptive check interval: shorter for first few checks to learn timeout,
+	// then longer once we have a pattern.
+	checkInterval := 30 * time.Second
+	connectTime := time.Now()
+	var lastDisconnect time.Time
+	sessionCount := 0
+	renewCount := 0
+
+	fmt.Println()
+	fmt.Printf("  %s  Maintaining session (bypass: %s)\n", green("CONNECTED"), successMethod)
+	fmt.Printf("  %s  Checking every %s — Ctrl+C to disconnect\n", dim("INFO"), checkInterval)
+	fmt.Println()
+
+	consecutiveOK := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			elapsed := time.Since(connectTime).Round(time.Second)
+			fmt.Printf("\n  Session lasted %s (%d renewals)\n\n", elapsed, renewCount)
+			return
+		case <-time.After(checkInterval):
+		}
+
+		ts := time.Now().Format("15:04:05")
+		uptime := time.Since(connectTime).Round(time.Second)
+
+		if checkInternet() {
+			consecutiveOK++
+			// After 5 consecutive OKs, extend interval to reduce noise.
+			if consecutiveOK > 5 && checkInterval < 60*time.Second {
+				checkInterval = 60 * time.Second
+			}
+			fmt.Printf("  %s  %s  Connected (%s)\n", dim(ts), green("OK"), uptime)
+			continue
+		}
+
+		// --- Session dropped ---
+		consecutiveOK = 0
+		checkInterval = 30 * time.Second // Reset to aggressive checking.
+
+		// Track timeout pattern for future prediction.
+		if !lastDisconnect.IsZero() {
+			sessionCount++
+		}
+		lastDisconnect = time.Now()
+		sessionDuration := lastDisconnect.Sub(connectTime).Round(time.Second)
+
+		fmt.Printf("  %s  %s  Session dropped after %s\n", dim(ts), red("DOWN"), sessionDuration)
+		fmt.Printf("  %s  %s  Re-establishing connection...\n", dim(ts), yellow("RENEW"))
+
+		// Strategy: try the technique that worked first, then fall back to full bypass.
+		reconnected := false
+
+		// Attempt 1: MAC rotate + DHCP (fast, works if portal just expired the session).
+		newMAC := platform.GenerateRandomMAC()
+		if err := platform.SetMAC(iface, newMAC); err == nil {
+			if err := platform.RenewDHCP(iface); err == nil {
+				time.Sleep(3 * time.Second)
+				if checkInternet() {
+					reconnected = true
+					renewCount++
+					fmt.Printf("  %s  %s  Reconnected via MAC rotate (%s)\n", dim(ts), green("OK"), newMAC)
+				}
+			}
+		}
+
+		// Attempt 2: Full bypass re-run with original probes.
+		if !reconnected {
+			fmt.Printf("  %s  %s  MAC rotate failed, re-running full bypass...\n", dim(ts), yellow("RETRY"))
+			bpProbes := mapProbeResults(probes)
+			newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+			for _, r := range newResults {
+				if r.Success {
+					reconnected = true
+					renewCount++
+					successMethod = string(r.Method)
+					fmt.Printf("  %s  %s  Reconnected via %s\n", dim(ts), green("OK"), successMethod)
+					break
+				}
+			}
+		}
+
+		// Attempt 3: Re-probe the network (topology may have changed).
+		if !reconnected {
+			fmt.Printf("  %s  %s  Full bypass failed, re-probing network...\n", dim(ts), yellow("PROBE"))
+			tunnelIP := extractHost(bpConfig.TunnelServer)
+			newProbes := probe.ProbeAll(iface, stealth, tunnelIP)
+			probes = newProbes // Update for next cycle.
+			bpProbes := mapProbeResults(newProbes)
+			newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+			for _, r := range newResults {
+				if r.Success {
+					reconnected = true
+					renewCount++
+					successMethod = string(r.Method)
+					fmt.Printf("  %s  %s  Reconnected via %s (after re-probe)\n", dim(ts), green("OK"), successMethod)
+					break
+				}
+			}
+		}
+
+		if !reconnected {
+			fmt.Printf("  %s  %s  All reconnect attempts failed. Retrying in %s...\n", dim(ts), red("FAIL"), checkInterval)
+		}
+
+		// Reset connect time for the new session.
+		if reconnected {
+			connectTime = time.Now()
+		}
+	}
 }
 
 // extractHost extracts the hostname or IP from a URL string.
