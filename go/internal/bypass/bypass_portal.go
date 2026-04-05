@@ -13,6 +13,18 @@ import (
 	"time"
 )
 
+// cnaCheckURL is the URL probed by tryCNASpoof. Tests override this to
+// point at httptest servers.
+var cnaCheckURL = "http://connectivitycheck.gstatic.com/generate_204"
+
+// jsTestURLOverrides, when non-nil, replaces the hardcoded test URLs in
+// tryJSBypass. Tests set this to httptest server URLs.
+var jsTestURLOverrides []string
+
+// portalSchemes controls which protocols tryDefaultCreds tries. Tests can
+// set this to []string{"http"} and point gateway at a mock server.
+var portalSchemes = []string{"http", "https"}
+
 // ---------------------------------------------------------------------------
 // Technique 3: CNA User-Agent spoof
 // ---------------------------------------------------------------------------
@@ -31,7 +43,7 @@ func tryCNASpoof() Result {
 
 	for _, a := range agents {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		req, _ := http.NewRequestWithContext(ctx, "GET", "http://connectivitycheck.gstatic.com/generate_204", nil)
+		req, _ := http.NewRequestWithContext(ctx, "GET", cnaCheckURL, nil)
 		req.Header.Set("User-Agent", a.ua)
 
 		client := &http.Client{
@@ -71,6 +83,9 @@ func tryJSBypass() Result {
 		"http://httpbin.org/ip",
 		"http://ifconfig.me/ip",
 		"http://icanhazip.com",
+	}
+	if jsTestURLOverrides != nil {
+		testURLs = jsTestURLOverrides
 	}
 
 	client := &http.Client{
@@ -120,11 +135,15 @@ func tryJSBypass() Result {
 	// SPA bypass: check if the portal's backend API is accessible without
 	// the JavaScript frontend. Many inflight portals (Panasonic, Gogo) use
 	// SPAs where auth is only enforced by the JS app, not the API.
+	spaURL := "http://connectivitycheck.gstatic.com/generate_204"
+	if jsTestURLOverrides != nil && len(jsTestURLOverrides) > 0 {
+		spaURL = jsTestURLOverrides[0]
+	}
 	spaAPIs := []struct {
 		url  string
 		desc string
 	}{
-		{"http://connectivitycheck.gstatic.com/generate_204", "Google 204 via direct request"},
+		{spaURL, "Google 204 via direct request"},
 	}
 
 	// Also try accessing common SPA portal API endpoints if we can detect the portal.
@@ -173,6 +192,12 @@ func tryJSBypass() Result {
 // Technique 12: Session cookie replay
 // ---------------------------------------------------------------------------
 
+// sessionReplayURLFunc builds the portal URL for session replay probing.
+// Tests override this to point at httptest servers.
+var sessionReplayURLFunc = func(gateway string) string {
+	return fmt.Sprintf("http://%s/", gateway)
+}
+
 func trySessionReplay(iface string, plat PlatformOps) Result {
 	gateway := plat.GetGateway(iface)
 	if gateway == "" {
@@ -189,7 +214,7 @@ func trySessionReplay(iface string, plat PlatformOps) Result {
 		},
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://%s/", gateway), nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", sessionReplayURLFunc(gateway), nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return Result{Method: SessionReplay, Success: false, Details: "Portal uses HTTPS or no cookies found"}
@@ -218,6 +243,10 @@ func trySessionReplay(iface string, plat PlatformOps) Result {
 // Technique 13: Portal default credentials
 // ---------------------------------------------------------------------------
 
+// defaultCredsBaseURL, when non-empty, overrides the gateway-derived base URL
+// in tryDefaultCreds. Tests set this to an httptest server URL.
+var defaultCredsBaseURL string
+
 func tryDefaultCreds(iface string, plat PlatformOps) Result {
 	gateway := plat.GetGateway(iface)
 	if gateway == "" {
@@ -238,8 +267,13 @@ func tryDefaultCreds(iface string, plat PlatformOps) Result {
 	}
 
 	for _, path := range adminPaths {
-		for _, proto := range []string{"http", "https"} {
-			adminURL := fmt.Sprintf("%s://%s%s", proto, gateway, path)
+		for _, proto := range portalSchemes {
+			var adminURL string
+			if defaultCredsBaseURL != "" {
+				adminURL = defaultCredsBaseURL + path
+			} else {
+				adminURL = fmt.Sprintf("%s://%s%s", proto, gateway, path)
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			req, _ := http.NewRequestWithContext(ctx, "GET", adminURL, nil)

@@ -277,12 +277,16 @@ func getNetworkService(iface string) string {
 // Internet connectivity check
 // ---------------------------------------------------------------------------
 
+// internetCheckURL is the URL used by hasInternet(). Tests override this
+// to point at httptest servers so no real network call is made.
+var internetCheckURL = "http://connectivitycheck.gstatic.com/generate_204"
+
 func hasInternet() bool {
 	// Use 10s timeout to accommodate satellite links (RTT 500-2500ms).
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", "http://connectivitycheck.gstatic.com/generate_204", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", internetCheckURL, nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return false
