@@ -36,6 +36,11 @@ func GetWifiInfo(iface string) (*WifiInfo, error) {
 		return info, nil
 	}
 
+	// Strategy 3.5: wdutil (requires root, but nowifi often runs as root)
+	if info := getWifiInfoWdutil(); info != nil {
+		return info, nil
+	}
+
 	// Strategy 4: ifconfig (just check if interface is active with an IP)
 	if info := getWifiInfoIfconfig(iface); info != nil {
 		return info, nil
@@ -86,8 +91,14 @@ func getWifiInfoSystemProfiler() *WifiInfo {
 				continue
 			}
 			ssid := cn.Name
-			if ssid == "" {
-				ssid = "<redacted>"
+			if ssid == "" || ssid == "<redacted>" {
+				// macOS Sequoia+ redacts SSID without Location Services.
+				// Try DNS search domain as a hint.
+				if hint := ssidFromDNSSearchDomain(); hint != "" {
+					ssid = hint + " (from DNS)"
+				} else {
+					ssid = "<redacted by macOS — enable Location Services in System Settings → Privacy & Security → Location Services for Terminal/iTerm>"
+				}
 			}
 			return &WifiInfo{
 				SSID:     ssid,
@@ -206,6 +217,113 @@ func getWifiInfoIfconfig(iface string) *WifiInfo {
 		}
 	}
 	return nil
+}
+
+// ssidFromDNSSearchDomain attempts to infer the network name from the DNS
+// search domain. On inflight WiFi, this often reveals the airline/portal
+// (e.g., "www.nordic-sky.finnair.com" → "Nordic Sky (Finnair)").
+//
+// This is a best-effort fallback when macOS Sequoia redacts the real SSID.
+func ssidFromDNSSearchDomain() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "scutil", "--dns").Output()
+	if err != nil {
+		return ""
+	}
+
+	// Extract search domain from scutil output.
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "search domain") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		domain := strings.TrimSpace(parts[1])
+		if domain == "" || domain == "local" {
+			continue
+		}
+
+		// Known inflight WiFi domain patterns → friendly names.
+		knownPatterns := []struct {
+			contains string
+			name     string
+		}{
+			{"nordic-sky.finnair", "Nordic Sky (Finnair)"},
+			{"finnair.com", "Finnair WiFi"},
+			{"gogoinflight.com", "Gogo Inflight"},
+			{"gogo.aero", "Gogo Inflight"},
+			{"panasonic.aero", "Panasonic Avionics"},
+			{"viasat", "Viasat Inflight"},
+			{"inflyt", "Thales InFlyt"},
+			{"flytlive", "Thales FlytLIVE"},
+			{"inmarsat", "Inmarsat GX"},
+			{"sita.aero", "SITA OnAir"},
+			{"onair.aero", "SITA OnAir"},
+			{"boingo", "Boingo"},
+		}
+
+		domainLower := strings.ToLower(domain)
+		for _, kp := range knownPatterns {
+			if strings.Contains(domainLower, kp.contains) {
+				return kp.name
+			}
+		}
+
+		// Generic: use the domain itself as hint.
+		// Strip "www." prefix and trailing dots.
+		hint := strings.TrimPrefix(domain, "www.")
+		hint = strings.TrimSuffix(hint, ".")
+		if hint != "" {
+			return hint
+		}
+	}
+	return ""
+}
+
+func getWifiInfoWdutil() *WifiInfo {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "wdutil", "info").Output()
+	if err != nil {
+		return nil
+	}
+
+	info := make(map[string]string)
+	for _, line := range strings.Split(string(out), "\n") {
+		idx := strings.Index(line, ":")
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		info[key] = val
+	}
+
+	ssid := info["SSID"]
+	if ssid == "" {
+		return nil
+	}
+
+	rssi := -99
+	if s, ok := info["RSSI"]; ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(strings.Split(s, " ")[0])); err == nil {
+			rssi = n
+		}
+	}
+
+	return &WifiInfo{
+		SSID:     ssid,
+		BSSID:    info["BSSID"],
+		Channel:  info["Channel"],
+		Security: info["Security"],
+		RSSI:     rssi,
+	}
 }
 
 // GetCurrentMAC returns the current MAC address of the given interface.

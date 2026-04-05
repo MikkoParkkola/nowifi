@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -140,6 +141,46 @@ var vendorSignatures = map[string]vendorSignature{
 		HTMLMarkers:    []string{"nomadix", "usg"},
 		HeaderPatterns: []string{"Nomadix"},
 	},
+	"panasonic_avionics": {
+		URLPatterns:    []string{"nordic-sky", "panasonic.aero", "portal-loader.js"},
+		HTMLMarkers:    []string{"portal-loader.js", "portal-versions.json", "pax-api", "finnair", "fwp"},
+		HeaderPatterns: []string{"kong/", "x-kong-"},
+	},
+	"gogo_inflight": {
+		URLPatterns:    []string{"gogoinflight.com", "airborne.gogoinflight.com", "buy.gogoinflight.com"},
+		HTMLMarkers:    []string{"gogo", "gogoinflight", "gogo-portal"},
+		HeaderPatterns: []string{"Gogo"},
+	},
+	"viasat_inflight": {
+		URLPatterns:    []string{"viasat.com", "row44.com", "inflightinternet"},
+		HTMLMarkers:    []string{"viasat", "row44", "exede"},
+		HeaderPatterns: []string{"Viasat"},
+	},
+	"inmarsat_gx": {
+		URLPatterns:    []string{"inmarsat.com", "portal.inmarsat", "gx-aviation"},
+		HTMLMarkers:    []string{"inmarsat", "gx-aviation", "aviator"},
+		HeaderPatterns: []string{"Inmarsat"},
+	},
+	"thales_inflyt": {
+		URLPatterns:    []string{"inflyt.com", "thales", "flytlive"},
+		HTMLMarkers:    []string{"inflyt", "thales", "flytlive", "topconnect"},
+		HeaderPatterns: []string{"Thales"},
+	},
+	"sita_onair": {
+		URLPatterns:    []string{"sita.aero", "onair.aero"},
+		HTMLMarkers:    []string{"sita", "onair"},
+		HeaderPatterns: []string{"SITA"},
+	},
+	"anuvu_inflight": {
+		URLPatterns:    []string{"anuvu.com", "global-eagle"},
+		HTMLMarkers:    []string{"anuvu", "global-eagle", "ges"},
+		HeaderPatterns: nil,
+	},
+	"boingo_inflight": {
+		URLPatterns:    []string{"boingo.com", "boingohotspot"},
+		HTMLMarkers:    []string{"boingo", "boingohotspot"},
+		HeaderPatterns: []string{"Boingo"},
+	},
 }
 
 // canaryResult holds the parsed response from a single canary check.
@@ -158,6 +199,12 @@ type canaryResult struct {
 func DetectPortal(iface string) *PortalInfo {
 	info := &PortalInfo{
 		Type: PortalNone,
+	}
+
+	// Pre-detection: check DNS search domain for vendor hints.
+	if dnsVendor, dnsHint := fingerprintFromDNS(); dnsVendor != "" {
+		info.Vendor = dnsVendor
+		info.SSID = dnsHint // Use as SSID hint when macOS redacts the real SSID.
 	}
 
 	type redirect struct {
@@ -350,6 +397,14 @@ func fingerprintPortal(info *PortalInfo, body, rawURL string, headers http.Heade
 		}
 	}
 
+	// Check for Kong API gateway (common in inflight WiFi).
+	if via := headers.Get("Via"); strings.Contains(strings.ToLower(via), "kong") {
+		info.Vendor = "panasonic_avionics" // Kong is Panasonic's gateway
+	}
+	if headers.Get("X-Kong-Proxy-Latency") != "" || headers.Get("X-Kong-Upstream-Latency") != "" {
+		info.Vendor = "panasonic_avionics"
+	}
+
 	// Detect auth methods from form fields.
 	info.AuthMethods = detectAuthMethods(body)
 }
@@ -372,6 +427,47 @@ func countVendorPatternMatches(haystack string, patterns []string) int {
 		}
 	}
 	return matchCount
+}
+
+// fingerprintFromDNS attempts to identify the portal vendor from the DNS
+// search domain, which often reveals the portal identity on inflight WiFi.
+func fingerprintFromDNS() (vendor, hint string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "scutil", "--dns").Output()
+	if err != nil {
+		return "", ""
+	}
+
+	output := strings.ToLower(string(out))
+
+	// Map of DNS search domain patterns to vendor identifiers.
+	dnsPatterns := []struct {
+		pattern string
+		vendor  string
+		hint    string
+	}{
+		{"nordic-sky", "panasonic_avionics", "Finnair Nordic Sky (Panasonic Avionics)"},
+		{"panasonic.aero", "panasonic_avionics", "Panasonic Avionics IFE"},
+		{"gogoinflight", "gogo_inflight", "Gogo Inflight WiFi"},
+		{"gogo.aero", "gogo_inflight", "Gogo Inflight WiFi"},
+		{"viasat", "viasat_inflight", "Viasat Inflight WiFi"},
+		{"inmarsat", "inmarsat_gx", "Inmarsat GX Aviation"},
+		{"inflyt", "thales_inflyt", "Thales InFlyt Experience"},
+		{"flytlive", "thales_inflyt", "Thales FlytLIVE"},
+		{"sita.aero", "sita_onair", "SITA OnAir"},
+		{"onair.aero", "sita_onair", "SITA OnAir"},
+		{"anuvu", "anuvu_inflight", "Anuvu (Global Eagle)"},
+		{"boingo", "boingo_inflight", "Boingo Inflight"},
+	}
+
+	for _, dp := range dnsPatterns {
+		if strings.Contains(output, dp.pattern) {
+			return dp.vendor, dp.hint
+		}
+	}
+	return "", ""
 }
 
 // authPattern maps an authentication method name to a list of regexes

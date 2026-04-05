@@ -90,6 +90,7 @@ type ProbeResults struct {
 	QUIC             PortProbeResult   `json:"quic"`
 	NTP              PortProbeResult   `json:"ntp"`
 	DoH              PortProbeResult   `json:"doh"`
+	Topology         SubnetTopology    `json:"topology"`
 }
 
 // PortServices maps well-known port numbers to human-readable service names.
@@ -503,6 +504,29 @@ var whitelistTargets = []struct {
 	{"www.google.com", "https://www.google.com"},
 	{"login.microsoftonline.com", "https://login.microsoftonline.com"},
 	{"facebook.com", "https://facebook.com"},
+
+	// Inflight WiFi — payment processors (almost always whitelisted for WiFi purchase).
+	{"stripe.com", "https://stripe.com"},
+	{"js.stripe.com", "https://js.stripe.com"},
+	{"checkout.stripe.com", "https://checkout.stripe.com"},
+	{"*.adyen.com", "https://www.adyen.com"},
+
+	// Inflight WiFi — CDN/infrastructure (whitelisted for portal assets).
+	{"cdn.cloudflare.com", "https://cdn.cloudflare.com"},
+	{"cdnjs.cloudflare.com", "https://cdnjs.cloudflare.com"},
+
+	// Inflight WiFi — airline/IFE portals (whitelisted for portal operation).
+	{"finnair.com", "https://www.finnair.com"},
+	{"panasonic.aero", "https://www.panasonic.aero"},
+
+	// Inflight WiFi — DNS providers (often whitelisted).
+	{"dns.google", "https://dns.google"},
+	{"cloudflare-dns.com", "https://cloudflare-dns.com/dns-query?name=example.com&type=A"},
+
+	// Inflight WiFi — entertainment/messaging (sometimes whitelisted as free tier).
+	{"icloud.com", "https://www.icloud.com"},
+	{"imessage.apple.com", "https://init.push.apple.com"},
+	{"whatsapp.com", "https://web.whatsapp.com"},
 }
 
 // ProbeWhitelists tests commonly whitelisted domains for pre-auth access.
@@ -976,6 +1000,69 @@ func shufflePorts(ports []int) {
 		j := int(n.Int64())
 		ports[i], ports[j] = ports[j], ports[i]
 	}
+}
+
+// SubnetTopology holds the result of cross-subnet analysis.
+type SubnetTopology struct {
+	ClientSubnet  string `json:"client_subnet"`
+	GatewayIP     string `json:"gateway_ip"`
+	PortalIP      string `json:"portal_ip,omitempty"`
+	IsCrossSubnet bool   `json:"is_cross_subnet"`
+	Details       string `json:"details"`
+}
+
+// ProbeTopology analyzes the network topology to identify cross-subnet
+// portals and potential routing leaks. Inflight WiFi often places the
+// portal on a different VLAN/subnet (e.g., portal at 172.16.x.x, clients
+// at 172.19.x.x).
+func ProbeTopology(iface string, portalIP string) SubnetTopology {
+	result := SubnetTopology{PortalIP: portalIP}
+
+	// Get client IP and subnet.
+	conn, err := net.DialTimeout("udp", "8.8.8.8:53", 3*time.Second)
+	if err != nil {
+		result.Details = "Cannot determine local IP"
+		return result
+	}
+	localAddr := conn.LocalAddr().(*net.UDPAddr).IP.String()
+	conn.Close()
+	result.ClientSubnet = localAddr
+
+	// Get gateway.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "netstat", "-rn").Output()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && fields[0] == "default" {
+				result.GatewayIP = fields[1]
+				break
+			}
+		}
+	}
+
+	if portalIP == "" || result.GatewayIP == "" {
+		result.Details = "Insufficient data for topology analysis"
+		return result
+	}
+
+	// Check if portal and client are on different /16 subnets.
+	clientParts := strings.Split(localAddr, ".")
+	portalParts := strings.Split(portalIP, ".")
+	if len(clientParts) >= 2 && len(portalParts) >= 2 {
+		if clientParts[0] == portalParts[0] && clientParts[1] != portalParts[1] {
+			result.IsCrossSubnet = true
+			result.Details = fmt.Sprintf("Portal (%s) on different subnet from clients (%s) — separate management VLAN detected", portalIP, localAddr)
+		} else if clientParts[0] != portalParts[0] {
+			result.IsCrossSubnet = true
+			result.Details = fmt.Sprintf("Portal (%s) on entirely different network from clients (%s)", portalIP, localAddr)
+		} else {
+			result.Details = fmt.Sprintf("Portal (%s) and clients (%s) on same subnet", portalIP, localAddr)
+		}
+	}
+
+	return result
 }
 
 // isTimeout reports whether an error is a network timeout.
