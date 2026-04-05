@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/server"
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
 
@@ -161,8 +162,8 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 
 	hasServer := config.TunnelServer != ""
 	if !hasServer {
-		logStatus("No tunnel server configured -- 10 serverless techniques available.")
-		logStatus("For all 19: run `nowifi server create` first.")
+		logStatus("No tunnel server configured -- trying serverless techniques first.")
+		logStatus("Tip: `nowifi server create` deploys a free Cloudflare Worker (~30s).")
 	}
 
 	type technique struct {
@@ -1112,8 +1113,28 @@ func tryQUICTunnel(config *Config, probes *ProbeResults) Result {
 // ---------------------------------------------------------------------------
 
 func tryCFWorkers(config *Config, probes *ProbeResults) Result {
-	if config.CFWorkersURL == "" {
-		return Result{Method: CFWorkers, Success: false, Details: "No CF Workers URL configured (use --cf-workers)"}
+	workerURL := config.CFWorkersURL
+
+	// Auto-discover: if no URL configured, check saved server config.
+	if workerURL == "" {
+		cfg := server.LoadConfig()
+		if url, ok := cfg["cf_workers_url"]; ok && url != "" {
+			workerURL = url
+			logStatus("Found saved CF Workers URL: %s", workerURL)
+		}
+	}
+
+	// Auto-deploy: if still no URL, try to deploy a free CF Worker.
+	if workerURL == "" {
+		logStatus("No CF Workers URL — attempting auto-deploy (free, ~30s)...")
+		info, err := server.SetupCloudflareWorker()
+		if err != nil {
+			// Not an error — user just doesn't have wrangler/CF account set up.
+			return Result{Method: CFWorkers, Success: false,
+				Details: fmt.Sprintf("No CF Workers URL and auto-deploy unavailable: %v. Run `nowifi server create` to set up.", err)}
+		}
+		workerURL = info.URL
+		logStatus("Auto-deployed CF Worker: %s", workerURL)
 	}
 
 	// Check if Cloudflare is reachable.
@@ -1128,13 +1149,13 @@ func tryCFWorkers(config *Config, probes *ProbeResults) Result {
 		return Result{Method: CFWorkers, Success: false, Details: "Cloudflare not reachable pre-auth"}
 	}
 
-	if tunnel.VerifyCFWorkersProxy(config.CFWorkersURL) {
+	if tunnel.VerifyCFWorkersProxy(workerURL) {
 		return Result{
 			Method:      CFWorkers,
 			Success:     true,
 			Severity:    "critical",
-			Impact:      "Full internet via Cloudflare Workers proxy (serverless, free)",
-			Details:     fmt.Sprintf("CF Worker at %s proxies requests. Traffic goes to trusted Cloudflare IPs.", config.CFWorkersURL),
+			Impact:      "Full internet via Cloudflare Workers proxy (serverless, free, no server needed)",
+			Details:     fmt.Sprintf("CF Worker at %s proxies requests. Traffic goes to trusted Cloudflare IPs.", workerURL),
 			Remediation: "Block access to *.workers.dev domains. Inspect HTTPS traffic to Cloudflare for proxy patterns. Consider blocking unknown Cloudflare subdomains.",
 		}
 	}
