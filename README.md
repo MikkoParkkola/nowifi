@@ -12,7 +12,7 @@ One command. 27 techniques. Browser works immediately.
 sudo ./nowifi
 ```
 
-Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 23 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
+Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 19 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs a multi-step WPA cracking pipeline with 4 more techniques.
 
@@ -70,7 +70,7 @@ sudo ./nowifi crack
 
 ---
 
-## All 16 Commands
+## All 21 Commands
 
 | Command | What it does |
 |---------|-------------|
@@ -228,6 +228,7 @@ internal/
   discover/                WiFi network scanning
   portal/                  Auto-login to known portal types
   clone/                   MAC address cloning
+  inflight/                Airline portal intelligence: 7 provider profiles, 50+ airlines
   ui/                      Web dashboard + menubar app
 ```
 
@@ -235,7 +236,14 @@ internal/
 
 ## Responsible Use
 
-This tool is for **authorized security assessments** of captive portal implementations. Only test networks you own or have explicit written authorization to test. Unauthorized access to computer networks is illegal in most jurisdictions.
+This tool is for **authorized security assessments** of captive portal implementations.
+
+- **Only test networks you own or have explicit written authorization to test.** Unauthorized access to computer networks is illegal in most jurisdictions (e.g., CFAA in the US, Computer Misuse Act in the UK, Rikoslaki 38:8 in Finland).
+- **Deauthentication attacks** (technique #22, WPA handshake capture) actively interfere with other users' connections. This may violate telecommunications regulations even on networks you own, if it affects third parties.
+- **MAC cloning** another device's address takes over their authenticated session, disconnecting them. Only use this in controlled lab environments or with explicit consent.
+- **Session cookie replay** involves capturing other users' network traffic. This may violate wiretapping laws in your jurisdiction.
+
+The authors accept no liability for misuse. This tool is published for defensive research, security assessment, and education.
 
 ---
 

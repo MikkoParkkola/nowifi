@@ -16,7 +16,7 @@ brews:
       owner: MikkoParkkola
       name: homebrew-tap
     homepage: https://github.com/MikkoParkkola/nowifi
-    description: "WiFi security assessment tool — 23 bypass techniques"
+    description: "WiFi security assessment tool — 27 techniques (19 portal bypass + 4 WPA crack + 4 smart crack)"
 
 checksum:
   name_template: checksums.txt
