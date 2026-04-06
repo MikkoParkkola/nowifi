@@ -60,7 +60,7 @@ brew install MikkoParkkola/tap/nowifi
 ## Quick Start
 
 ```bash
-# Full audit: detect portal, probe leaks, try all bypasses
+# One command. Detect, bypass, cloak, and stay connected until you stop.
 sudo ./nowifi
 
 # Read-only assessment (no changes to network)
@@ -72,6 +72,19 @@ sudo ./nowifi crack
 # Check system health
 ./nowifi doctor
 ```
+
+`sudo nowifi` does everything automatically: detects the portal, probes for leaks, bypasses using the most powerful technique available, applies traffic stealth (anti-tethering), and **maintains your connection** until you press `Ctrl+C`. All network changes are restored on exit.
+
+---
+
+## Key Features
+
+- **Session persistence** — stays connected after bypass. Auto-renews on session expiry (MAC rotate → full re-bypass → re-probe). One command at boarding, connected for the entire flight.
+- **Traffic stealth** — normalizes TTL, IP ID, and MSS to defeat anti-tethering detection. Your bypassed connection looks identical to a directly-connected device.
+- **Inflight WiFi intelligence** — profiles for 7 major providers (Panasonic, Gogo, Viasat, Inmarsat, Thales, SITA, Anuvu) covering 50+ airlines. Auto-detects provider and optimizes technique ordering.
+- **Satellite-aware** — detects high-latency links (650-2400ms RTT) and adjusts all timeouts dynamically. Prevents false-positive idle detection on inflight networks.
+- **Zero-config tunnels** — auto-deploys Cloudflare Workers proxy if no tunnel server is configured. Auto-downloads `cloudflared` for DoH tunneling.
+- **Clean restore guarantee** — `Ctrl+C` always restores original MAC, proxy, DNS, TTL, PF rules, and tunnel processes. Works on SIGINT, SIGTERM, and panics.
 
 ---
 
