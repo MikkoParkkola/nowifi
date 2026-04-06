@@ -399,12 +399,12 @@ func (m tuiModel) View() string {
 	// Full-width panels add +2 to innerW to match: each half-panel adds
 	// its own border+padding (4 chars), so two halves = innerW + 5 outer,
 	// while a single panel at innerW is innerW + 4 outer. The +2 closes that.
-	header := m.viewHeader(innerW + 2)
+	header := m.viewHeader(innerW + 1)
 	sysNet := m.viewSystemNetwork(innerW)
-	probes := m.viewProbes(innerW + 2)
-	bypass := m.viewBypass(innerW + 2)
-	session := m.viewSession(innerW + 2)
-	footer := m.viewFooter(innerW + 2)
+	probes := m.viewProbes(innerW + 1)
+	bypass := m.viewBypass(innerW + 1)
+	session := m.viewSession(innerW + 1)
+	footer := m.viewFooter(innerW + 1)
 
 	// Stack everything vertically.
 	full := lipgloss.JoinVertical(lipgloss.Left,
