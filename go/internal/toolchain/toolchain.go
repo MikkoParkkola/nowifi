@@ -9,8 +9,11 @@
 package toolchain
 
 import (
+	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,20 +21,33 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 )
 
 // ToolDir is the default directory for downloaded tool binaries.
 var ToolDir = filepath.Join(homeDir(), ".nowifi", "bin")
 
+type assetFormat string
+
+const (
+	assetFormatPlain assetFormat = "plain"
+	assetFormatGzip  assetFormat = "gzip"
+	assetFormatTarGz assetFormat = "tar.gz"
+)
+
 // ToolInfo describes a downloadable tool binary.
 type ToolInfo struct {
-	Name        string
-	Description string
-	DownloadURL string // URL template with {version}, {os}, {arch}
-	BinaryName  string
-	Version     string
-	RequiredFor []string
+	Name                 string
+	Description          string
+	DownloadURL          string // URL template with {version}, {os}, {arch}
+	PlatformDownloadURLs map[string]string
+	BinaryName           string
+	Version              string
+	RequiredFor          []string
+	Checksums            map[string]string
+	ArchiveFormat        assetFormat
+	PlatformFormats      map[string]assetFormat
 }
 
 // ToolStatus reports the installation state of a tool.
@@ -57,28 +73,57 @@ func (e *ToolNotFoundError) Error() string {
 // tools is the registry of downloadable binaries.
 var tools = map[string]*ToolInfo{
 	"chisel": {
-		Name:        "chisel",
-		Description: "HTTPS/WebSocket tunnel",
-		DownloadURL: "https://github.com/jpillora/chisel/releases/download/v{version}/chisel_{version}_{os}_{arch}.gz",
-		BinaryName:  "chisel",
-		Version:     "1.10.1",
-		RequiredFor: []string{"chisel_tunnel"},
+		Name:          "chisel",
+		Description:   "HTTPS/WebSocket tunnel",
+		DownloadURL:   "https://github.com/jpillora/chisel/releases/download/v{version}/chisel_{version}_{os}_{arch}.gz",
+		BinaryName:    "chisel",
+		Version:       "1.10.1",
+		RequiredFor:   []string{"chisel_tunnel"},
+		ArchiveFormat: assetFormatGzip,
+		Checksums: map[string]string{
+			"darwin/amd64": "5a7e6ba198e840492d34d7110e1c90118642faac542773121a4c4cc9b44c226a",
+			"darwin/arm64": "474bf6d3dd92c9162950d1a8d8e912709b1e48494ca6af5dc5d0381ab80e56bd",
+			"linux/amd64":  "0525aa3c5d457f2a4075e66221d5125d434bedf15006d3271c213f5cd6ff2230",
+			"linux/arm64":  "f55beb68fb99b69903df1adcff4197fbfdb82cb0ee596848c0f055dc219da983",
+		},
 	},
 	"hysteria": {
-		Name:        "hysteria",
-		Description: "QUIC/HTTP3 tunnel (UDP/443)",
-		DownloadURL: "https://github.com/apernet/hysteria/releases/download/app%2Fv{version}/hysteria-{os}-{arch}",
-		BinaryName:  "hysteria",
-		Version:     "2.6.1",
-		RequiredFor: []string{"quic_tunnel"},
+		Name:          "hysteria",
+		Description:   "QUIC/HTTP3 tunnel (UDP/443)",
+		DownloadURL:   "https://github.com/apernet/hysteria/releases/download/app%2Fv{version}/hysteria-{os}-{arch}",
+		BinaryName:    "hysteria",
+		Version:       "2.6.1",
+		RequiredFor:   []string{"quic_tunnel"},
+		ArchiveFormat: assetFormatPlain,
+		Checksums: map[string]string{
+			"darwin/amd64": "9e8e3699bf42553f15d419d87bc8b7b08d5a9de6ef132dbc2df5fbfd9964b5e3",
+			"darwin/arm64": "f636d9afc6f5bc69803b07f5e306d313adae4dabb78614f6ac36d06765f7246e",
+			"linux/amd64":  "4bcdd7941a0fb85d3c55babe10cc2748fa0345c19a9b4bbf9b6b42613db149e3",
+			"linux/arm64":  "2ee3fbbc0e590bae463fac38bd9f4bdfa7157e70bcf164037d817fc6d540d701",
+		},
 	},
 	"cloudflared": {
 		Name:        "cloudflared",
 		Description: "Cloudflare Tunnel / DoH proxy",
 		DownloadURL: "https://github.com/cloudflare/cloudflared/releases/download/{version}/cloudflared-{os}-{arch}",
-		BinaryName:  "cloudflared",
-		Version:     "2024.12.2",
-		RequiredFor: []string{"doh_tunnel"},
+		PlatformDownloadURLs: map[string]string{
+			"darwin/amd64": "https://github.com/cloudflare/cloudflared/releases/download/{version}/cloudflared-darwin-amd64.tgz",
+			"darwin/arm64": "https://github.com/cloudflare/cloudflared/releases/download/{version}/cloudflared-darwin-arm64.tgz",
+		},
+		BinaryName:    "cloudflared",
+		Version:       "2024.12.2",
+		RequiredFor:   []string{"doh_tunnel"},
+		ArchiveFormat: assetFormatPlain,
+		PlatformFormats: map[string]assetFormat{
+			"darwin/amd64": assetFormatTarGz,
+			"darwin/arm64": assetFormatTarGz,
+		},
+		Checksums: map[string]string{
+			"darwin/amd64": "71b17468bab0426b20959d4eeadfff3658d07c636beea472539e0781381559cc",
+			"darwin/arm64": "30eb982ab6dda1e12dbc17b3a9d51c80362874544032930055354965b1930621",
+			"linux/amd64":  "5237675a5e806120729acc78c5be02f9db5f406717699587abfa72b49b39fe40",
+			"linux/arm64":  "96e8f95e878c1d4154d91c42781749ab66ca8088f1f3e6e6bc78c25c921e6b64",
+		},
 	},
 }
 
@@ -149,18 +194,26 @@ func DownloadTool(name string) (string, error) {
 		"os":      osName,
 		"arch":    arch,
 	})
+	platform := platformKey(osName, arch)
+	if override, ok := info.PlatformDownloadURLs[platform]; ok {
+		url = expandTemplate(override, map[string]string{
+			"version": info.Version,
+			"os":      osName,
+			"arch":    arch,
+		})
+	}
+	checksum, err := checksumForPlatform(info, platform)
+	if err != nil {
+		return "", err
+	}
+	format := archiveFormatForPlatform(info, platform)
 
 	dest := filepath.Join(ToolDir, info.BinaryName)
 
-	if err := downloadFile(url, dest); err != nil {
+	if err := downloadFile(url, checksum, format, info.BinaryName, dest); err != nil {
 		// Clean up partial download.
 		_ = os.Remove(dest)
 		return "", fmt.Errorf("download %s: %w", name, err)
-	}
-
-	// Make executable (owner rwx, group rx, other rx).
-	if err := os.Chmod(dest, 0o755); err != nil {
-		return "", fmt.Errorf("chmod %s: %w", dest, err)
 	}
 
 	return dest, nil
@@ -293,8 +346,36 @@ func indexOf(s, sub string, start int) int {
 	return -1
 }
 
-// downloadFile fetches a URL to a local file. Handles .gz decompression.
-func downloadFile(url, dest string) error {
+func platformKey(osName, arch string) string {
+	return osName + "/" + arch
+}
+
+func checksumForPlatform(info *ToolInfo, platform string) (string, error) {
+	if info.Checksums == nil {
+		return "", fmt.Errorf("no checksum configured for %s", info.Name)
+	}
+	sum, ok := info.Checksums[platform]
+	if !ok || sum == "" {
+		return "", fmt.Errorf("no checksum configured for %s on %s", info.Name, platform)
+	}
+	return strings.ToLower(sum), nil
+}
+
+func archiveFormatForPlatform(info *ToolInfo, platform string) assetFormat {
+	if info.PlatformFormats != nil {
+		if format, ok := info.PlatformFormats[platform]; ok {
+			return format
+		}
+	}
+	if info.ArchiveFormat != "" {
+		return info.ArchiveFormat
+	}
+	return assetFormatPlain
+}
+
+// downloadFile fetches a URL to a local file, verifies its checksum, and
+// extracts archives into the final executable path.
+func downloadFile(url, checksum string, format assetFormat, binaryName, dest string) error {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil) //nolint:gosec // URL is from internal registry, not user input
 	if err != nil {
 		return err
@@ -309,17 +390,110 @@ func downloadFile(url, dest string) error {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
 
-	var reader io.Reader = resp.Body
-
-	// Decompress gzip if the URL ends with .gz
-	if len(url) > 3 && url[len(url)-3:] == ".gz" {
-		gz, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return fmt.Errorf("gzip open: %w", err)
-		}
-		defer gz.Close()
-		reader = gz
+	dir := filepath.Dir(dest)
+	rawFile, err := os.CreateTemp(dir, binaryName+".*.asset")
+	if err != nil {
+		return err
 	}
+	rawPath := rawFile.Name()
+	defer func() {
+		_ = rawFile.Close()
+		_ = os.Remove(rawPath)
+	}()
+
+	if _, err := io.Copy(rawFile, resp.Body); err != nil {
+		return err
+	}
+	if err := rawFile.Close(); err != nil {
+		return err
+	}
+
+	if err := verifySHA256(rawPath, checksum); err != nil {
+		return err
+	}
+
+	tempDest, err := writeInstalledBinary(rawPath, format, binaryName, dir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tempDest)
+	}()
+
+	if err := os.Chmod(tempDest, 0o755); err != nil {
+		return fmt.Errorf("chmod %s: %w", tempDest, err)
+	}
+	if err := os.Rename(tempDest, dest); err != nil {
+		return err
+	}
+	return nil
+}
+
+func verifySHA256(path, expected string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return err
+	}
+	got := hex.EncodeToString(hasher.Sum(nil))
+	if got != strings.ToLower(expected) {
+		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
+	}
+	return nil
+}
+
+func writeInstalledBinary(rawPath string, format assetFormat, binaryName, dir string) (string, error) {
+	tempDest, err := os.CreateTemp(dir, binaryName+".*.tmp")
+	if err != nil {
+		return "", err
+	}
+	tempDestPath := tempDest.Name()
+	if err := tempDest.Close(); err != nil {
+		return "", err
+	}
+
+	switch format {
+	case assetFormatPlain:
+		if err := os.Rename(rawPath, tempDestPath); err != nil {
+			_ = os.Remove(tempDestPath)
+			return "", err
+		}
+		return tempDestPath, nil
+	case assetFormatGzip:
+		if err := extractGzip(rawPath, tempDestPath); err != nil {
+			_ = os.Remove(tempDestPath)
+			return "", err
+		}
+		return tempDestPath, nil
+	case assetFormatTarGz:
+		if err := extractTarGz(rawPath, binaryName, tempDestPath); err != nil {
+			_ = os.Remove(tempDestPath)
+			return "", err
+		}
+		return tempDestPath, nil
+	default:
+		_ = os.Remove(tempDestPath)
+		return "", fmt.Errorf("unsupported asset format: %s", format)
+	}
+}
+
+func extractGzip(src, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	gz, err := gzip.NewReader(in)
+	if err != nil {
+		return fmt.Errorf("gzip open: %w", err)
+	}
+	defer gz.Close()
 
 	out, err := os.Create(dest)
 	if err != nil {
@@ -327,6 +501,47 @@ func downloadFile(url, dest string) error {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, reader)
+	_, err = io.Copy(out, gz)
 	return err
+}
+
+func extractTarGz(src, binaryName, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	gz, err := gzip.NewReader(in)
+	if err != nil {
+		return fmt.Errorf("gzip open: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if hdr.FileInfo().IsDir() {
+			continue
+		}
+		if filepath.Base(hdr.Name) != binaryName {
+			continue
+		}
+		out, err := os.Create(dest)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, tr); err != nil {
+			_ = out.Close()
+			return err
+		}
+		return out.Close()
+	}
+	return fmt.Errorf("archive did not contain %s", binaryName)
 }
