@@ -25,7 +25,6 @@ var (
 	cYellow    = lipgloss.Color("#ffd000")
 	cDimGray   = lipgloss.Color("#7a7a8e") // Brighter for readability on dark bg
 	cWhite     = lipgloss.Color("#e8e8f8")
-	cDark      = lipgloss.Color("#0d0d1a")
 	cBorder    = lipgloss.Color("#3a3a55") // Slightly brighter borders
 	cBorderHot = lipgloss.Color("#00e5ff") // Glowing border for active panels
 )
@@ -197,7 +196,6 @@ type tuiModel struct {
 
 	// Control
 	quitting bool
-	err      error
 }
 
 type tuiBypassEntry struct {
@@ -502,7 +500,7 @@ func (m tuiModel) viewSystem(w int) string {
 	} else {
 		portalLine = indicatorDot(true) + " Portal " + warnStyle.Render(m.portalType)
 		if m.vendor != "" {
-			portalLine += dimStyle.Render(" ("+m.vendor+")")
+			portalLine += dimStyle.Render(" (" + m.vendor + ")")
 		}
 	}
 
@@ -630,7 +628,7 @@ func (m tuiModel) viewBypass(w int) string {
 			if len(detail) > 50 {
 				detail = detail[:47] + "..."
 			}
-			line += dimStyle.Render(" -- "+detail)
+			line += dimStyle.Render(" -- " + detail)
 		}
 		lines = append(lines, line)
 	}

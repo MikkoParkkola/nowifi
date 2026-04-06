@@ -100,17 +100,16 @@ const (
 )
 
 // Color helpers that return raw ANSI (no reset suffix).
-func dBoldCyan() string   { return "\033[1;36m" }
-func dBold() string       { return "\033[1m" }
-func dDim() string        { return "\033[2m" }
-func dGreen() string      { return "\033[32m" }
+func dBoldCyan() string    { return "\033[1;36m" }
+func dDim() string         { return "\033[2m" }
+func dGreen() string       { return "\033[32m" }
 func dBrightGreen() string { return "\033[1;32m" }
-func dRed() string        { return "\033[31m" }
-func dBrightRed() string  { return "\033[1;31m" }
-func dYellow() string     { return "\033[33m" }
-func dWhite() string      { return "\033[37m" }
+func dRed() string         { return "\033[31m" }
+func dBrightRed() string   { return "\033[1;31m" }
+func dYellow() string      { return "\033[33m" }
+func dWhite() string       { return "\033[37m" }
 func dBrightWhite() string { return "\033[1;37m" }
-func dGray() string       { return "\033[90m" }
+func dGray() string        { return "\033[90m" }
 
 // NewDashboard creates the dashboard, switches to the alternate screen,
 // hides the cursor, and renders the initial empty frame.
@@ -769,14 +768,12 @@ func (d *Dashboard) bannerRow(inner int, bannerLine, rightText string) string {
 	b.WriteString(dReset)
 
 	// Right-aligned text.
-	rtLen := len(rightText)
-	gap := inner - bl - rtLen
+	gap := inner - bl - len(rightText)
 	if gap < 1 {
 		gap = 1
 		// Truncate right text if it doesn't fit.
 		if bl+1 >= inner {
 			rightText = ""
-			rtLen = 0
 			gap = inner - bl
 			if gap < 0 {
 				gap = 0

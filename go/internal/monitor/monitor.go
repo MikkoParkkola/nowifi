@@ -355,16 +355,22 @@ func getPhyForInterface(iface string) string {
 type Guard struct {
 	iface   string
 	monitor *Interface
+	enable  func(string) (*Interface, error)
+	disable func(*Interface) error
 }
 
 // NewGuard creates a new Guard for the given interface.
 func NewGuard(iface string) *Guard {
-	return &Guard{iface: iface}
+	return &Guard{iface: iface, enable: Enable, disable: Disable}
 }
 
 // Enable puts the interface into monitor mode and returns the Interface.
 func (g *Guard) Enable() (*Interface, error) {
-	mon, err := Enable(g.iface)
+	enable := g.enable
+	if enable == nil {
+		enable = Enable
+	}
+	mon, err := enable(g.iface)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +381,11 @@ func (g *Guard) Enable() (*Interface, error) {
 // Close reverts the interface from monitor mode. Safe to call multiple times.
 func (g *Guard) Close() error {
 	if g.monitor != nil && g.monitor.WasManaged {
-		err := Disable(g.monitor)
+		disable := g.disable
+		if disable == nil {
+			disable = Disable
+		}
+		err := disable(g.monitor)
 		g.monitor = nil
 		return err
 	}

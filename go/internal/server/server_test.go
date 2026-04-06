@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -503,7 +504,12 @@ func TestCreateVPS_DigitalOcean_Mock(t *testing.T) {
 	// that CreateVPS would produce, and test the mock API response parsing.
 
 	// Simulate what createDigitalOcean does with the response.
-	resp, err := http.Post(srv.URL+"/v2/droplets", "application/json", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/v2/droplets", nil)
+	if err != nil {
+		t.Fatalf("new POST request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST to mock: %v", err)
 	}
@@ -523,7 +529,11 @@ func TestCreateVPS_DigitalOcean_Mock(t *testing.T) {
 	}
 
 	// Simulate GET for IP.
-	resp2, err := http.Get(srv.URL + "/v2/droplets/123")
+	req2, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/v2/droplets/123", nil)
+	if err != nil {
+		t.Fatalf("new GET request: %v", err)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
 		t.Fatalf("GET to mock: %v", err)
 	}
@@ -577,7 +587,12 @@ func TestCreateVPS_Hetzner_Mock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/servers", "application/json", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/v1/servers", nil)
+	if err != nil {
+		t.Fatalf("new POST request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +664,7 @@ func TestDestroyServer_DigitalOcean_Mock(t *testing.T) {
 	defer srv.Close()
 
 	// Simulate the destroy request to the mock server.
-	req, err := http.NewRequest("DELETE", srv.URL+"/v2/droplets/456", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, srv.URL+"/v2/droplets/456", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

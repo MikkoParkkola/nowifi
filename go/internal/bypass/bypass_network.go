@@ -133,7 +133,11 @@ func tryHTTPConnect(probes *ProbeResults, config *Config, plat PlatformOps) Resu
 
 		_, _ = conn.Write([]byte("CONNECT httpbin.org:443 HTTP/1.1\r\nHost: httpbin.org\r\n\r\n"))
 		buf := make([]byte, 4096)
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			conn.Close()
+			cancel()
+			continue
+		}
 		n, _ := conn.Read(buf)
 		conn.Close()
 		cancel()

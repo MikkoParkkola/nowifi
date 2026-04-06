@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -216,7 +217,11 @@ func TestCheckInternet_204(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp, err := client.Get(ts.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL, nil)
+	if err != nil {
+		t.Fatalf("new GET request: %v", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -238,7 +243,11 @@ func TestCheckInternet_Redirect(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp, err := client.Get(ts.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL, nil)
+	if err != nil {
+		t.Fatalf("new GET request: %v", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -260,7 +269,11 @@ func TestCheckInternet_ServerError(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp, err := client.Get(ts.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL, nil)
+	if err != nil {
+		t.Fatalf("new GET request: %v", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}

@@ -160,7 +160,9 @@ func Serve(port int) error {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			return
+		}
 	})
 
 	// JSON state endpoint for htmx polling.
@@ -174,14 +176,24 @@ func Serve(port int) error {
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	fmt.Printf("Dashboard: http://%s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 func handleState(w http.ResponseWriter, r *http.Request) {
 	state.mu.RLock()
 	defer state.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(state)
+	if err := json.NewEncoder(w).Encode(state); err != nil {
+		http.Error(w, "failed to encode state", http.StatusInternalServerError)
+	}
 }
 
 func handleAudit(w http.ResponseWriter, r *http.Request) {

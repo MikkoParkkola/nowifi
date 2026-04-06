@@ -527,7 +527,7 @@ func CapturePMKID(target WifiTarget, iface string, timeout time.Duration) (*Resu
 	// Write filterlist (target BSSID without colons).
 	filterlist := filepath.Join(outputDir, "filterlist.txt")
 	bssidClean := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(target.BSSID, ":", ""), "-", ""))
-	if err := os.WriteFile(filterlist, []byte(bssidClean+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filterlist, []byte(bssidClean+"\n"), 0o600); err != nil {
 		return nil, fmt.Errorf("write filterlist: %w", err)
 	}
 
@@ -655,7 +655,7 @@ func captureHandshakeHcx(target WifiTarget, iface, outputDir string, timeout tim
 
 	filterlist := filepath.Join(outputDir, "filterlist.txt")
 	bssidClean := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(target.BSSID, ":", ""), "-", ""))
-	if err := os.WriteFile(filterlist, []byte(bssidClean+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filterlist, []byte(bssidClean+"\n"), 0o600); err != nil {
 		return nil, fmt.Errorf("write filterlist: %w", err)
 	}
 
@@ -950,7 +950,10 @@ func CrackWPSPixie(target WifiTarget, iface string, timeout time.Duration) (*Res
 	stdoutText := runCmdWithTimeout(cmd, timeout)
 
 	// Save log.
-	_ = os.WriteFile(outputFile, []byte(stdoutText), 0o644)
+	logSaved := false
+	if err := os.WriteFile(outputFile, []byte(stdoutText), 0o600); err == nil {
+		logSaved = true
+	}
 
 	// Parse reaver output for WPS PIN and WPA PSK.
 	wpsPin, wpaPSK := parseReaverOutput(stdoutText)
@@ -959,11 +962,15 @@ func CrackWPSPixie(target WifiTarget, iface string, timeout time.Duration) (*Res
 		result.Success = true
 		result.Password = wpaPSK
 		result.Details = fmt.Sprintf("Pixie-Dust recovered WPA PSK from %s (WPS PIN: %s)", target.SSID, wpsPin)
-		result.CaptureFile = outputFile
+		if logSaved {
+			result.CaptureFile = outputFile
+		}
 	} else if wpsPin != "" {
 		result.Success = true
 		result.Details = fmt.Sprintf("Pixie-Dust recovered WPS PIN: %s (but no PSK in output)", wpsPin)
-		result.CaptureFile = outputFile
+		if logSaved {
+			result.CaptureFile = outputFile
+		}
 	} else {
 		if strings.Contains(stdoutText, "WPS transaction failed") {
 			result.Details = "WPS transaction failed -- AP may have rate limiting"
@@ -1025,7 +1032,7 @@ func CrackWPSPin(target WifiTarget, iface string, timeout time.Duration) (*Resul
 	stdoutText := runCmdWithTimeout(cmd, timeout)
 
 	// Save log.
-	_ = os.WriteFile(outputFile, []byte(stdoutText), 0o644)
+	_ = os.WriteFile(outputFile, []byte(stdoutText), 0o600)
 
 	wpsPin, wpaPSK := parseReaverOutput(stdoutText)
 
@@ -1928,7 +1935,7 @@ func onlineBruteViaCli(target WifiTarget, iface, wpaSupplicant, wpaCli, outputDi
 			result.Elapsed = time.Since(start)
 
 			logEntries = append(logEntries, fmt.Sprintf("FOUND: %s (attempt %d)", password, attempted))
-			_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+			_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o600)
 
 			// Disconnect.
 			_ = runWithTimeout(wpaCli, []string{"-i", iface, "disconnect"}, 3*time.Second)
@@ -1941,7 +1948,7 @@ func onlineBruteViaCli(target WifiTarget, iface, wpaSupplicant, wpaCli, outputDi
 		logEntries = append(logEntries, fmt.Sprintf("FAIL: %s", password))
 	}
 
-	_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+	_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o600)
 
 	if time.Since(start) >= timeout {
 		result.Details = fmt.Sprintf("Online brute force timed out after %d attempts in %v", attempted, timeout)
@@ -2001,7 +2008,7 @@ func onlineBruteViaConfig(target WifiTarget, iface, wpaSupplicant, outputDir, lo
 			result.Elapsed = time.Since(start)
 
 			logEntries = append(logEntries, fmt.Sprintf("FOUND: %s (attempt %d)", password, attempted))
-			_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+			_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o600)
 			return result, nil
 		}
 
@@ -2012,7 +2019,7 @@ func onlineBruteViaConfig(target WifiTarget, iface, wpaSupplicant, outputDir, lo
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+	_ = os.WriteFile(logFile, []byte(strings.Join(logEntries, "\n")+"\n"), 0o600)
 
 	if time.Since(start) >= timeout {
 		result.Details = fmt.Sprintf("Online brute force timed out after %d attempts in %v", attempted, timeout)

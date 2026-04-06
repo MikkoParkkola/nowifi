@@ -230,11 +230,6 @@ func simpleTable(title string, borderColor string, headers []string, rows [][]st
 
 	// Title.
 	if title != "" {
-		totalWidth := 0
-		for _, w := range widths {
-			totalWidth += w + 3
-		}
-		totalWidth-- // last column has no trailing space
 		sb.WriteString("\n" + bold + title + reset + "\n")
 	}
 
@@ -504,10 +499,10 @@ func GenerateMarkdown(portal PortalInfo, probes ProbeResults, bypasses []bypass.
 
 // jsonReport is the serialization structure for JSON output.
 type jsonReport struct {
-	Timestamp string          `json:"timestamp"`
-	Portal    jsonPortal      `json:"portal"`
-	Probes    jsonProbes      `json:"probes"`
-	Bypasses  []jsonBypass    `json:"bypasses"`
+	Timestamp string       `json:"timestamp"`
+	Portal    jsonPortal   `json:"portal"`
+	Probes    jsonProbes   `json:"probes"`
+	Bypasses  []jsonBypass `json:"bypasses"`
 }
 
 type jsonPortal struct {

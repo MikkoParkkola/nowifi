@@ -23,7 +23,6 @@ type mockPlatform struct {
 	arpTable   []platform.ArpEntry
 	currentMAC string
 	gateway    string
-	setMACErr  error
 	setMACOK   bool
 	renewCalls int
 	randomMAC  string
@@ -416,7 +415,7 @@ func TestTryMACClone_FiltersGatewayBroadcastOwnMAC(t *testing.T) {
 			{IP: "192.168.1.1", MAC: "11:22:33:44:55:66", Interface: "en0"},   // gateway -> skip
 			{IP: "192.168.1.2", MAC: "ff:ff:ff:ff:ff:ff", Interface: "en0"},   // broadcast -> skip
 			{IP: "192.168.1.3", MAC: "aa:bb:cc:dd:ee:ff", Interface: "en0"},   // our MAC -> skip
-			{IP: "192.168.1.4", MAC: "(incomplete)", Interface: "en0"},         // incomplete -> skip
+			{IP: "192.168.1.4", MAC: "(incomplete)", Interface: "en0"},        // incomplete -> skip
 			{IP: "192.168.1.5", MAC: "00:11:22:33:44:55", Interface: "wlan0"}, // wrong iface -> skip
 		},
 		setMACOK: false, // so it won't actually try to set anything
@@ -1138,7 +1137,7 @@ func TestTryChisel_CFViaWhitelist(t *testing.T) {
 
 func TestTryChisel_ServerNoOpenPorts(t *testing.T) {
 	probes := &ProbeResults{
-		Cloudflare:        ProbeResult{IsOpen: false},
+		Cloudflare: ProbeResult{IsOpen: false},
 		TunnelServerPorts: []PortResult{
 			{Port: 443, IsOpen: false},
 			{Port: 80, IsOpen: false},
@@ -1426,7 +1425,7 @@ func TestTryVPNPort53_DNSOpen(t *testing.T) {
 
 func TestTryChisel_WithOpenTunnelPort(t *testing.T) {
 	probes := &ProbeResults{
-		Cloudflare:        ProbeResult{IsOpen: false},
+		Cloudflare: ProbeResult{IsOpen: false},
 		TunnelServerPorts: []PortResult{
 			{Port: 443, IsOpen: true},
 		},

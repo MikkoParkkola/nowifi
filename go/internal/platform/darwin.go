@@ -576,7 +576,11 @@ func EnableStealth(iface string) (*StealthState, error) {
 
 	out, err := exec.CommandContext(ctx, "sysctl", "-n", "net.inet.ip.ttl").Output()
 	if err == nil {
-		fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &state.OriginalTTL)
+		if ttl, parseErr := strconv.Atoi(strings.TrimSpace(string(out))); parseErr == nil {
+			state.OriginalTTL = ttl
+		} else {
+			state.OriginalTTL = 64
+		}
 	} else {
 		state.OriginalTTL = 64
 	}

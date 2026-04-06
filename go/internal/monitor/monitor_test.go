@@ -167,6 +167,35 @@ func TestNewGuard_DifferentInterfaces(t *testing.T) {
 	}
 }
 
+func TestGuardEnable_UsesInjectedEnable(t *testing.T) {
+	expected := &Interface{Name: "test0mon", OriginalName: "test0", WasManaged: true}
+	called := false
+	g := &Guard{
+		iface: "test0",
+		enable: func(iface string) (*Interface, error) {
+			called = true
+			if iface != "test0" {
+				t.Fatalf("enable called with %q, want test0", iface)
+			}
+			return expected, nil
+		},
+	}
+
+	got, err := g.Enable()
+	if err != nil {
+		t.Fatalf("Enable() error = %v, want nil", err)
+	}
+	if !called {
+		t.Fatal("Enable() did not use injected enable function")
+	}
+	if got != expected {
+		t.Fatalf("Enable() returned unexpected interface: got %+v want %+v", got, expected)
+	}
+	if g.monitor != expected {
+		t.Fatal("Guard.monitor should store the enabled interface")
+	}
+}
+
 func TestGuardClose_Idempotent(t *testing.T) {
 	g := NewGuard("wlan0")
 	// Close without Enable should be safe and return nil.
@@ -201,14 +230,24 @@ func TestGuardClose_NotManaged(t *testing.T) {
 
 func TestGuardClose_ClearsMonitor(t *testing.T) {
 	// After Close with WasManaged=true, g.monitor should be nil.
+	disableCalled := false
 	g := &Guard{
 		iface:   "test0",
 		monitor: &Interface{Name: "test0", OriginalName: "test0", WasManaged: true},
+		disable: func(mon *Interface) error {
+			disableCalled = true
+			if mon == nil || mon.Name != "test0" {
+				t.Fatalf("disable called with unexpected monitor: %+v", mon)
+			}
+			return nil
+		},
 	}
-	// Close will try to call Disable which calls platform-specific code.
-	// On darwin with a fake interface it will fail, but monitor should still
-	// be set to nil (that's the contract). The error itself is acceptable.
-	_ = g.Close()
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close() error = %v, want nil", err)
+	}
+	if !disableCalled {
+		t.Fatal("Close() did not call injected disable function")
+	}
 	if g.monitor != nil {
 		t.Error("Guard.monitor should be nil after Close")
 	}

@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -117,7 +118,12 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	// Internet reachability.
 	inetOK := false
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, inetErr := client.Get("http://connectivitycheck.gstatic.com/generate_204")
+	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://connectivitycheck.gstatic.com/generate_204", nil)
+	inetErr := reqErr
+	var resp *http.Response
+	if reqErr == nil {
+		resp, inetErr = client.Do(req)
+	}
 	if inetErr == nil {
 		resp.Body.Close()
 		inetOK = resp.StatusCode == 204

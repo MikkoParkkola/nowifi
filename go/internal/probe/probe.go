@@ -27,9 +27,9 @@ import (
 
 // DnsProbeResult holds the result of external DNS resolver reachability tests.
 type DnsProbeResult struct {
-	IsOpen    bool              `json:"is_open"`
-	Resolvers []ResolverResult  `json:"resolvers,omitempty"`
-	Details   string            `json:"details"`
+	IsOpen    bool             `json:"is_open"`
+	Resolvers []ResolverResult `json:"resolvers,omitempty"`
+	Details   string           `json:"details"`
 }
 
 // ResolverResult holds the result of a single DNS resolver test.
@@ -80,17 +80,17 @@ type PortProbeResult struct {
 
 // ProbeResults aggregates all probe results.
 type ProbeResults struct {
-	DNS              DnsProbeResult    `json:"dns"`
-	ICMP             IcmpProbeResult   `json:"icmp"`
-	IPv6             Ipv6ProbeResult   `json:"ipv6"`
-	Cloudflare       HttpsProbeResult  `json:"cloudflare"`
-	Whitelists       []WhitelistResult `json:"whitelists,omitempty"`
-	OpenPorts        []PortProbeResult `json:"open_ports,omitempty"`
+	DNS               DnsProbeResult    `json:"dns"`
+	ICMP              IcmpProbeResult   `json:"icmp"`
+	IPv6              Ipv6ProbeResult   `json:"ipv6"`
+	Cloudflare        HttpsProbeResult  `json:"cloudflare"`
+	Whitelists        []WhitelistResult `json:"whitelists,omitempty"`
+	OpenPorts         []PortProbeResult `json:"open_ports,omitempty"`
 	TunnelServerPorts []PortProbeResult `json:"tunnel_server_ports,omitempty"`
-	QUIC             PortProbeResult   `json:"quic"`
-	NTP              PortProbeResult   `json:"ntp"`
-	DoH              PortProbeResult   `json:"doh"`
-	Topology         SubnetTopology    `json:"topology"`
+	QUIC              PortProbeResult   `json:"quic"`
+	NTP               PortProbeResult   `json:"ntp"`
+	DoH               PortProbeResult   `json:"doh"`
+	Topology          SubnetTopology    `json:"topology"`
 }
 
 // PortServices maps well-known port numbers to human-readable service names.
@@ -235,7 +235,9 @@ func tryDNSResolve(resolverIP, domain string) string {
 		return ""
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return ""
+	}
 
 	// Build a minimal DNS query for A record.
 	query := buildDNSQuery(domain)
@@ -411,7 +413,12 @@ func ProbeIPv6(iface string) Ipv6ProbeResult {
 
 	// Fallback: try HTTP over IPv6.
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://ipv6.google.com")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://ipv6.google.com", nil)
+	if err != nil {
+		result.Details = fmt.Sprintf("IPv6 address %s present but no external connectivity", ipv6Addr)
+		return result
+	}
+	resp, err := client.Do(req)
 	if err == nil {
 		resp.Body.Close()
 		if resp.StatusCode == 200 {
@@ -466,7 +473,12 @@ func ProbeHTTPS(targetURL, label string) HttpsProbeResult {
 		},
 	}
 
-	resp, err := client.Get(targetURL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, targetURL, nil)
+	if err != nil {
+		result.Details = fmt.Sprintf("%s: connection failed (%s)", labelOrURL(label, targetURL), err)
+		return result
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		result.Details = fmt.Sprintf("%s: connection failed (%s)", labelOrURL(label, targetURL), err)
 		return result
@@ -538,7 +550,14 @@ func ProbeWhitelists(stealth bool) []WhitelistResult {
 
 		wr := WhitelistResult{Domain: t.Domain}
 
-		resp, err := client.Get(t.URL)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, t.URL, nil)
+		if err != nil {
+			wr.Details = "Invalid request URL"
+			results = append(results, wr)
+			continue
+		}
+
+		resp, err := client.Do(req)
 		if err != nil {
 			if isTimeout(err) {
 				wr.Details = "Timeout"
@@ -733,7 +752,7 @@ func ProbeDoH(stealth bool) PortProbeResult {
 	for _, ep := range endpoints {
 		stealthSleep(stealth, 100, 300)
 
-		req, err := http.NewRequest(http.MethodGet, ep.URL, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ep.URL, nil)
 		if err != nil {
 			continue
 		}
@@ -763,15 +782,17 @@ func probeUDPPort(targetIP string, port int, timeout time.Duration) bool {
 		return false
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(timeout))
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return false
+	}
 
 	var probe []byte
 	switch port {
 	case 443:
 		// QUIC Initial packet header (triggers version negotiation).
 		probe = []byte{
-			0xC0,                                           // Long header, fixed bit
-			0x00, 0x00, 0x00, 0x01,                         // Version 1
+			0xC0,                   // Long header, fixed bit
+			0x00, 0x00, 0x00, 0x01, // Version 1
 			0x08,                                           // DCID length
 			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // DCID
 			0x00,       // SCID length
@@ -885,7 +906,10 @@ func tryDNSBeacon(serverIP string) []int {
 		if err != nil {
 			continue
 		}
-		conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			conn.Close()
+			continue
+		}
 
 		// Build TXT query.
 		query := buildDNSTXTQuery(domain)

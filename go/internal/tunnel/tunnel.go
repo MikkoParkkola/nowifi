@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -379,7 +380,9 @@ func VerifySOCKS(port int) bool {
 			host, portStr, _ := net.SplitHostPort(addr)
 			portNum := 80
 			if portStr != "" {
-				fmt.Sscanf(portStr, "%d", &portNum)
+				if parsedPort, err := strconv.Atoi(portStr); err == nil {
+					portNum = parsedPort
+				}
 			}
 
 			req := []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
@@ -468,25 +471,24 @@ func waitForPort(cmd *exec.Cmd, stderrPipe io.Reader, port int, timeout time.Dur
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				stderr := readStderr(stderrPipe)
-				return fmt.Errorf("tunnel did not start within %v: %s", timeout, truncate(stderr, 500))
-			}
+	for range ticker.C {
+		if time.Now().After(deadline) {
+			stderr := readStderr(stderrPipe)
+			return fmt.Errorf("tunnel did not start within %v: %s", timeout, truncate(stderr, 500))
+		}
 
-			// Check if process died.
-			if cmd.ProcessState != nil {
-				stderr := readStderr(stderrPipe)
-				return fmt.Errorf("tunnel process exited early: %s", truncate(stderr, 500))
-			}
+		// Check if process died.
+		if cmd.ProcessState != nil {
+			stderr := readStderr(stderrPipe)
+			return fmt.Errorf("tunnel process exited early: %s", truncate(stderr, 500))
+		}
 
-			if portListening(port) {
-				return nil
-			}
+		if portListening(port) {
+			return nil
 		}
 	}
+
+	return nil
 }
 
 // waitForTunInterface polls until a TUN interface has an IPv4 address,
@@ -501,26 +503,25 @@ func waitForTunInterface(cmd *exec.Cmd, stderrPipe io.Reader, ifaceName string, 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return fmt.Errorf("tunnel interface %s did not appear within %v", ifaceName, timeout)
-			}
+	for range ticker.C {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("tunnel interface %s did not appear within %v", ifaceName, timeout)
+		}
 
-			// Check if process died.
-			if cmd.ProcessState != nil {
-				stderr := readStderr(stderrPipe)
-				return fmt.Errorf("tunnel process exited early: %s", truncate(stderr, 500))
-			}
+		// Check if process died.
+		if cmd.ProcessState != nil {
+			stderr := readStderr(stderrPipe)
+			return fmt.Errorf("tunnel process exited early: %s", truncate(stderr, 500))
+		}
 
-			// Check if TUN interface has an IP.
-			out, err := exec.Command("ifconfig", ifaceName).CombinedOutput()
-			if err == nil && strings.Contains(string(out), "inet") {
-				return nil
-			}
+		// Check if TUN interface has an IP.
+		out, err := exec.Command("ifconfig", ifaceName).CombinedOutput()
+		if err == nil && strings.Contains(string(out), "inet") {
+			return nil
 		}
 	}
+
+	return nil
 }
 
 // tryCloudflaredDoH attempts to start cloudflared in proxy-dns mode.

@@ -10,6 +10,7 @@ package toolchain
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -294,7 +295,11 @@ func indexOf(s, sub string, start int) int {
 
 // downloadFile fetches a URL to a local file. Handles .gz decompression.
 func downloadFile(url, dest string) error {
-	resp, err := http.Get(url) //nolint:gosec // URL is from internal registry, not user input
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil) //nolint:gosec // URL is from internal registry, not user input
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}

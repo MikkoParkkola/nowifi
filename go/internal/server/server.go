@@ -13,6 +13,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,7 +156,7 @@ func writeServers(servers []Info) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(serversFile(), data, 0o644)
+	return os.WriteFile(serversFile(), data, 0o600)
 }
 
 // LoadConfig loads ~/.nowifi/config.json (tokens, URLs).
@@ -178,7 +179,7 @@ func SaveConfig(cfg map[string]string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configFile(), data, 0o644)
+	return os.WriteFile(configFile(), data, 0o600)
 }
 
 // getToken gets an API token: explicit arg > config file > error.
@@ -305,14 +306,14 @@ func SetupCloudflareWorker() (*Info, error) {
 	defer os.RemoveAll(tmpDir)
 
 	workerPath := filepath.Join(tmpDir, "worker.js")
-	if err := os.WriteFile(workerPath, []byte(CloudflareWorkerJS), 0o644); err != nil {
+	if err := os.WriteFile(workerPath, []byte(CloudflareWorkerJS), 0o600); err != nil {
 		return nil, fmt.Errorf("write worker.js: %w", err)
 	}
 
 	today := time.Now().UTC().Format("2006-01-02")
 	tomlContent := fmt.Sprintf(cfWranglerTOML, today)
 	tomlPath := filepath.Join(tmpDir, "wrangler.toml")
-	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0o644); err != nil {
+	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0o600); err != nil {
 		return nil, fmt.Errorf("write wrangler.toml: %w", err)
 	}
 
@@ -403,7 +404,7 @@ func createDigitalOcean(token string, ttlHours int) (*Info, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", "https://api.digitalocean.com/v2/droplets", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.digitalocean.com/v2/droplets", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +465,7 @@ func waitForDropletIP(token, dropletID string, timeout time.Duration) (string, e
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	for time.Since(start) < timeout {
-		req, err := http.NewRequest("GET", "https://api.digitalocean.com/v2/droplets/"+dropletID, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.digitalocean.com/v2/droplets/"+dropletID, nil)
 		if err != nil {
 			return "", err
 		}
@@ -521,7 +522,7 @@ func createHetzner(token string, ttlHours int) (*Info, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", "https://api.hetzner.cloud/v1/servers", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.hetzner.cloud/v1/servers", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +592,7 @@ func waitForHetznerIP(token, serverID string, timeout time.Duration) (string, er
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	for time.Since(start) < timeout {
-		req, err := http.NewRequest("GET", "https://api.hetzner.cloud/v1/servers/"+serverID, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.hetzner.cloud/v1/servers/"+serverID, nil)
 		if err != nil {
 			return "", err
 		}
@@ -660,7 +661,7 @@ func DestroyServer(info *Info, apiToken string) error {
 }
 
 func destroyDigitalOcean(token, dropletID string) error {
-	req, err := http.NewRequest("DELETE", "https://api.digitalocean.com/v2/droplets/"+dropletID, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, "https://api.digitalocean.com/v2/droplets/"+dropletID, nil)
 	if err != nil {
 		return err
 	}
@@ -682,7 +683,7 @@ func destroyDigitalOcean(token, dropletID string) error {
 }
 
 func destroyHetzner(token, serverID string) error {
-	req, err := http.NewRequest("DELETE", "https://api.hetzner.cloud/v1/servers/"+serverID, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, "https://api.hetzner.cloud/v1/servers/"+serverID, nil)
 	if err != nil {
 		return err
 	}

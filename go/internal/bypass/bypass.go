@@ -51,7 +51,7 @@ const (
 	IPv6Bypass      Method = "ipv6_bypass"
 	ChiselTunnel    Method = "chisel_tunnel"
 	CNASpoof        Method = "cna_useragent_spoof"
-	JSBypass        Method = "js_only_bypass"
+	JSBypass        Method = "js_only_bypass" //nolint:gosec // descriptive method name, not a secret
 	HTTPConnect     Method = "http_connect_abuse"
 	MACCloneIdle    Method = "mac_clone_idle"
 	MACClone        Method = "mac_clone"
@@ -130,8 +130,8 @@ type ProbeResults struct {
 	NTP        ProbeResult
 	DoH        ProbeResult
 
-	Whitelists       []WhitelistResult
-	OpenPorts        []PortResult
+	Whitelists        []WhitelistResult
+	OpenPorts         []PortResult
 	TunnelServerPorts []PortResult
 }
 
@@ -304,12 +304,12 @@ func hasInternet() bool {
 
 type defaultPlatformOps struct{}
 
-func (d *defaultPlatformOps) GetGateway(iface string) string       { return "" }
-func (d *defaultPlatformOps) GetCurrentMAC(iface string) string    { return "" }
-func (d *defaultPlatformOps) GetArpTable() []platform.ArpEntry     { return nil }
-func (d *defaultPlatformOps) SetMAC(iface, mac string) bool        { return false }
-func (d *defaultPlatformOps) RenewDHCP(iface string)               {}
-func (d *defaultPlatformOps) GenerateRandomMAC() string             { return platform.GenerateRandomMAC() }
+func (d *defaultPlatformOps) GetGateway(iface string) string    { return "" }
+func (d *defaultPlatformOps) GetCurrentMAC(iface string) string { return "" }
+func (d *defaultPlatformOps) GetArpTable() []platform.ArpEntry  { return nil }
+func (d *defaultPlatformOps) SetMAC(iface, mac string) bool     { return false }
+func (d *defaultPlatformOps) RenewDHCP(iface string)            {}
+func (d *defaultPlatformOps) GenerateRandomMAC() string         { return platform.GenerateRandomMAC() }
 
 // logStatus prints inline status during bypass attempts.
 // SuppressLog disables bypass log output (set true during TUI mode).

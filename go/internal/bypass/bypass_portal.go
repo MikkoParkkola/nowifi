@@ -136,7 +136,7 @@ func tryJSBypass() Result {
 	// the JavaScript frontend. Many inflight portals (Panasonic, Gogo) use
 	// SPAs where auth is only enforced by the JS app, not the API.
 	spaURL := "http://connectivitycheck.gstatic.com/generate_204"
-	if jsTestURLOverrides != nil && len(jsTestURLOverrides) > 0 {
+	if len(jsTestURLOverrides) > 0 {
 		spaURL = jsTestURLOverrides[0]
 	}
 	spaAPIs := []struct {

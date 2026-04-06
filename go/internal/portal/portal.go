@@ -10,6 +10,7 @@
 package portal
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ import (
 // LoginResult describes the outcome of an auto-login attempt.
 type LoginResult struct {
 	Success bool   `json:"success"`
-	Method  string `json:"method"`  // "click_through", "email", "room_number", "social", "manual"
+	Method  string `json:"method"` // "click_through", "email", "room_number", "social", "manual"
 	Details string `json:"details"`
 }
 
@@ -58,7 +59,11 @@ func AutoLogin(portalURL string) (*LoginResult, error) {
 	}
 
 	// Fetch the portal page.
-	resp, err := client.Get(portalURL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, portalURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch portal: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch portal: %w", err)
 	}
@@ -122,7 +127,11 @@ func Verify() bool {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp, err := client.Get("http://connectivitycheck.gstatic.com/generate_204")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://connectivitycheck.gstatic.com/generate_204", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -134,7 +143,6 @@ func Verify() bool {
 
 var (
 	formActionRE = regexp.MustCompile(`(?i)<form[^>]*action=["']([^"']+)["']`)
-	formMethodRE = regexp.MustCompile(`(?i)<form[^>]*method=["']([^"']+)["']`)
 	inputRE      = regexp.MustCompile(`(?i)<input[^>]*>`)
 	inputNameRE  = regexp.MustCompile(`(?i)name=["']([^"']+)["']`)
 	inputTypeRE  = regexp.MustCompile(`(?i)type=["']([^"']+)["']`)
@@ -204,7 +212,12 @@ func submitClickThrough(client *http.Client, actionURL string, fields []formFiel
 		}
 	}
 
-	resp, err := client.PostForm(actionURL, data)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, actionURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("submit click-through: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("submit click-through: %w", err)
 	}
@@ -245,7 +258,12 @@ func submitEmail(client *http.Client, actionURL string, fields []formField) (*Lo
 		data.Set("email", email)
 	}
 
-	resp, err := client.PostForm(actionURL, data)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, actionURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("submit email: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("submit email: %w", err)
 	}

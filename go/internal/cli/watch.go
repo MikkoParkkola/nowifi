@@ -153,7 +153,11 @@ func checkInternet() bool {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp, err := client.Get("http://connectivitycheck.gstatic.com/generate_204")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://connectivitycheck.gstatic.com/generate_204", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}

@@ -196,7 +196,7 @@ func portOpen(probes *probe.ProbeResults, port int) bool {
 // writeOutput writes content to diagnoseOutput file or stdout.
 func writeOutput(content string) {
 	if diagnoseOutput != "" {
-		if err := os.WriteFile(diagnoseOutput, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(diagnoseOutput, []byte(content), 0o600); err != nil {
 			fmt.Printf("  Error writing to %s: %v\n", diagnoseOutput, err)
 			return
 		}
