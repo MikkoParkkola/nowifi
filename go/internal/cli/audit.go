@@ -63,11 +63,11 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 	// temporarily. We handle this by doing the prompt BEFORE starting
 	// the Bubbletea program if a portal is detected and --auto is off.
 	//
-	// Phase 0: Pre-TUI portal prompt (runs outside Bubbletea).
+	// Phase 0: Quick WiFi check only — portal detection moves to pipeline goroutine.
 	wifi, wifiErr := platform.GetWifiInfo(flagInterface)
-	portalInfo := detect.DetectPortal(flagInterface)
+	var portalInfo *detect.PortalInfo // Detected inside pipeline for instant TUI start.
 
-	if portalInfo.IsCaptive && !flagAutoBypass {
+	if false && !flagAutoBypass { // Portal prompt disabled — runs inside TUI now.
 		printBanner("No WiFi? Now WiFi.")
 		choice := promptBypassChoice()
 		switch choice {
@@ -124,7 +124,10 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		p.Send(wifiMsg{ssid: wifi.SSID, channel: wifi.Channel, rssi: wifi.RSSI})
 	}
 
-	// --- Phase 2: Portal detection ---
+	// --- Phase 2: Portal detection (runs here for instant TUI start) ---
+	if portalInfo == nil {
+		portalInfo = detect.DetectPortal(flagInterface)
+	}
 	if portalInfo.IsCaptive {
 		p.Send(portalMsg{portalType: string(portalInfo.Type), vendor: portalInfo.Vendor, captive: true})
 		if portalInfo.Gateway != "" {
