@@ -119,14 +119,13 @@ func (g *Guard) Restore() {
 		}
 	}
 
-	// 4. Restore original MAC address if it was changed.
-	if g.originalMAC != "" {
+	// 4. Restore original MAC address if it was changed (requires root).
+	if g.originalMAC != "" && os.Geteuid() == 0 {
 		current, err := platform.GetCurrentMAC(g.iface)
 		if err == nil && current != g.originalMAC {
 			if err := platform.SetMAC(g.iface, g.originalMAC); err != nil {
 				fmt.Fprintf(os.Stderr, "nowifi: warning: failed to restore MAC address: %v\n", err)
 			} else {
-				// Renew DHCP after MAC change so the network sees the original address.
 				if err := platform.RenewDHCP(g.iface); err != nil {
 					fmt.Fprintf(os.Stderr, "nowifi: warning: failed to renew DHCP: %v\n", err)
 				}
@@ -134,8 +133,10 @@ func (g *Guard) Restore() {
 		}
 	}
 
-	// 5. Flush DNS cache.
-	_ = platform.FlushDNS()
+	// 5. Flush DNS cache (best-effort, may need root).
+	if os.Geteuid() == 0 {
+		_ = platform.FlushDNS()
+	}
 }
 
 // OriginalMAC returns the MAC address captured when the Guard was created.

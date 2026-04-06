@@ -304,101 +304,76 @@ func (d *Dashboard) Render() {
 	var b strings.Builder
 	b.Grow(w * d.height * 4) // Pre-allocate generously for ANSI sequences.
 
-	// Home cursor.
-	b.WriteString("\033[H")
-
 	inner := w - 2 // Usable width inside the double-line border.
 
-	// ── Row 1: Top border ──────────────────────────────────────────
-	b.WriteString(d.borderTop(w))
-	b.WriteByte('\n')
+	// Row counter — every row gets absolute positioning + line clear.
+	// This prevents stacking when rows overflow terminal width.
+	row := 1
+	writeLine := func(content string) {
+		b.WriteString(fmt.Sprintf("\033[%d;1H\033[2K", row)) // Move to row, clear line.
+		b.WriteString(content)
+		row++
+	}
 
-	// ── Rows 2-4: Banner ──────────────────────────────────────────
+	// ── Row 1: Top border ──────────────────────────────────────────
+	writeLine(d.borderTop(w))
+
+	// ── Rows 2-5: Banner ──────────────────────────────────────────
 	for i, line := range bannerLines {
 		right := ""
 		switch i {
-		case 0:
-			// Empty right side.
 		case 1:
 			right = "No WiFi? Now WiFi."
 		case 2:
 			right = "v" + version
 		}
-		b.WriteString(d.bannerRow(inner, line, right))
-		b.WriteByte('\n')
+		writeLine(d.bannerRow(inner, line, right))
 	}
 
-	// ── Row 5: Header separator with T-junctions ──────────────────
+	// ── Header separator with T-junctions ──────────────────────
 	midCol := d.midColumn(inner)
-	b.WriteString(d.headerSep(w, midCol))
-	b.WriteByte('\n')
+	writeLine(d.headerSep(w, midCol))
 
-	// ── Rows 6-9: System + Network dual-pane ──────────────────────
+	// ── System + Network dual-pane ──────────────────────────────
 	leftW := midCol - 1
 	rightW := inner - midCol - 1
 
-	// Row 6: Section headers.
-	b.WriteString(d.dualPaneRow(leftW, rightW,
+	writeLine(d.dualPaneRow(leftW, rightW,
 		dBoldCyan()+"  SYSTEM"+dReset,
 		dBoldCyan()+"  NETWORK"+dReset,
 		8, 9))
-	b.WriteByte('\n')
 
-	// Row 7: WiFi / Gateway.
 	wifiVal := d.wifiDisplay()
 	gwVal := d.gatewayDisplay()
-	b.WriteString(d.dualPaneRow(leftW, rightW,
+	writeLine(d.dualPaneRow(leftW, rightW,
 		"  "+d.indicator(d.ssid != "" || d.wifiErr != "")+" WiFi  "+wifiVal,
 		"  Gateway  "+gwVal,
-		d.visLen("  "+d.indicator(d.ssid != "" || d.wifiErr != "")+" WiFi  "+wifiVal),
-		d.visLen("  Gateway  "+gwVal)))
-	b.WriteByte('\n')
+		0, 0))
 
-	// Row 8: Portal / Clients.
 	portalVal := d.portalDisplay()
 	clientVal := d.clientDisplay()
-	b.WriteString(d.dualPaneRow(leftW, rightW,
+	writeLine(d.dualPaneRow(leftW, rightW,
 		"  "+d.indicator(d.portalType != "")+" Portal "+portalVal,
 		"  Clients  "+clientVal,
-		d.visLen("  "+d.indicator(d.portalType != "")+" Portal "+portalVal),
-		d.visLen("  Clients  "+clientVal)))
-	b.WriteByte('\n')
+		0, 0))
 
-	// Row 9: Vendor / RTT.
 	vendorVal := d.vendorDisplay()
 	rttVal := d.rttDisplay()
-	b.WriteString(d.dualPaneRow(leftW, rightW,
+	writeLine(d.dualPaneRow(leftW, rightW,
 		"  "+d.indicator(d.vendor != "")+" Vendor "+vendorVal,
 		"  RTT      "+rttVal,
-		d.visLen("  "+d.indicator(d.vendor != "")+" Vendor "+vendorVal),
-		d.visLen("  RTT      "+rttVal)))
-	b.WriteByte('\n')
+		0, 0))
 
-	// ── Row 10: Probe section separator ───────────────────────────
-	b.WriteString(d.fullSep(w, '╠', '╣'))
-	b.WriteByte('\n')
+	// ── Probe section ─────────────────────────────────────────────
+	writeLine(d.fullSep(w, '╠', '╣'))
+	writeLine(d.contentRow(inner, dBoldCyan()+"  PROBES"+dReset, 0))
+	writeLine(d.probeRow(inner))
 
-	// ── Row 11: PROBES header ─────────────────────────────────────
-	b.WriteString(d.contentRow(inner, dBoldCyan()+"  PROBES"+dReset, 8))
-	b.WriteByte('\n')
+	// ── Bypass section ────────────────────────────────────────────
+	writeLine(d.fullSep(w, '╠', '╣'))
+	writeLine(d.contentRow(inner, dBoldCyan()+"  BYPASS"+dReset, 0))
 
-	// ── Row 12: Probe indicators ──────────────────────────────────
-	b.WriteString(d.probeRow(inner))
-	b.WriteByte('\n')
-
-	// ── Row 13: Bypass section separator ──────────────────────────
-	b.WriteString(d.fullSep(w, '╠', '╣'))
-	b.WriteByte('\n')
-
-	// ── Row 14: BYPASS header ─────────────────────────────────────
-	b.WriteString(d.contentRow(inner, dBoldCyan()+"  BYPASS"+dReset, 8))
-	b.WriteByte('\n')
-
-	// ── Bypass log: expands to fill available terminal height ────
-	// Fixed rows: banner(4) + headerSep(1) + system(4) + probesSep(1) +
-	//   probesHdr(1) + probes(1) + bypassSep(1) + bypassHdr(1) +
-	//   sessionSep(1) + session(1) + stealth(1) + footerSep(1) +
-	//   status(1) + bottomBorder(1) = 20 fixed rows
+	// Bypass log expands to fill available height.
 	bypassRows := d.height - 20
 	if bypassRows < 3 {
 		bypassRows = 3
@@ -409,43 +384,26 @@ func (d *Dashboard) Render() {
 	bypassLines := d.bypassLines()
 	for i := 0; i < bypassRows; i++ {
 		if i < len(bypassLines) {
-			b.WriteString(d.contentRow(inner, bypassLines[i].text, bypassLines[i].visLen))
+			writeLine(d.contentRow(inner, bypassLines[i].text, 0))
 		} else {
-			b.WriteString(d.contentRow(inner, "", 0))
+			writeLine(d.contentRow(inner, "", 0))
 		}
-		b.WriteByte('\n')
 	}
 
-	// ── Row 20: Session section separator ─────────────────────────
-	b.WriteString(d.fullSep(w, '╠', '╣'))
-	b.WriteByte('\n')
+	// ── Session section ───────────────────────────────────────────
+	writeLine(d.fullSep(w, '╠', '╣'))
+	writeLine(d.sessionRow(inner))
+	writeLine(d.stealthRow(inner))
 
-	// ── Row 21: SESSION line ──────────────────────────────────────
-	b.WriteString(d.sessionRow(inner))
-	b.WriteByte('\n')
-
-	// ── Row 22: Progress bar + stealth ────────────────────────────
-	b.WriteString(d.stealthRow(inner))
-	b.WriteByte('\n')
-
-	// ── Row 23: Footer separator ──────────────────────────────────
-	b.WriteString(d.fullSep(w, '╠', '╣'))
-	b.WriteByte('\n')
-
-	// ── Row 24: Status/help line ──────────────────────────────────
+	// ── Footer ────────────────────────────────────────────────────
+	writeLine(d.fullSep(w, '╠', '╣'))
 	statusText := d.statusDisplay()
-	b.WriteString(d.contentRow(inner, statusText.text, statusText.visLen))
-	b.WriteByte('\n')
-
-	// ── Row 25: Bottom border ─────────────────────────────────────
-	b.WriteString(d.borderBottom(w))
+	writeLine(d.contentRow(inner, statusText.text, 0))
+	writeLine(d.borderBottom(w))
 
 	// Clear any leftover lines below the dashboard.
-	remaining := d.height - 25
-	if remaining > 0 {
-		for i := 0; i < remaining; i++ {
-			b.WriteString("\n\033[2K")
-		}
+	for row <= d.height {
+		writeLine("")
 	}
 
 	d.mu.Unlock()
