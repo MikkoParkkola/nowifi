@@ -11,12 +11,12 @@ import (
 	"time"
 )
 
-// ASCII art banner using block character style.
-const banner = `
- ░█▀█░█▀█░█░█░▀█▀░█▀▀░▀█▀
- ░█░█░█░█░█▄█░░█░░█▀▀░░█░
- ░▀░▀░▀▀▀░▀░▀░▀▀▀░▀░░░▀▀▀
-`
+// Banner lines — the final revealed state.
+var bannerLines = []string{
+	"  ░█▀█░█▀█░█░█░▀█▀░█▀▀░▀█▀",
+	"  ░█░█░█░█░█▄█░░█░░█▀▀░░█░",
+	"  ░▀░▀░▀▀▀░▀░▀░▀▀▀░▀░░░▀▀▀",
+}
 
 // printBanner displays the styled startup banner.
 func printBanner(subtitle string) {
@@ -25,45 +25,64 @@ func printBanner(subtitle string) {
 		return
 	}
 
-	// Cyan banner
-	lines := strings.Split(banner, "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			fmt.Printf("\033[1;36m%s\033[0m\n", line)
-		}
-	}
-
-	// Version + subtitle
-	fmt.Printf("  \033[2m%s\033[0m  \033[1mv%s\033[0m\n", subtitle, version)
 	fmt.Println()
+	for _, line := range bannerLines {
+		fmt.Printf("\033[1;36m%s\033[0m\n", line)
+	}
+	fmt.Printf("\n  \033[2m%s\033[0m  \033[1;37mv%s\033[0m\n\n", subtitle, version)
 }
 
-// matrixRain displays a brief matrix-style animation.
-// Duration is ~1 second, 12 frames. Only runs if stdout is a terminal.
+// matrixRain displays a signal-scan animation unique to nowifi.
+//
+// The concept: a WiFi signal sweep searches for connectivity.
+// Signal bars scan left to right, probing for an opening.
+// When found, the banner crystallizes from the interference pattern.
+//
+// Three phases:
+//  1. SCAN — A signal probe sweeps across, leaving interference patterns
+//  2. LOCK — The probe finds a signal; interference patterns freeze
+//  3. DECODE — Frozen patterns resolve into the banner text
+//
+// Total: ~1.5 seconds. Terminal-only, respects NO_COLOR.
 func matrixRain() {
-	// Skip animation if not a terminal or NO_COLOR is set.
 	if !useColor {
 		return
 	}
 	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-		return // Not a terminal (piped output).
+		return
 	}
 
-	cols := 60
-	rows := 8
-	chars := "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"
-	runeChars := []rune(chars)
+	const (
+		cols = 40
+		rows = 5 // 1 blank + 3 banner + 1 blank
+		fps  = 50 * time.Millisecond
+	)
 
-	// Each column has a "drop" position.
-	drops := make([]int, cols)
-	for i := range drops {
-		drops[i] = -rand.Intn(rows * 2)
+	// Signal/interference characters — WiFi themed.
+	signalChars := []rune("·∙•○◦◌◎●◉⦿⊙⊚░▒▓")
+	probeChars := []rune("▸▹►▻⟩›»→⟶⇢")
+
+	// Build target from banner lines.
+	target := make([][]rune, rows)
+	for r := 0; r < rows; r++ {
+		bannerIdx := r - 1 // offset: row 0 is blank, rows 1-3 are banner
+		if bannerIdx >= 0 && bannerIdx < len(bannerLines) {
+			line := bannerLines[bannerIdx]
+			runes := []rune(line)
+			target[r] = make([]rune, cols)
+			copy(target[r], runes)
+			for c := len(runes); c < cols; c++ {
+				target[r][c] = ' '
+			}
+		} else {
+			target[r] = make([]rune, cols)
+			for c := range target[r] {
+				target[r][c] = ' '
+			}
+		}
 	}
 
-	// Hide cursor.
-	fmt.Print("\033[?25l")
-	defer fmt.Print("\033[?25h") // Restore cursor.
-
+	// Working grid.
 	grid := make([][]rune, rows)
 	for r := range grid {
 		grid[r] = make([]rune, cols)
@@ -72,57 +91,115 @@ func matrixRain() {
 		}
 	}
 
-	for frame := 0; frame < 12; frame++ {
-		// Advance drops.
-		for c := range drops {
-			drops[c]++
-			row := drops[c]
-			if row >= 0 && row < rows {
-				grid[row][c] = runeChars[rand.Intn(len(runeChars))]
-			}
-			// Fade old positions.
-			fadeRow := row - 3
-			if fadeRow >= 0 && fadeRow < rows {
-				grid[fadeRow][c] = ' '
-			}
-			// Reset drop when it goes past the screen.
-			if drops[c] > rows+5 {
-				drops[c] = -rand.Intn(rows)
-			}
-		}
+	decoded := make([][]bool, rows)
+	for r := range decoded {
+		decoded[r] = make([]bool, cols)
+	}
 
-		// Render frame.
+	// Reserve screen space.
+	fmt.Print("\033[?25l") // Hide cursor.
+	defer fmt.Print("\033[?25h")
+
+	for i := 0; i < rows+1; i++ {
+		fmt.Println()
+	}
+	fmt.Printf("\033[%dA\033[s", rows+1)
+
+	render := func() {
 		var buf strings.Builder
-		buf.WriteString("\033[H") // Move cursor to top.
+		buf.WriteString("\033[u")
 		for r := 0; r < rows; r++ {
 			for c := 0; c < cols; c++ {
 				ch := grid[r][c]
-				dropRow := drops[c]
 				if ch == ' ' {
 					buf.WriteByte(' ')
-				} else if r == dropRow {
-					// Head of drop: bright white.
-					buf.WriteString("\033[1;37m")
-					buf.WriteRune(ch)
-					buf.WriteString("\033[0m")
-				} else if r == dropRow-1 {
-					// Just behind head: bright green.
-					buf.WriteString("\033[1;32m")
+				} else if decoded[r][c] {
+					buf.WriteString("\033[1;36m") // Cyan — final banner.
 					buf.WriteRune(ch)
 					buf.WriteString("\033[0m")
 				} else {
-					// Trail: dim green.
-					buf.WriteString("\033[0;32m")
+					// Interference: dim cyan with occasional bright flickers.
+					if rand.Float32() < 0.15 {
+						buf.WriteString("\033[1;37m") // Bright white flash.
+					} else if rand.Float32() < 0.4 {
+						buf.WriteString("\033[0;36m") // Dim cyan.
+					} else {
+						buf.WriteString("\033[2;36m") // Very dim cyan.
+					}
 					buf.WriteRune(ch)
 					buf.WriteString("\033[0m")
 				}
 			}
 			buf.WriteByte('\n')
 		}
+		// Signal strength indicator below banner.
+		buf.WriteString("\033[0m")
 		fmt.Print(buf.String())
-		time.Sleep(80 * time.Millisecond)
 	}
 
-	// Clear the animation area.
-	fmt.Printf("\033[H\033[J")
+	// Phase 1: SCAN — Signal probe sweeps left to right.
+	// A vertical bar moves across, leaving interference in its wake.
+	for probeCol := 0; probeCol < cols+5; probeCol += 2 {
+		for r := 0; r < rows; r++ {
+			for c := 0; c < cols; c++ {
+				if c == probeCol {
+					// Probe head.
+					grid[r][c] = probeChars[rand.Intn(len(probeChars))]
+				} else if c == probeCol-1 || c == probeCol-2 {
+					// Probe trail — interference.
+					if target[r][c] != ' ' {
+						// Where banner text will be: leave denser interference.
+						grid[r][c] = signalChars[rand.Intn(len(signalChars))]
+					} else if rand.Float32() < 0.2 {
+						grid[r][c] = signalChars[rand.Intn(4)] // Light scatter.
+					}
+				} else if c < probeCol-2 && grid[r][c] != ' ' {
+					// Old interference fades.
+					if rand.Float32() < 0.15 {
+						grid[r][c] = ' '
+					}
+				}
+			}
+		}
+		render()
+		time.Sleep(fps)
+	}
+
+	// Phase 2: LOCK — Interference freezes, signal strength pulses.
+	for frame := 0; frame < 4; frame++ {
+		for r := 0; r < rows; r++ {
+			for c := 0; c < cols; c++ {
+				if target[r][c] != ' ' && !decoded[r][c] {
+					// Replace interference with banner-adjacent chars.
+					grid[r][c] = signalChars[rand.Intn(len(signalChars))]
+				}
+			}
+		}
+		render()
+		time.Sleep(fps)
+	}
+
+	// Phase 3: DECODE — Banner text resolves from interference.
+	// Decode column by column, left to right (like a signal lock).
+	for c := 0; c < cols; c++ {
+		for r := 0; r < rows; r++ {
+			if target[r][c] != ' ' {
+				grid[r][c] = target[r][c]
+				decoded[r][c] = true
+			} else {
+				grid[r][c] = ' '
+			}
+		}
+		if c%2 == 0 {
+			render()
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	// Final clean render.
+	render()
+	time.Sleep(150 * time.Millisecond)
+
+	// Move cursor below.
+	fmt.Printf("\033[u\033[%dB", rows+1)
 }
