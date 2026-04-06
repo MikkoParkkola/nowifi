@@ -117,13 +117,15 @@ func TestValidateInterface(t *testing.T) {
 		{"valid en1", "en1", "en1", false},
 		{"valid wlan0", "wlan0", "wlan0", false},
 		{"valid long", "abcdef0123456789", "abcdef0123456789", false},
+		{"valid VLAN", "en0.1", "en0.1", false},
+		{"valid systemd predictable", "wlx001122334455", "wlx001122334455", false},
+		{"valid p2p-dev", "p2p-dev-wlan0", "p2p-dev-wlan0", false},
 		{"empty", "", "", true},
 		{"starts with number", "0en", "", true},
 		{"special chars", "en0;", "", true},
 		{"injection", "en0; rm -rf /", "", true},
-		{"too long", "a1234567890123456", "", true},
+		{"too long (32 chars)", "a12345678901234567890123456789012", "", true},
 		{"spaces", "en 0", "", true},
-		{"dots", "en0.1", "", true},
 		{"slashes", "/dev/en0", "", true},
 	}
 	for _, tt := range tests {
@@ -464,10 +466,10 @@ func TestValidateInterface_SingleChar(t *testing.T) {
 }
 
 func TestValidateInterface_MaxLength(t *testing.T) {
-	name := "a123456789012345" // 16 chars: 1 alpha + 15 alnum = max allowed
+	name := "a12345678901234567890123456789a" // 31 chars: 1 alpha + 30 alnum = max
 	got, err := ValidateInterface(name)
 	if err != nil {
-		t.Errorf("16-char interface should be valid: %v", err)
+		t.Errorf("31-char interface should be valid: %v", err)
 	}
 	if got != name {
 		t.Errorf("got %q, want %q", got, name)
@@ -475,24 +477,30 @@ func TestValidateInterface_MaxLength(t *testing.T) {
 }
 
 func TestValidateInterface_OverMaxLength(t *testing.T) {
-	name := "a1234567890123456" // 17 chars
+	name := "a123456789012345678901234567890123" // 32+ chars
 	_, err := ValidateInterface(name)
 	if err == nil {
-		t.Error("17-char interface should be invalid")
+		t.Error("32-char interface should be invalid")
 	}
 }
 
 func TestValidateInterface_Underscore(t *testing.T) {
-	_, err := ValidateInterface("wlan_0")
-	if err == nil {
-		t.Error("underscore in interface name should be invalid")
+	got, err := ValidateInterface("wlan_0")
+	if err != nil {
+		t.Errorf("underscore in Linux interface name should be valid: %v", err)
+	}
+	if got != "wlan_0" {
+		t.Errorf("got %q, want wlan_0", got)
 	}
 }
 
 func TestValidateInterface_Hyphen(t *testing.T) {
-	_, err := ValidateInterface("wlan-0")
-	if err == nil {
-		t.Error("hyphen in interface name should be invalid")
+	got, err := ValidateInterface("p2p-dev-wlan0")
+	if err != nil {
+		t.Errorf("hyphen in Linux interface name should be valid: %v", err)
+	}
+	if got != "p2p-dev-wlan0" {
+		t.Errorf("got %q, want p2p-dev-wlan0", got)
 	}
 }
 
@@ -591,8 +599,8 @@ func TestValidateInterface_EdgeCases(t *testing.T) {
 		{"unicode", "en\u00e90", true},
 		{"newline", "en0\n", true},
 		{"null byte", "en\x000", true},
-		{"17 chars (max+1)", "a12345678901234567", true},
-		{"16 chars (max)", "a123456789012345", false},
+		{"32 chars (max+1)", "a123456789012345678901234567890123", true},
+		{"31 chars (max)", "a12345678901234567890123456789a", false},
 		{"pipe injection", "en0|id", true},
 		{"backtick injection", "en0`id`", true},
 		{"dollar injection", "en0$HOME", true},

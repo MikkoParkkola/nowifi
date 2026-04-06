@@ -88,6 +88,52 @@ func TestDownloadTool_VerifiesAndExtractsTarGzAsset(t *testing.T) {
 	}
 }
 
+func TestExtractGzipWithLimit_RejectsOversizedPayload(t *testing.T) {
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "tool.gz")
+	dest := filepath.Join(srcDir, "tool")
+	payload := bytes.Repeat([]byte("a"), 9)
+	if err := os.WriteFile(src, gzipBytes(t, payload), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", src, err)
+	}
+
+	err := extractGzipWithLimit(src, dest, 8)
+	if err == nil {
+		t.Fatal("extractGzipWithLimit succeeded with oversized payload, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Fatalf("expected size limit error, got %v", err)
+	}
+	info, statErr := os.Stat(dest)
+	if statErr != nil {
+		t.Fatalf("Stat(%q): %v", dest, statErr)
+	}
+	if info.Size() != 8 {
+		t.Fatalf("dest size = %d, want 8-byte capped partial output", info.Size())
+	}
+}
+
+func TestExtractTarGzWithLimit_RejectsOversizedPayload(t *testing.T) {
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "tool.tgz")
+	dest := filepath.Join(srcDir, "cloudflared-test")
+	payload := bytes.Repeat([]byte("b"), 9)
+	if err := os.WriteFile(src, tarGzBytes(t, "cloudflared-test", payload), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", src, err)
+	}
+
+	err := extractTarGzWithLimit(src, "cloudflared-test", dest, 8)
+	if err == nil {
+		t.Fatal("extractTarGzWithLimit succeeded with oversized payload, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds max extracted size") {
+		t.Fatalf("expected size limit error, got %v", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no extracted file when tar header exceeds limit, got stat err %v", statErr)
+	}
+}
+
 func TestDownloadTool_RejectsChecksumMismatch(t *testing.T) {
 	payload := []byte("plain-binary")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

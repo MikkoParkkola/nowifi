@@ -41,8 +41,10 @@ type StealthState struct {
 }
 
 var (
-	macRE   = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
-	ifaceRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]{0,15}$`)
+	macRE = regexp.MustCompile(`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`)
+	// Linux interface names: up to 31 chars (IFNAMSIZ-1), letters/digits/dot/hyphen/underscore.
+	// Covers en0, wlan0, enp3s0, wlx001122334455, wlan0.1 (VLAN), bond0.100, p2p-dev-wlan0.
+	ifaceRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]{0,30}$`)
 )
 
 // ValidateMAC validates a MAC address format and returns it lower-cased.

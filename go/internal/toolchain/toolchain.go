@@ -31,9 +31,10 @@ var ToolDir = filepath.Join(homeDir(), ".nowifi", "bin")
 type assetFormat string
 
 const (
-	assetFormatPlain assetFormat = "plain"
-	assetFormatGzip  assetFormat = "gzip"
-	assetFormatTarGz assetFormat = "tar.gz"
+	assetFormatPlain           assetFormat = "plain"
+	assetFormatGzip            assetFormat = "gzip"
+	assetFormatTarGz           assetFormat = "tar.gz"
+	maxExtractedToolBinarySize int64       = 256 << 20
 )
 
 // ToolInfo describes a downloadable tool binary.
@@ -483,6 +484,10 @@ func writeInstalledBinary(rawPath string, format assetFormat, binaryName, dir st
 }
 
 func extractGzip(src, dest string) error {
+	return extractGzipWithLimit(src, dest, maxExtractedToolBinarySize)
+}
+
+func extractGzipWithLimit(src, dest string, maxSize int64) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -501,11 +506,14 @@ func extractGzip(src, dest string) error {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, gz)
-	return err
+	return copyExtractedBinaryWithLimit(out, gz, maxSize)
 }
 
 func extractTarGz(src, binaryName, dest string) error {
+	return extractTarGzWithLimit(src, binaryName, dest, maxExtractedToolBinarySize)
+}
+
+func extractTarGzWithLimit(src, binaryName, dest string, maxSize int64) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -533,15 +541,39 @@ func extractTarGz(src, binaryName, dest string) error {
 		if filepath.Base(hdr.Name) != binaryName {
 			continue
 		}
+		if hdr.Size < 0 {
+			return fmt.Errorf("archive entry %s has invalid size %d", hdr.Name, hdr.Size)
+		}
+		if hdr.Size > maxSize {
+			return fmt.Errorf("archive entry %s exceeds max extracted size %d bytes", hdr.Name, maxSize)
+		}
 		out, err := os.Create(dest)
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, tr); err != nil {
+		if err := copyExtractedBinaryWithLimit(out, tr, maxSize); err != nil {
 			_ = out.Close()
 			return err
 		}
 		return out.Close()
 	}
 	return fmt.Errorf("archive did not contain %s", binaryName)
+}
+
+func copyExtractedBinaryWithLimit(out *os.File, in io.Reader, maxSize int64) error {
+	written, err := io.Copy(out, io.LimitReader(in, maxSize))
+	if err != nil {
+		return err
+	}
+	if written == maxSize {
+		var probe [1]byte
+		n, err := in.Read(probe[:])
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n > 0 {
+			return fmt.Errorf("extracted binary exceeds max size %d bytes", maxSize)
+		}
+	}
+	return nil
 }

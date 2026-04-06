@@ -291,7 +291,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rttMs = msg.rttMs
 		return m, nil
 
-
 	case probeMsg:
 		m.phase = "probe"
 		if msg.open {
@@ -347,7 +346,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		m.phase = "done"
 		return m, nil
-
 
 	// Spinner tick
 	case spinner.TickMsg:
@@ -414,13 +412,8 @@ func (m tuiModel) View() string {
 // ---------------------------------------------------------------------------
 
 func (m tuiModel) viewHeader(w int) string {
-	banner := strings.Join([]string{
-		"  _ __   _____      _(_)/ _(_)",
-		" | '_ \\ / _ \\ \\ /\\ / / | |_| |",
-		" | | | | (_) \\ V  V /| |  _| |",
-		" |_| |_|\\___/ \\_/\\_/ |_|_| |_|",
-	}, "\n")
-
+	// Reference single source of truth from banner.go.
+	banner := strings.Join(bannerLines, "\n")
 	bannerRendered := bannerStyle.Render(banner)
 
 	tagline := dimStyle.Render("No WiFi? Now WiFi.") +

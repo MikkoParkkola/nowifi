@@ -60,6 +60,7 @@ var (
 	flagCFWorkers    string
 	flagQUICServer   string
 	flagNTPServer    string
+	flagVPNServer    string
 	flagStealth      bool
 	flagFast         bool
 	flagProbeOnly    bool
@@ -76,6 +77,7 @@ func init() {
 	rootCmd.Flags().StringVar(&flagCFWorkers, "cf-workers", "", "Cloudflare Workers proxy URL")
 	rootCmd.Flags().StringVar(&flagQUICServer, "quic-server", "", "QUIC/Hysteria2 server address")
 	rootCmd.Flags().StringVar(&flagNTPServer, "ntp-server", "", "NTP tunnel server IP")
+	rootCmd.Flags().StringVar(&flagVPNServer, "vpn-server", "", "VPN server (host:port) for VPN-on-port-53 technique")
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
 	rootCmd.Flags().BoolVar(&flagFast, "fast", false, "Skip stealth delays")
 	rootCmd.Flags().BoolVarP(&flagProbeOnly, "probe-only", "p", false, "Probe only, don't exploit")

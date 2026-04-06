@@ -237,6 +237,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		ICMPServer:   flagICMPServer,
 		QUICServer:   flagQUICServer,
 		NTPServer:    flagNTPServer,
+		VPNServer:    flagVPNServer,
 		CFWorkersURL: flagCFWorkers,
 		Stealth:      stealth,
 	}
@@ -549,6 +550,7 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		ICMPServer:   flagICMPServer,
 		QUICServer:   flagQUICServer,
 		NTPServer:    flagNTPServer,
+		VPNServer:    flagVPNServer,
 		CFWorkersURL: flagCFWorkers,
 		Stealth:      stealth,
 	}
