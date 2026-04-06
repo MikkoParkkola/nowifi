@@ -21,6 +21,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
 	"github.com/MikkoParkkola/nowifi/internal/report"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -45,9 +46,9 @@ func runAudit(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Full audit: use the dashboard if we have a terminal with color.
+	// Full audit: use the Bubbletea TUI if we have a terminal with color.
 	if useColor {
-		runAuditDashboard(startTime, stealth)
+		runAuditTUI(startTime, stealth)
 		return
 	}
 
@@ -56,7 +57,329 @@ func runAudit(cmd *cobra.Command, args []string) {
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard-based audit (full-screen TUI)
+// Bubbletea TUI audit (full-screen, replaces the old ANSI dashboard)
+// ---------------------------------------------------------------------------
+
+func runAuditTUI(startTime time.Time, stealth bool) {
+	// For the interactive portal prompt we need to leave alt-screen
+	// temporarily. We handle this by doing the prompt BEFORE starting
+	// the Bubbletea program if a portal is detected and --auto is off.
+	//
+	// Phase 0: Pre-TUI portal prompt (runs outside Bubbletea).
+	wifi, wifiErr := platform.GetWifiInfo(flagInterface)
+	portalInfo := detect.DetectPortal(flagInterface)
+
+	if portalInfo.IsCaptive && !flagAutoBypass {
+		printBanner("No WiFi? Now WiFi.")
+		choice := promptBypassChoice()
+		switch choice {
+		case 2:
+			// Diagnose only.
+			tunnelIP := extractHost(flagTunnelServer)
+			probes := probe.ProbeAll(flagInterface, stealth, tunnelIP)
+			rPortal := mapPortalInfo(portalInfo, wifi)
+			rProbes := mapReportProbes(probes)
+			report.PrintTerminal(rPortal, rProbes, nil)
+			fmt.Println()
+			return
+		case 4:
+			fmt.Println()
+			return
+		}
+	}
+
+	// Create the Bubbletea TUI program.
+	m := newTuiModel()
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// Run the full audit pipeline in a background goroutine,
+	// communicating state changes to the TUI via p.Send().
+	go runAuditPipeline(p, startTime, stealth, wifi, wifiErr, portalInfo)
+
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+	}
+
+	// After TUI exits, print clean exit message.
+	fmt.Println()
+	fmt.Println("  All changes restored. Network is back to original state.")
+	fmt.Println()
+}
+
+// runAuditPipeline drives all audit phases in a background goroutine,
+// sending typed messages to the Bubbletea program as state changes.
+func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *platform.WifiInfo, wifiErr error, portalInfo *detect.PortalInfo) {
+	// Check for root.
+	if os.Geteuid() != 0 {
+		p.Send(statusMsg{text: "Warning: running without sudo. MAC spoofing and tunnels won't work."})
+		time.Sleep(2 * time.Second)
+	}
+
+	// --- Phase 1: WiFi info ---
+	if wifiErr != nil {
+		p.Send(wifiErrMsg{text: fmt.Sprintf("%s -- %v", flagInterface, wifiErr)})
+	} else if wifi != nil {
+		p.Send(wifiMsg{ssid: wifi.SSID, channel: wifi.Channel, rssi: wifi.RSSI})
+	}
+
+	// --- Phase 2: Portal detection ---
+	if portalInfo.IsCaptive {
+		p.Send(portalMsg{portalType: string(portalInfo.Type), vendor: portalInfo.Vendor, captive: true})
+		if portalInfo.Gateway != "" {
+			p.Send(networkMsg{gateway: portalInfo.Gateway})
+		}
+	} else {
+		p.Send(portalMsg{portalType: "none", captive: false})
+	}
+
+	// --- Phase 3: Leak enumeration ---
+	p.Send(statusMsg{text: "Probing network leaks..."})
+	tunnelIP := extractHost(flagTunnelServer)
+	probes := probe.ProbeAll(flagInterface, stealth, tunnelIP)
+
+	p.Send(probeMsg{name: "DNS", open: probes.DNS.IsOpen})
+	p.Send(probeMsg{name: "ICMP", open: probes.ICMP.IsOpen})
+	p.Send(probeMsg{name: "IPv6", open: probes.IPv6.IsOpen})
+	p.Send(probeMsg{name: "HTTPS", open: probes.Cloudflare.IsOpen})
+	p.Send(probeMsg{name: "QUIC", open: probes.QUIC.IsOpen})
+	p.Send(probeMsg{name: "NTP", open: probes.NTP.IsOpen})
+	p.Send(probeMsg{name: "DoH", open: probes.DoH.IsOpen})
+
+	// --- Phase 4: Bypass ---
+	bpConfig := &bypass.Config{
+		Interface:    flagInterface,
+		TunnelServer: flagTunnelServer,
+		DNSDomain:    flagDNSDomain,
+		ICMPServer:   flagICMPServer,
+		QUICServer:   flagQUICServer,
+		NTPServer:    flagNTPServer,
+		CFWorkersURL: flagCFWorkers,
+		Stealth:      stealth,
+	}
+
+	p.Send(statusMsg{text: "Running bypass techniques..."})
+	bpProbes := mapProbeResults(probes)
+	bypassResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+
+	for _, r := range bypassResults {
+		detail := r.Details
+		if len(detail) > 50 {
+			detail = detail[:50] + "..."
+		}
+		p.Send(bypassResultMsg{technique: string(r.Method), success: r.Success, detail: detail})
+	}
+
+	successCount := 0
+	for _, r := range bypassResults {
+		if r.Success {
+			successCount++
+		}
+	}
+	if successCount > 0 {
+		p.Send(statusMsg{text: fmt.Sprintf("%d technique(s) succeeded", successCount)})
+	} else {
+		p.Send(statusMsg{text: "No bypass succeeded"})
+	}
+
+	// --- Phase 5: Save audit record ---
+	record := &capture.AuditRecord{
+		ID:        time.Now().Format("20060102-150405"),
+		Timestamp: startTime,
+		Portal:    portalInfo.IsCaptive,
+		Vendor:    portalInfo.Vendor,
+		Duration:  time.Since(startTime).Round(time.Second).String(),
+		Probes: map[string]bool{
+			"dns":  probes.DNS.IsOpen,
+			"icmp": probes.ICMP.IsOpen,
+			"ipv6": probes.IPv6.IsOpen,
+			"quic": probes.QUIC.IsOpen,
+			"ntp":  probes.NTP.IsOpen,
+			"doh":  probes.DoH.IsOpen,
+		},
+	}
+	if wifi != nil {
+		record.SSID = wifi.SSID
+	}
+	for _, r := range bypassResults {
+		if r.Success {
+			record.BypassUsed = string(r.Method)
+			record.Success = true
+			break
+		}
+	}
+	if err := capture.SaveAudit(record); err != nil {
+		p.Send(statusMsg{text: fmt.Sprintf("Warning: failed to save audit: %v", err)})
+	}
+
+	// --- Phase 6: Session persistence ---
+	if record.Success {
+		g := guard.New(flagInterface)
+
+		// Register tunnel cleanup.
+		for _, r := range bypassResults {
+			if r.Success && r.Tunnel != nil && r.Tunnel.Active {
+				g.RegisterTunnel(tunnelCloser{r.Tunnel})
+			}
+		}
+
+		// Enable stealth.
+		if os.Geteuid() == 0 {
+			stealthState, stealthErr := platform.EnableStealth(flagInterface)
+			if stealthErr != nil {
+				p.Send(stealthMsg{ttl: false, pf: false})
+			} else {
+				p.Send(stealthMsg{ttl: true, pf: true})
+			}
+			if stealthState != nil {
+				g.RegisterStealth(stealthState)
+			}
+		} else {
+			p.Send(stealthMsg{ttl: false, pf: false})
+		}
+
+		// Session maintenance loop -- runs until TUI quits.
+		maintainSessionTUI(p, flagInterface, bypassResults, bpConfig, probes, stealth)
+
+		// Cleanup.
+		g.Restore()
+		return
+	}
+
+	// No bypass succeeded -- pause briefly then signal done.
+	time.Sleep(3 * time.Second)
+	p.Send(doneMsg{})
+}
+
+// maintainSessionTUI is the Bubbletea-aware session maintenance loop.
+// It runs in the audit pipeline goroutine and sends state to the TUI.
+func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, bpConfig *bypass.Config, probes *probe.ProbeResults, stealth bool) {
+	var successMethod string
+	for _, r := range results {
+		if r.Success {
+			successMethod = string(r.Method)
+			break
+		}
+	}
+
+	checkInterval := 30 * time.Second
+	connectTime := time.Now()
+	renewCount := 0
+	consecutiveOK := 0
+
+	p.Send(sessionTickMsg{uptime: 0, renewals: 0})
+	p.Send(statusMsg{text: fmt.Sprintf("Maintaining session (bypass: %s)", successMethod)})
+
+	uptimeTicker := time.NewTicker(1 * time.Second)
+	defer uptimeTicker.Stop()
+
+	checkTicker := time.NewTicker(checkInterval)
+	defer checkTicker.Stop()
+
+	for {
+		select {
+		case <-uptimeTicker.C:
+			uptime := time.Since(connectTime).Round(time.Second)
+			p.Send(sessionTickMsg{uptime: uptime, renewals: renewCount})
+
+		case <-checkTicker.C:
+			if checkInternet() {
+				consecutiveOK++
+				if consecutiveOK > 5 && checkInterval < 60*time.Second {
+					checkInterval = 60 * time.Second
+					checkTicker.Reset(checkInterval)
+				}
+				continue
+			}
+
+			// Session dropped.
+			consecutiveOK = 0
+			checkInterval = 30 * time.Second
+			checkTicker.Reset(checkInterval)
+			p.Send(sessionDownMsg{})
+			p.Send(statusMsg{text: "Session dropped -- re-establishing connection..."})
+
+			reconnected := false
+
+			// Attempt 1: MAC rotate + DHCP.
+			p.Send(bypassStartMsg{technique: "MAC rotate + DHCP renew"})
+			newMAC := platform.GenerateRandomMAC()
+			if err := platform.SetMAC(iface, newMAC); err == nil {
+				if err := platform.RenewDHCP(iface); err == nil {
+					time.Sleep(3 * time.Second)
+					if checkInternet() {
+						reconnected = true
+						renewCount++
+						p.Send(bypassResultMsg{technique: "MAC rotate", success: true, detail: newMAC})
+					}
+				}
+			}
+			if !reconnected {
+				p.Send(bypassResultMsg{technique: "MAC rotate", success: false, detail: "no connectivity"})
+			}
+
+			// Attempt 2: Full bypass re-run.
+			if !reconnected {
+				p.Send(bypassStartMsg{technique: "Full bypass re-run"})
+				bpProbes := mapProbeResults(probes)
+				newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+				for _, r := range newResults {
+					if r.Success {
+						reconnected = true
+						renewCount++
+						successMethod = string(r.Method)
+						p.Send(bypassResultMsg{technique: string(r.Method), success: true, detail: "reconnected"})
+						break
+					}
+				}
+				if !reconnected {
+					p.Send(bypassResultMsg{technique: "Full bypass", success: false, detail: "all techniques failed"})
+				}
+			}
+
+			// Attempt 3: Re-probe + bypass.
+			if !reconnected {
+				p.Send(bypassStartMsg{technique: "Re-probing network"})
+				tunnelIP := extractHost(bpConfig.TunnelServer)
+				newProbes := probe.ProbeAll(iface, stealth, tunnelIP)
+				probes = newProbes
+
+				p.Send(probeMsg{name: "DNS", open: newProbes.DNS.IsOpen})
+				p.Send(probeMsg{name: "ICMP", open: newProbes.ICMP.IsOpen})
+				p.Send(probeMsg{name: "IPv6", open: newProbes.IPv6.IsOpen})
+				p.Send(probeMsg{name: "HTTPS", open: newProbes.Cloudflare.IsOpen})
+				p.Send(probeMsg{name: "QUIC", open: newProbes.QUIC.IsOpen})
+				p.Send(probeMsg{name: "NTP", open: newProbes.NTP.IsOpen})
+				p.Send(probeMsg{name: "DoH", open: newProbes.DoH.IsOpen})
+
+				bpProbes := mapProbeResults(newProbes)
+				newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+				for _, r := range newResults {
+					if r.Success {
+						reconnected = true
+						renewCount++
+						successMethod = string(r.Method)
+						p.Send(bypassResultMsg{technique: string(r.Method), success: true, detail: "after re-probe"})
+						break
+					}
+				}
+				if !reconnected {
+					p.Send(bypassResultMsg{technique: "Re-probe + bypass", success: false, detail: "all failed"})
+				}
+			}
+
+			if reconnected {
+				connectTime = time.Now()
+				p.Send(sessionTickMsg{uptime: 0, renewals: renewCount})
+				p.Send(statusMsg{text: fmt.Sprintf("Reconnected via %s", successMethod)})
+			} else {
+				p.Send(statusMsg{text: fmt.Sprintf("All reconnect attempts failed. Retrying in %s...", checkInterval)})
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Legacy ANSI dashboard audit (kept for reference, no longer called)
 // ---------------------------------------------------------------------------
 
 func runAuditDashboard(startTime time.Time, stealth bool) {
@@ -275,7 +598,7 @@ type dashBypassObserver struct {
 	dash *Dashboard
 }
 
-// maintainSessionDashboard is the dashboard-aware session maintenance loop.
+// maintainSessionDashboard is the legacy dashboard-aware session maintenance loop.
 func maintainSessionDashboard(ctx context.Context, dash *Dashboard, iface string, results []bypass.Result, bpConfig *bypass.Config, probes *probe.ProbeResults, stealth bool) {
 	var successMethod string
 	for _, r := range results {
