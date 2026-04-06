@@ -394,9 +394,20 @@ func (d *Dashboard) Render() {
 	b.WriteString(d.contentRow(inner, dBoldCyan()+"  BYPASS"+dReset, 8))
 	b.WriteByte('\n')
 
-	// ── Rows 15-19: Bypass log (5 visible lines) ─────────────────
+	// ── Bypass log: expands to fill available terminal height ────
+	// Fixed rows: banner(4) + headerSep(1) + system(4) + probesSep(1) +
+	//   probesHdr(1) + probes(1) + bypassSep(1) + bypassHdr(1) +
+	//   sessionSep(1) + session(1) + stealth(1) + footerSep(1) +
+	//   status(1) + bottomBorder(1) = 20 fixed rows
+	bypassRows := d.height - 20
+	if bypassRows < 3 {
+		bypassRows = 3
+	}
+	if bypassRows > 15 {
+		bypassRows = 15
+	}
 	bypassLines := d.bypassLines()
-	for i := 0; i < 5; i++ {
+	for i := 0; i < bypassRows; i++ {
 		if i < len(bypassLines) {
 			b.WriteString(d.contentRow(inner, bypassLines[i].text, bypassLines[i].visLen))
 		} else {
