@@ -2,6 +2,9 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/MikkoParkkola/nowifi/actions/workflows/ci.yml/badge.svg)](https://github.com/MikkoParkkola/nowifi/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/MikkoParkkola/nowifi)](https://goreportcard.com/report/github.com/MikkoParkkola/nowifi)
+[![Release](https://img.shields.io/github/v/release/MikkoParkkola/nowifi)](https://github.com/MikkoParkkola/nowifi/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/MikkoParkkola/nowifi/master?filename=go/go.mod)](go/go.mod)
 
 ### No WiFi? Now WiFi.
 
