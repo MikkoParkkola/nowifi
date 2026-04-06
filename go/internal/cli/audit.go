@@ -248,26 +248,20 @@ func runAuditDashboard(startTime time.Time, stealth bool) {
 
 		maintainSessionDashboard(ctx, dash, flagInterface, bypassResults, bpConfig, probes, stealth)
 
-		// Exit: close dashboard, print summary.
+		// Exit: close dashboard, print clean exit message.
 		dash.Close()
 
-		fmt.Println()
-		rPortal := mapPortalInfo(portalInfo, wifi)
-		rProbes := mapReportProbes(probes)
-		report.PrintTerminal(rPortal, rProbes, bypassResults)
 		fmt.Println()
 		fmt.Println("  All changes restored. Network is back to original state.")
 		fmt.Println()
 		return
 	}
 
-	// No bypass succeeded -- show report and exit.
-	time.Sleep(2 * time.Second)
+	// No bypass succeeded -- keep dashboard visible briefly, then exit.
+	time.Sleep(3 * time.Second)
 	dash.Close()
 	fmt.Println()
-	rPortal := mapPortalInfo(portalInfo, wifi)
-	rProbes := mapReportProbes(probes)
-	report.PrintTerminal(rPortal, rProbes, bypassResults)
+	fmt.Println("  No bypass succeeded. Run with sudo for full capabilities.")
 	fmt.Println()
 }
 

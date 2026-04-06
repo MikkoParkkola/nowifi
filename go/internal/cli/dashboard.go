@@ -125,6 +125,10 @@ func NewDashboard() *Dashboard {
 	if err != nil || w < 60 || h < 20 {
 		w, h = 80, 24
 	}
+	// Cap width for aesthetics — too wide looks stretched and ugly.
+	if w > 100 {
+		w = 100
+	}
 	d.width = w
 	d.height = h
 

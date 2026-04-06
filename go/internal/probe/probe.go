@@ -515,8 +515,7 @@ var whitelistTargets = []struct {
 	{"cdn.cloudflare.com", "https://cdn.cloudflare.com"},
 	{"cdnjs.cloudflare.com", "https://cdnjs.cloudflare.com"},
 
-	// Inflight WiFi — airline/IFE portals (whitelisted for portal operation).
-	{"finnair.com", "https://www.finnair.com"},
+	// Inflight WiFi — IFE portal infrastructure (whitelisted for portal operation).
 	{"panasonic.aero", "https://www.panasonic.aero"},
 
 	// Inflight WiFi — DNS providers (often whitelisted).
