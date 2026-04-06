@@ -19,14 +19,15 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	cCyan    = lipgloss.Color("#00d4ff")
-	cGreen   = lipgloss.Color("#00ff88")
-	cRed     = lipgloss.Color("#ff4444")
-	cYellow  = lipgloss.Color("#ffcc00")
-	cDimGray = lipgloss.Color("#555555")
-	cWhite   = lipgloss.Color("#ffffff")
-	cDark    = lipgloss.Color("#1a1a2e")
-	cBorder  = lipgloss.Color("#333355")
+	cCyan      = lipgloss.Color("#00e5ff")
+	cGreen     = lipgloss.Color("#00ff9f")
+	cRed       = lipgloss.Color("#ff3366")
+	cYellow    = lipgloss.Color("#ffd000")
+	cDimGray   = lipgloss.Color("#4a4a5e")
+	cWhite     = lipgloss.Color("#e0e0f0")
+	cDark      = lipgloss.Color("#0d0d1a")
+	cBorder    = lipgloss.Color("#2a2a44")
+	cBorderHot = lipgloss.Color("#00e5ff") // Glowing border for active panels
 )
 
 // ---------------------------------------------------------------------------
@@ -40,10 +41,16 @@ var (
 			BorderForeground(cBorder).
 			Padding(0, 1)
 
-	// Panel with highlighted border (active section)
+	// Panel with glowing border (active/connected section)
 	activePanelStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(cCyan).
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(cBorderHot).
+				Padding(0, 1)
+
+	// Panel with success glow
+	successPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(cGreen).
 				Padding(0, 1)
 
 	// Header labels inside panels
@@ -639,14 +646,13 @@ func (m tuiModel) viewBypass(w int) string {
 		append([]string{title}, lines...)...,
 	)
 
-	border := cBorder
+	style := panelStyle
 	if m.activeTechnique != "" {
-		border = cYellow
+		style = activePanelStyle // Glowing double border during bypass.
 	}
 
-	return panelStyle.
+	return style.
 		Width(w).
-		BorderForeground(border).
 		Render(content)
 }
 
@@ -733,14 +739,13 @@ func (m tuiModel) viewSession(w int) string {
 		secondLine,
 	)
 
-	border := cBorder
+	style := panelStyle
 	if m.connected {
-		border = cGreen
+		style = successPanelStyle // Green double border when connected.
 	}
 
-	return panelStyle.
+	return style.
 		Width(w).
-		BorderForeground(border).
 		Render(content)
 }
 

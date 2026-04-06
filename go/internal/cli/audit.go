@@ -38,8 +38,6 @@ func runAudit(cmd *cobra.Command, args []string) {
 		stealth = false
 	}
 
-	matrixRain()
-
 	// --probe-only and diagnose use the plain scrolling output.
 	if flagProbeOnly {
 		runAuditPlain(startTime, stealth)
