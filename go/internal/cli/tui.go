@@ -455,7 +455,7 @@ func (m tuiModel) viewSystemNetwork(totalW int) string {
 	// Full-width panel renders at totalW + 4 (2 border + 2 padding).
 	// Two half panels: each (halfW + 4) + 1 gap = totalW + 4.
 	// So: 2*halfW + 9 = totalW + 4 → halfW = (totalW - 5) / 2.
-	halfW := (totalW - 5) / 2
+	halfW := (totalW - 3) / 2
 
 	sys := m.viewSystem(halfW)
 	net := m.viewNetwork(halfW)
