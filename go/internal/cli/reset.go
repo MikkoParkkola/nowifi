@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/spf13/cobra"
 )
@@ -39,21 +38,25 @@ func runReset(cmd *cobra.Command, args []string) {
 		"chisel", "iodine", "iodined", "hans", "ptunnel",
 		"wstunnel", "hysteria", "ntpescape", "dnscrypt-proxy",
 	}
-	killed := 0
-	for _, proc := range tunnelProcesses {
-		if err := exec.Command("pkill", "-f", proc).Run(); err == nil {
-			killed++
-		}
+	killed, warnings := stopOrphanedProcesses(tunnelProcesses)
+	for _, warning := range warnings {
+		fmt.Printf("  Warning: %v\n", warning)
 	}
-	if killed > 0 {
+	switch {
+	case killed > 0:
 		fmt.Printf("  Killed %d orphaned tunnel process(es)\n", killed)
-	} else {
+	case len(warnings) > 0:
+		fmt.Println("  Tunnel cleanup completed with warnings")
+	default:
 		fmt.Println("  No orphaned tunnel processes found")
 	}
 
 	// 2. Remove system SOCKS proxy.
-	bypass.ClearSystemSOCKSProxy(iface)
-	fmt.Println("  SOCKS proxy disabled")
+	if err := platform.ClearSystemProxy(iface); err != nil {
+		fmt.Printf("  SOCKS proxy disable failed: %v\n", err)
+	} else {
+		fmt.Println("  SOCKS proxy disabled")
+	}
 
 	// 3. Restore hardware MAC.
 	fmt.Printf("  MAC check (interface: %s)... ", iface)
