@@ -1,11 +1,11 @@
 Output demo.gif
-Set FontSize 15
-Set Width 800
-Set Height 500
+Set FontSize 14
+Set Width 820
+Set Height 550
 Set Theme "Catppuccin Mocha"
-Set Padding 15
+Set Padding 12
 Set Shell bash
-Set PlaybackSpeed 0.8
+Set PlaybackSpeed 1.0
 
 Hide
 Type "export PS1=''"
