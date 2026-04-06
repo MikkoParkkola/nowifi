@@ -88,6 +88,10 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 		}
 	}
 
+	// Suppress bypass log output during TUI mode.
+	bypass.SuppressLog = true
+	defer func() { bypass.SuppressLog = false }()
+
 	// Create the Bubbletea TUI program.
 	m := newTuiModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())

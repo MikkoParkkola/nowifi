@@ -312,6 +312,11 @@ func (d *defaultPlatformOps) RenewDHCP(iface string)               {}
 func (d *defaultPlatformOps) GenerateRandomMAC() string             { return platform.GenerateRandomMAC() }
 
 // logStatus prints inline status during bypass attempts.
+// SuppressLog disables bypass log output (set true during TUI mode).
+var SuppressLog bool
+
 func logStatus(format string, args ...any) {
-	log.Printf("  "+format, args...)
+	if !SuppressLog {
+		log.Printf("  "+format, args...)
+	}
 }

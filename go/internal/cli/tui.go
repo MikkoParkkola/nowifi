@@ -380,8 +380,8 @@ func (m tuiModel) View() string {
 	if w < 60 {
 		w = 60
 	}
-	if w > 140 {
-		w = 140
+	if w > 100 {
+		w = 100
 	}
 
 	// Inner width available for panel content.
@@ -405,9 +405,9 @@ func (m tuiModel) View() string {
 		footer,
 	)
 
-	// Center in the terminal.
+	// Place in the terminal — top-left for clean alignment.
 	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, full)
+		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, full)
 	}
 	return full
 }
