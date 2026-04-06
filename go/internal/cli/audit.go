@@ -123,7 +123,20 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 	fmt.Println("  " + bold("Security Findings:"))
 	for _, r := range tuiBypassResults {
 		if r.Success {
-			fmt.Printf("  %s %s  %s\n", green("✓"), bold(string(r.Method)), r.Details)
+			sev := r.Severity
+			if sev == "" {
+				sev = "info"
+			}
+			sevStr := bold(strings.ToUpper(sev))
+			switch strings.ToLower(sev) {
+			case "critical":
+				sevStr = red(strings.ToUpper(sev))
+			case "high":
+				sevStr = yellow(strings.ToUpper(sev))
+			}
+			fmt.Printf("\n  %s [%s] %s\n", green("✓"), sevStr, bold(string(r.Method)))
+			fmt.Printf("    %s %s\n", dim("Impact:"), r.Impact)
+			fmt.Printf("    %s %s\n", dim("PoC:"), r.Details)
 			if r.Remediation != "" {
 				fmt.Printf("    %s %s\n", dim("Fix:"), r.Remediation)
 			}
