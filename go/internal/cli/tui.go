@@ -23,10 +23,10 @@ var (
 	cGreen     = lipgloss.Color("#00ff9f")
 	cRed       = lipgloss.Color("#ff3366")
 	cYellow    = lipgloss.Color("#ffd000")
-	cDimGray   = lipgloss.Color("#4a4a5e")
-	cWhite     = lipgloss.Color("#e0e0f0")
+	cDimGray   = lipgloss.Color("#7a7a8e") // Brighter for readability on dark bg
+	cWhite     = lipgloss.Color("#e8e8f8")
 	cDark      = lipgloss.Color("#0d0d1a")
-	cBorder    = lipgloss.Color("#2a2a44")
+	cBorder    = lipgloss.Color("#3a3a55") // Slightly brighter borders
 	cBorderHot = lipgloss.Color("#00e5ff") // Glowing border for active panels
 )
 
@@ -452,7 +452,7 @@ func (m tuiModel) viewHeader(w int) string {
 // ---------------------------------------------------------------------------
 
 func (m tuiModel) viewSystemNetwork(totalW int) string {
-	halfW := (totalW - 3) / 2 // -3 for gap between panels.
+	halfW := (totalW - 1) / 2 // -1 for single space gap between panels.
 
 	sys := m.viewSystem(halfW)
 	net := m.viewNetwork(halfW)
@@ -475,9 +475,13 @@ func (m tuiModel) viewSystem(w int) string {
 		} else if m.rssi < -50 {
 			rssiStyled = warnStyle.Render(rssiStr)
 		}
+		// Truncate SSID to fit in half-width panel.
+		ssid := m.ssid
+		if len(ssid) > 22 {
+			ssid = ssid[:19] + "..."
+		}
 		wifiLine = indicatorDot(true) + " WiFi   " +
-			boldValStyle.Render(m.ssid) + " " +
-			dimStyle.Render("ch"+m.channel) + " " + rssiStyled
+			boldValStyle.Render(ssid) + " " + rssiStyled
 	} else {
 		wifiLine = indicatorDot(false) + " WiFi   " + dimStyle.Render("scanning...")
 	}
