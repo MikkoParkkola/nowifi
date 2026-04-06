@@ -225,16 +225,19 @@ func runAuditDashboard(startTime time.Time, stealth bool) {
 			}
 		}
 
-		// Enable stealth.
-		stealthState, stealthErr := platform.EnableStealth(flagInterface)
-		if stealthErr != nil {
-			dash.SetStealth(false, false)
-			dash.SetStatus(fmt.Sprintf("Stealth partially enabled: %v", stealthErr))
+		// Enable stealth (requires root for sysctl/pf).
+		if os.Geteuid() == 0 {
+			stealthState, stealthErr := platform.EnableStealth(flagInterface)
+			if stealthErr != nil {
+				dash.SetStealth(false, false)
+			} else {
+				dash.SetStealth(true, true)
+			}
+			if stealthState != nil {
+				g.RegisterStealth(stealthState)
+			}
 		} else {
-			dash.SetStealth(true, true)
-		}
-		if stealthState != nil {
-			g.RegisterStealth(stealthState)
+			dash.SetStealth(false, false)
 		}
 
 		// Ctrl+C handler.
@@ -559,14 +562,16 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 			}
 		}
 
-		stealthState, stealthErr := platform.EnableStealth(flagInterface)
-		if stealthErr != nil {
-			fmt.Printf("  %s  Stealth partially enabled: %v\n", yellow("WARN"), stealthErr)
-		} else {
-			fmt.Printf("5. Stealth  TTL normalized, traffic scrubbed\n")
-		}
-		if stealthState != nil {
-			g.RegisterStealth(stealthState)
+		if os.Geteuid() == 0 {
+			stealthState, stealthErr := platform.EnableStealth(flagInterface)
+			if stealthErr != nil {
+				fmt.Printf("  %s  Stealth partially enabled: %v\n", yellow("WARN"), stealthErr)
+			} else {
+				fmt.Printf("5. Stealth  TTL normalized, traffic scrubbed\n")
+			}
+			if stealthState != nil {
+				g.RegisterStealth(stealthState)
+			}
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())

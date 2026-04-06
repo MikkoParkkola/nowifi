@@ -125,10 +125,9 @@ func NewDashboard() *Dashboard {
 	if err != nil || w < 60 || h < 20 {
 		w, h = 80, 24
 	}
-	// Cap width for aesthetics — too wide looks stretched and ugly.
-	if w > 100 {
-		w = 100
-	}
+	// Force width to exactly 80 — universally safe, avoids Unicode
+	// ambiguous-width rendering issues on wide terminals.
+	w = 80
 	d.width = w
 	d.height = h
 
