@@ -142,6 +142,137 @@ func TestSaveCreatesDirectory(t *testing.T) {
 	}
 }
 
+func TestLoadCorruptedJSON(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	// Write corrupted config file.
+	dir := filepath.Join(tmp, ".nowifi")
+	os.MkdirAll(dir, 0700)
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte("{not valid json"), 0600)
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load() should return error for corrupted JSON")
+	}
+	// Should still return defaults.
+	if cfg.Interface != "en0" {
+		t.Errorf("Interface = %q, want en0 (default on error)", cfg.Interface)
+	}
+}
+
+func TestLoadReadError(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	// Create config.json as a directory to cause a non-ENOENT read error.
+	dir := filepath.Join(tmp, ".nowifi")
+	os.MkdirAll(filepath.Join(dir, "config.json"), 0700)
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load() should return error when config.json is a directory")
+	}
+	// Should still return defaults.
+	if cfg.Interface != "en0" {
+		t.Errorf("Interface = %q, want en0 (default on error)", cfg.Interface)
+	}
+}
+
+func TestLoadCacheHit(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	// First load sets cache.
+	cfg1, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Second load should return cached value (same pointer).
+	cfg2, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg1 != cfg2 {
+		t.Error("second Load() should return cached config (same pointer)")
+	}
+}
+
+func TestSaveDirCreationFailure(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	// Create a file where .nowifi should be, blocking MkdirAll.
+	os.WriteFile(filepath.Join(tmp, ".nowifi"), []byte("blocker"), 0600)
+
+	err := Save(Defaults())
+	if err == nil {
+		t.Error("Save() should fail when .nowifi dir cannot be created")
+	}
+}
+
+func TestSaveRenameFailure(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	dir := filepath.Join(tmp, ".nowifi")
+	os.MkdirAll(dir, 0700)
+	// Create config.json as a directory to make rename fail.
+	os.MkdirAll(filepath.Join(dir, "config.json"), 0700)
+
+	err := Save(Defaults())
+	if err == nil {
+		t.Error("Save() should fail when config.json is a directory (rename fails)")
+	}
+}
+
+func TestSaveWriteFailure(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	dir := filepath.Join(tmp, ".nowifi")
+	os.MkdirAll(dir, 0700)
+	// Make dir read-only to prevent writing.
+	os.Chmod(dir, 0500)
+	defer os.Chmod(dir, 0700)
+
+	err := Save(Defaults())
+	if err == nil {
+		t.Error("Save() should fail when dir is read-only")
+	}
+}
+
 func TestCacheInvalidation(t *testing.T) {
 	InvalidateCache()
 

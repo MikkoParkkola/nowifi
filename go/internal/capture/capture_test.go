@@ -105,6 +105,176 @@ func TestListAuditsEmpty(t *testing.T) {
 	}
 }
 
+func TestSaveAuditDirCreationFailure(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	// Create a file where the captures directory should be, blocking MkdirAll.
+	nowifiDir := tmp + "/.nowifi"
+	os.MkdirAll(nowifiDir, 0700)
+	os.WriteFile(nowifiDir+"/captures", []byte("blocker"), 0600)
+
+	record := &AuditRecord{
+		ID:        "fail-dir",
+		Timestamp: time.Now(),
+		SSID:      "Test",
+		Probes:    map[string]bool{},
+	}
+
+	err := SaveAudit(record)
+	if err == nil {
+		t.Error("SaveAudit should fail when captures dir cannot be created")
+	}
+}
+
+func TestSaveAuditWriteError(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	// Create captures dir as read-only so write fails.
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir, 0700)
+
+	record := &AuditRecord{
+		ID:        "fail-write",
+		Timestamp: time.Now(),
+		SSID:      "Test",
+		Probes:    map[string]bool{},
+	}
+
+	// Make the captures dir read-only so file writes fail.
+	os.Chmod(captDir, 0500)
+	defer os.Chmod(captDir, 0700)
+
+	err := SaveAudit(record)
+	if err == nil {
+		t.Error("SaveAudit should fail when captures dir is read-only")
+	}
+}
+
+func TestListAuditsCorruptedIndex(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	// Create a corrupted index file.
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir, 0700)
+	os.WriteFile(captDir+"/index.json", []byte("{not valid json["), 0600)
+
+	_, err := ListAudits()
+	if err == nil {
+		t.Error("ListAudits should fail with corrupted index")
+	}
+}
+
+func TestLoadIndexEmptyFile(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir, 0700)
+	// Empty file is not valid JSON.
+	os.WriteFile(captDir+"/index.json", []byte(""), 0600)
+
+	_, err := loadIndex()
+	if err == nil {
+		t.Error("loadIndex should fail with empty file (invalid JSON)")
+	}
+}
+
+func TestLoadIndexMissingFile(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	// No captures dir at all.
+	records, err := loadIndex()
+	if err != nil {
+		t.Fatalf("loadIndex on missing file should return nil error, got %v", err)
+	}
+	if records != nil {
+		t.Errorf("loadIndex on missing file should return nil records, got %d", len(records))
+	}
+}
+
+func TestLoadIndexReadError(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	// Create index as a directory to cause a read error (not ENOENT).
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir+"/index.json", 0700)
+
+	_, err := loadIndex()
+	if err == nil {
+		t.Error("loadIndex should fail when index.json is a directory")
+	}
+}
+
+func TestSaveIndex_RenameError(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir, 0700)
+
+	// Create index.json as a directory so rename fails.
+	os.MkdirAll(captDir+"/index.json", 0700)
+
+	records := []AuditRecord{{ID: "x", Timestamp: time.Now(), Probes: map[string]bool{}}}
+	err := saveIndex(records)
+	if err == nil {
+		t.Error("saveIndex should fail when index.json is a directory (rename fails)")
+	}
+}
+
+func TestSaveIndexWriteError(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir, 0700)
+	os.Chmod(captDir, 0500)
+	defer os.Chmod(captDir, 0700)
+
+	records := []AuditRecord{{ID: "x", Timestamp: time.Now(), Probes: map[string]bool{}}}
+	err := saveIndex(records)
+	if err == nil {
+		t.Error("saveIndex should fail when dir is read-only")
+	}
+}
+
+func TestGetAuditCorruptedJSON(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	captDir := tmp + "/.nowifi/captures"
+	os.MkdirAll(captDir, 0700)
+	os.WriteFile(captDir+"/bad-json.json", []byte("{corrupted"), 0600)
+
+	_, err := GetAudit("bad-json")
+	if err == nil {
+		t.Error("GetAudit should fail with corrupted JSON")
+	}
+}
+
 func TestListAuditsSortedByTimestamp(t *testing.T) {
 	tmp := t.TempDir()
 	origHome := os.Getenv("HOME")

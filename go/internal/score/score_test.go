@@ -234,6 +234,29 @@ func TestScoreNetwork_ScoreFloorZero(t *testing.T) {
 	if ns.Score < 0 {
 		t.Errorf("score should not be negative, got %d", ns.Score)
 	}
+	// Open(-50) + WPS(-25) + PortalOnOpen(-10) = 15, not negative.
+	// Verify clamping works even though this case doesn't reach 0.
+	if ns.Score != 15 {
+		t.Errorf("score = %d, want 15", ns.Score)
+	}
+}
+
+func TestScoreNetwork_ScoreClampedToZero(t *testing.T) {
+	// This can't actually go below 0 with current penalties (max deduction is 85),
+	// but we verify the clamp logic is exercised by the floor check.
+	// The worst case is Open(-50)+WPS(-25)+Portal(-10)=15, so score never goes
+	// negative with the current penalty structure. This test documents that.
+	net := discover.ScannedNetwork{
+		SSID:         "NegTest",
+		Security:     "Open",
+		WPS:          true,
+		PortalLikely: true,
+		Signal:       -30, // strong signal adds finding but no deduction
+	}
+	ns := ScoreNetwork(net)
+	if ns.Score < 0 {
+		t.Errorf("score must not be negative: %d", ns.Score)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +400,184 @@ func TestBuildSummary_AllSameScore(t *testing.T) {
 	}
 	if s.GradeD != 2 {
 		t.Errorf("GradeD = %d, want 2", s.GradeD)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ScoreNetwork — client isolation on open with portal likely
+// ---------------------------------------------------------------------------
+
+func TestScoreNetwork_PortalLikelyClientIsolation(t *testing.T) {
+	// PortalLikely (but not Open) should trigger client isolation finding.
+	net := discover.ScannedNetwork{
+		SSID:         "HotelWiFi",
+		Security:     "WPA2",
+		PortalLikely: true,
+	}
+	ns := ScoreNetwork(net)
+	assertHasFinding(t, ns.Findings, "medium", "Client isolation unknown")
+}
+
+// ---------------------------------------------------------------------------
+// ScoreNetwork — combined worst case
+// ---------------------------------------------------------------------------
+
+func TestScoreNetwork_WEPWithWPS(t *testing.T) {
+	net := discover.ScannedNetwork{
+		SSID:     "OldRouterWPS",
+		Security: "WEP",
+		WPS:      true,
+	}
+	ns := ScoreNetwork(net)
+
+	// WEP (-45) + WPS (-25) = 30.
+	if ns.Score != 30 {
+		t.Errorf("WEP+WPS score = %d, want 30", ns.Score)
+	}
+	assertHasFinding(t, ns.Findings, "critical", "WEP encryption")
+	assertHasFinding(t, ns.Findings, "high", "WPS enabled")
+}
+
+func TestScoreNetwork_OpenWPSPortalStrong(t *testing.T) {
+	// Exercise maximum deductions: Open(-50) + WPS(-25) + Portal on open(-10) = 15.
+	net := discover.ScannedNetwork{
+		SSID:         "Worst",
+		Security:     "Open",
+		WPS:          true,
+		PortalLikely: true,
+		Signal:       -30, // strong signal
+	}
+	ns := ScoreNetwork(net)
+	if ns.Score != 15 {
+		t.Errorf("open+wps+portal+strong score = %d, want 15", ns.Score)
+	}
+	if ns.Grade != GradeF {
+		t.Errorf("grade = %q, want F", ns.Grade)
+	}
+	assertHasFinding(t, ns.Findings, "info", "Strong signal")
+}
+
+// ---------------------------------------------------------------------------
+// ScoreNetwork — WPA2 Enterprise
+// ---------------------------------------------------------------------------
+
+func TestScoreNetwork_WPA2Enterprise(t *testing.T) {
+	net := discover.ScannedNetwork{
+		SSID:     "CorpSecure",
+		Security: "WPA2-Enterprise",
+	}
+	ns := ScoreNetwork(net)
+	if ns.Score != 100 {
+		t.Errorf("WPA2-Enterprise score = %d, want 100", ns.Score)
+	}
+	assertHasFinding(t, ns.Findings, "info", "WPA2/3-Enterprise")
+}
+
+// ---------------------------------------------------------------------------
+// buildSummary — worst/best tracking with equal scores
+// ---------------------------------------------------------------------------
+
+func TestBuildSummary_FirstNetworkIsWorstAndBest(t *testing.T) {
+	// With a single network, it should be both worst and best.
+	networks := []NetworkScore{
+		{SSID: "OnlyNet", Score: 50, Grade: GradeD},
+	}
+	s := buildSummary(networks)
+	if s.WorstNetwork != "OnlyNet" {
+		t.Errorf("WorstNetwork = %q, want OnlyNet", s.WorstNetwork)
+	}
+	if s.BestNetwork != "OnlyNet" {
+		t.Errorf("BestNetwork = %q, want OnlyNet", s.BestNetwork)
+	}
+}
+
+func TestBuildSummary_CountsAllSeverities(t *testing.T) {
+	networks := []NetworkScore{
+		{
+			SSID: "Mixed", Score: 30, Grade: GradeF,
+			Findings: []Finding{
+				{Severity: "critical", Title: "a"},
+				{Severity: "critical", Title: "b"},
+				{Severity: "high", Title: "c"},
+				{Severity: "medium", Title: "d"},
+				{Severity: "medium", Title: "e"},
+				{Severity: "medium", Title: "f"},
+				{Severity: "low", Title: "g"},
+				{Severity: "info", Title: "h"},
+			},
+		},
+	}
+	s := buildSummary(networks)
+	if s.CriticalFindings != 2 {
+		t.Errorf("CriticalFindings = %d, want 2", s.CriticalFindings)
+	}
+	if s.HighFindings != 1 {
+		t.Errorf("HighFindings = %d, want 1", s.HighFindings)
+	}
+	if s.MediumFindings != 3 {
+		t.Errorf("MediumFindings = %d, want 3", s.MediumFindings)
+	}
+}
+
+func TestBuildSummary_AllGrades(t *testing.T) {
+	networks := []NetworkScore{
+		{SSID: "A1", Score: 95, Grade: GradeA},
+		{SSID: "A2", Score: 92, Grade: GradeA},
+		{SSID: "B1", Score: 80, Grade: GradeB},
+		{SSID: "C1", Score: 65, Grade: GradeC},
+		{SSID: "D1", Score: 45, Grade: GradeD},
+		{SSID: "F1", Score: 10, Grade: GradeF},
+		{SSID: "F2", Score: 5, Grade: GradeF},
+	}
+	s := buildSummary(networks)
+	if s.GradeA != 2 {
+		t.Errorf("GradeA = %d, want 2", s.GradeA)
+	}
+	if s.GradeB != 1 {
+		t.Errorf("GradeB = %d, want 1", s.GradeB)
+	}
+	if s.GradeC != 1 {
+		t.Errorf("GradeC = %d, want 1", s.GradeC)
+	}
+	if s.GradeD != 1 {
+		t.Errorf("GradeD = %d, want 1", s.GradeD)
+	}
+	if s.GradeF != 2 {
+		t.Errorf("GradeF = %d, want 2", s.GradeF)
+	}
+	if s.BestNetwork != "A1" {
+		t.Errorf("BestNetwork = %q, want A1", s.BestNetwork)
+	}
+	if s.WorstNetwork != "F2" {
+		t.Errorf("WorstNetwork = %q, want F2", s.WorstNetwork)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// scoreToGrade — exact boundaries
+// ---------------------------------------------------------------------------
+
+func TestScoreToGrade_Boundaries(t *testing.T) {
+	tests := []struct {
+		score int
+		want  Grade
+	}{
+		{100, GradeA},
+		{90, GradeA},
+		{89, GradeB},
+		{75, GradeB},
+		{74, GradeC},
+		{60, GradeC},
+		{59, GradeD},
+		{40, GradeD},
+		{39, GradeF},
+		{0, GradeF},
+	}
+	for _, tt := range tests {
+		got := scoreToGrade(tt.score)
+		if got != tt.want {
+			t.Errorf("scoreToGrade(%d) = %q, want %q", tt.score, got, tt.want)
+		}
 	}
 }
 

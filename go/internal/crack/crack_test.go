@@ -329,6 +329,54 @@ func TestSelectedSmartCrackStages(t *testing.T) {
 	}
 }
 
+func TestSelectedSmartCrackStages_FullBrute(t *testing.T) {
+	got := selectedSmartCrackStages(true, smartCrackOptions{fullBrute: true})
+	// Should include all 6 stages (with wordlists).
+	if len(got) != 6 {
+		t.Fatalf("fullBrute with wordlists: len = %d, want 6", len(got))
+	}
+	if got[5] != smartCrackStageFullBrute {
+		t.Errorf("last stage = %d, want fullBrute", got[5])
+	}
+}
+
+func TestSelectedSmartCrackStages_DictionarySkipped(t *testing.T) {
+	// Without wordlists and without fullBrute, dictionary should be skipped.
+	got := selectedSmartCrackStages(false, smartCrackOptions{})
+	for _, stage := range got {
+		if stage == smartCrackStageDictionary {
+			t.Error("dictionary stage should be skipped without wordlists")
+		}
+	}
+}
+
+func TestSelectedSmartCrackStages_WithWordlists(t *testing.T) {
+	got := selectedSmartCrackStages(true, smartCrackOptions{
+		startStage: smartCrackStageCommonPasswords,
+		endStage:   smartCrackStageSmartBrute,
+	})
+	// Should include dictionary stage when wordlists are available.
+	hasDictionary := false
+	for _, stage := range got {
+		if stage == smartCrackStageDictionary {
+			hasDictionary = true
+		}
+	}
+	if !hasDictionary {
+		t.Error("dictionary stage should be included with wordlists")
+	}
+}
+
+func TestNormalizeSmartCrackOptions_AllDefaults(t *testing.T) {
+	opts := normalizeSmartCrackOptions(smartCrackOptions{})
+	if opts.startStage != smartCrackStageCommonPasswords {
+		t.Errorf("default startStage = %d, want %d", opts.startStage, smartCrackStageCommonPasswords)
+	}
+	if opts.endStage != smartCrackStageSmartBrute {
+		t.Errorf("default endStage = %d, want %d", opts.endStage, smartCrackStageSmartBrute)
+	}
+}
+
 func TestSmartCrackScopeLabel(t *testing.T) {
 	if got := smartCrackScopeLabel(smartCrackOptions{
 		startStage: smartCrackStageCommonPasswords,
@@ -780,6 +828,53 @@ func TestSmartCrackMissingHashFile(t *testing.T) {
 	}
 }
 
+func TestSmartCrackWithFullBrute(t *testing.T) {
+	// Exercise the fullBrute=true path (reaches stage 6).
+	result, err := SmartCrack("/nonexistent/hash.22000", 1*time.Second, true)
+	if err != nil {
+		t.Fatalf("SmartCrack returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SmartCrack returned nil result")
+	}
+	if result.Success {
+		t.Error("SmartCrack should not succeed with missing hash file")
+	}
+	if !strings.Contains(result.Details, "not found") {
+		t.Errorf("Details = %q, should mention file not found", result.Details)
+	}
+}
+
+func TestSmartCrackWithOptions_AllStages(t *testing.T) {
+	// Exercise with options covering all stages.
+	opts := smartCrackOptions{
+		startStage: smartCrackStageCommonPasswords,
+		endStage:   smartCrackStageFullBrute,
+		fullBrute:  true,
+	}
+	result, err := smartCrackWithOptions("/nonexistent/hash.22000", 1*time.Second, opts)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.Success {
+		t.Error("should not succeed with missing hash file")
+	}
+}
+
+func TestSmartCrackWithOptions_SingleStage(t *testing.T) {
+	opts := smartCrackOptions{
+		startStage: smartCrackStageNumericMasks,
+		endStage:   smartCrackStageNumericMasks,
+	}
+	result, err := smartCrackWithOptions("/nonexistent/hash.22000", 1*time.Second, opts)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.Success {
+		t.Error("should not succeed with missing hash file")
+	}
+}
+
 func TestSmartCrackNoHashcat(t *testing.T) {
 	// Create a dummy hash file.
 	tmpDir := t.TempDir()
@@ -919,6 +1014,161 @@ func TestFindHashcatRuleByName_NoExist(t *testing.T) {
 // ---------------------------------------------------------------------------
 // smartCrackTimeout helper
 // ---------------------------------------------------------------------------
+
+func TestSmartCrackWithOptions_DictStageNoWordlists(t *testing.T) {
+	// Create a dummy hash file so we get past the file check.
+	tmpDir := t.TempDir()
+	hashFile := filepath.Join(tmpDir, "test.22000")
+	if err := os.WriteFile(hashFile, []byte("WPA*02*...\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := smartCrackOptions{
+		startStage: smartCrackStageDictionary,
+		endStage:   smartCrackStageDictionary,
+	}
+	result, err := smartCrackWithOptions(hashFile, 2*time.Second, opts)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// Without hashcat installed, this will fail gracefully.
+	if result.Method != SmartCrackM {
+		t.Errorf("Method = %q, want %q", result.Method, SmartCrackM)
+	}
+}
+
+func TestIsNumericMask_EdgeCases(t *testing.T) {
+	tests := []struct {
+		mask string
+		want bool
+	}{
+		{"?d?d?d?d?d?d?d?d", true},
+		{"12345678", true},
+		{"?d?d?d?d1234", true},
+		{"?l?d?d?d?d?d?d?d", false},
+		{"?d?d?d?d?d?d?d?a", false},
+		{"password", false},
+	}
+	for _, tt := range tests {
+		got := isNumericMask(tt.mask)
+		if got != tt.want {
+			t.Errorf("isNumericMask(%q) = %v, want %v", tt.mask, got, tt.want)
+		}
+	}
+}
+
+func TestBuildHashcatArgs_StandardFlags(t *testing.T) {
+	args := buildHashcatArgs("/tmp/hash.22000", "-a", "0", "/tmp/hash.22000", "/tmp/wl.txt")
+
+	// Check -m 22000 at start.
+	if len(args) < 2 || args[0] != "-m" || args[1] != "22000" {
+		t.Errorf("args should start with -m 22000, got %v", args[:2])
+	}
+
+	// Check standard flags are present.
+	hasQuiet := false
+	hasO := false
+	for _, a := range args {
+		if a == "--quiet" {
+			hasQuiet = true
+		}
+		if a == "-O" {
+			hasO = true
+		}
+	}
+	if !hasQuiet {
+		t.Error("args should contain --quiet")
+	}
+	if !hasO {
+		t.Error("args should contain -O")
+	}
+}
+
+func TestCrackWithAircrack_MissingCaptureFile(t *testing.T) {
+	result, err := CrackWithAircrack("/nonexistent/capture.cap", "/nonexistent/wordlist.txt")
+	if err != nil {
+		t.Fatalf("CrackWithAircrack returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	if result.Success {
+		t.Error("should not succeed with missing capture file")
+	}
+	if result.Method != Dictionary {
+		t.Errorf("Method = %q, want %q", result.Method, Dictionary)
+	}
+	if !strings.Contains(result.Details, "not found") {
+		t.Errorf("Details = %q, should mention file not found", result.Details)
+	}
+}
+
+func TestCrackWithHashcat_MissingHashFile(t *testing.T) {
+	result, err := CrackWithHashcat("/nonexistent/hash.22000", "")
+	if err != nil {
+		t.Fatalf("CrackWithHashcat returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	if result.Success {
+		t.Error("should not succeed with missing hash file")
+	}
+	if result.Method != Hashcat {
+		t.Errorf("Method = %q, want %q", result.Method, Hashcat)
+	}
+	if !strings.Contains(result.Details, "not found") {
+		t.Errorf("Details = %q, should mention file not found", result.Details)
+	}
+}
+
+func TestCrackWithAircrack_MissingWordlist(t *testing.T) {
+	// Create a dummy capture file so we get past the file check.
+	tmpDir := t.TempDir()
+	capFile := filepath.Join(tmpDir, "test.cap")
+	os.WriteFile(capFile, []byte("dummy"), 0o644)
+
+	result, err := CrackWithAircrack(capFile, "/nonexistent/wordlist.txt")
+	if err != nil {
+		t.Fatalf("CrackWithAircrack returned error: %v", err)
+	}
+	if result.Success {
+		t.Error("should not succeed with missing wordlist")
+	}
+	// Either "not found" (aircrack missing) or "Wordlist not found" (wordlist missing).
+	if result.Details == "" {
+		t.Error("Details should not be empty")
+	}
+}
+
+func TestScanTargets_InvalidInterface(t *testing.T) {
+	_, err := ScanTargets("../../etc/evil", 1)
+	if err == nil {
+		t.Error("ScanTargets should reject invalid interface")
+	}
+}
+
+func TestFindHashcatRules_NonexistentPath(t *testing.T) {
+	result := findHashcatRules("/nonexistent/hashcat")
+	// Should fall back to "best64.rule" when no rules file found.
+	if result != "best64.rule" {
+		t.Errorf("findHashcatRules = %q, want best64.rule fallback", result)
+	}
+}
+
+func TestRunCrack_InvalidInterface(t *testing.T) {
+	results, err := RunCrack("../../evil", "TestNet", "", 1*time.Second)
+	if err != nil {
+		t.Fatalf("RunCrack returned unexpected error: %v", err)
+	}
+	// RunCrack returns results (not error) when ScanTargets fails.
+	if len(results) == 0 {
+		t.Fatal("RunCrack should return at least one result")
+	}
+	if results[0].Success {
+		t.Error("RunCrack should not succeed with invalid interface")
+	}
+}
 
 func TestSmartCrackTimeout(t *testing.T) {
 	start := time.Now()

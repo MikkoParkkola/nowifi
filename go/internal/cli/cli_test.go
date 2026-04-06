@@ -359,8 +359,32 @@ func TestRootLongDescription(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// extractHost (audit.go helper)
+// extractHost (audit.go helper) — including error path
 // ---------------------------------------------------------------------------
+
+func TestExtractHost_URLParseError(t *testing.T) {
+	// url.Parse is very permissive, so exercise the empty return path.
+	got := extractHost("")
+	if got != "" {
+		t.Errorf("extractHost empty = %q, want empty", got)
+	}
+}
+
+func TestExtractHost_NoScheme(t *testing.T) {
+	// Without a scheme, url.Parse puts the value in Path, not Host.
+	got := extractHost("bare-hostname")
+	if got != "" {
+		t.Errorf("extractHost(bare-hostname) = %q, want empty (no scheme)", got)
+	}
+}
+
+func TestExtractHost_SchemeWithPort(t *testing.T) {
+	// url.Parse treats "host:port" as scheme:opaque, returning empty Hostname.
+	got := extractHost("myserver:8080")
+	if got != "" {
+		t.Errorf("extractHost(myserver:8080) = %q, want empty", got)
+	}
+}
 
 func TestExtractHost(t *testing.T) {
 	tests := []struct {

@@ -166,6 +166,20 @@ func TestWriteOutput_EmptyPath(t *testing.T) {
 	writeOutput("test")
 }
 
+func TestWriteOutput_BadPath(t *testing.T) {
+	origOutput := diagnoseOutput
+	defer func() { diagnoseOutput = origOutput }()
+
+	diagnoseOutput = "/nonexistent/directory/file.txt"
+	// Should not panic even on write error.
+	writeOutput("test content")
+}
+
+func TestWriteOrPrint_BadPath(t *testing.T) {
+	// Should not panic even on write error.
+	writeOrPrint("test content", "/nonexistent/directory/file.txt")
+}
+
 // ---------------------------------------------------------------------------
 // generateScoreMarkdown
 // ---------------------------------------------------------------------------
@@ -270,6 +284,96 @@ func TestGenerateScoreMarkdown_Findings(t *testing.T) {
 	if !strings.Contains(md, "1") {
 		t.Error("markdown should contain finding counts")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// printScoreTerminal
+// ---------------------------------------------------------------------------
+
+func TestPrintScoreTerminal_Basic(t *testing.T) {
+	report := &score.ScanReport{
+		Networks: []score.NetworkScore{
+			{
+				SSID:     "TestNet",
+				Grade:    score.GradeA,
+				Score:    95,
+				Security: "WPA3",
+				Findings: []score.Finding{
+					{Severity: "info", Title: "WPA3 encryption"},
+				},
+			},
+			{
+				SSID:     "BadNet",
+				Grade:    score.GradeF,
+				Score:    10,
+				Security: "Open",
+				WPS:      true,
+				Findings: []score.Finding{
+					{Severity: "critical", Title: "No encryption"},
+					{Severity: "high", Title: "WPS enabled"},
+				},
+			},
+			{
+				SSID:     "",
+				Grade:    score.GradeD,
+				Score:    45,
+				Security: "WEP",
+			},
+			{
+				SSID:     "VeryLongSSIDNameThatExceedsTwentyFourCharactersLimit",
+				Grade:    score.GradeC,
+				Score:    65,
+				Security: "WPA2",
+			},
+		},
+		Summary: score.ReportSummary{
+			TotalNetworks:    4,
+			GradeA:           1,
+			GradeF:           1,
+			GradeD:           1,
+			GradeC:           1,
+			CriticalFindings: 1,
+			HighFindings:     1,
+			WorstNetwork:     "BadNet",
+			BestNetwork:      "TestNet",
+		},
+	}
+
+	// Should not panic.
+	printScoreTerminal(report, nil)
+}
+
+func TestPrintScoreTerminal_WithConnected(t *testing.T) {
+	report := &score.ScanReport{
+		Networks: []score.NetworkScore{
+			{SSID: "Net1", Grade: score.GradeB, Score: 80, Security: "WPA2"},
+		},
+		Summary: score.ReportSummary{TotalNetworks: 1, GradeB: 1, BestNetwork: "Net1", WorstNetwork: "Net1"},
+	}
+	connected := &score.NetworkScore{
+		SSID:  "Net1",
+		Grade: score.GradeB,
+		Score: 80,
+		Findings: []score.Finding{
+			{Severity: "medium", Title: "DNS reachable", Description: "External DNS works", Remediation: "Block DNS"},
+			{Severity: "low", Title: "NTP open", Description: "NTP works", Remediation: "Restrict NTP"},
+			{Severity: "info", Title: "All ok", Description: "Standard config", Remediation: "None"},
+		},
+	}
+
+	// Should not panic.
+	printScoreTerminal(report, connected)
+}
+
+// ---------------------------------------------------------------------------
+// hint function (used by runScore)
+// ---------------------------------------------------------------------------
+
+func TestHint_FromScore(t *testing.T) {
+	// Verify hint doesn't panic with various arg counts.
+	hint()
+	hint("one hint")
+	hint("hint 1", "hint 2", "hint 3")
 }
 
 // ---------------------------------------------------------------------------

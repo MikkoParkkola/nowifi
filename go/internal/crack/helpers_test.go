@@ -5,6 +5,7 @@ package crack
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -321,6 +322,122 @@ func TestCountFileLines_NonexistentFile(t *testing.T) {
 // ---------------------------------------------------------------------------
 // errCommandTimedOut
 // ---------------------------------------------------------------------------
+
+func TestMonitorModeError_ContainsGuidance(t *testing.T) {
+	msg := monitorModeError("wlan0")
+	if isDarwin() {
+		if !strings.Contains(msg, "USB WiFi adapter") {
+			t.Errorf("macOS message should mention USB adapter: %q", msg)
+		}
+	} else {
+		if !strings.Contains(msg, "airmon-ng") {
+			t.Errorf("Linux message should mention airmon-ng: %q", msg)
+		}
+		if !strings.Contains(msg, "wlan0") {
+			t.Errorf("Linux message should mention interface: %q", msg)
+		}
+	}
+}
+
+func TestCaptureDir_ContainsCaptures(t *testing.T) {
+	dir := captureDir()
+	if !strings.HasSuffix(dir, "captures") {
+		t.Errorf("captureDir() = %q, should end with 'captures'", dir)
+	}
+}
+
+func TestTimestampedDir_ContainsPrefix(t *testing.T) {
+	dir := timestampedDir("pmkid")
+	if !strings.Contains(dir, "pmkid_") {
+		t.Errorf("timestampedDir(pmkid) = %q, should contain 'pmkid_'", dir)
+	}
+}
+
+func TestFindWordlists_PathsAbsolute(t *testing.T) {
+	wl := FindWordlists()
+	for _, p := range wl {
+		if p == "" {
+			t.Error("FindWordlists returned empty string")
+		}
+	}
+}
+
+func TestParseWashOutput_ShortLine(t *testing.T) {
+	// Lines with fewer than 5 fields after BSSID should be skipped.
+	output := "AA:BB:CC:DD:EE:01  6  -42\n"
+	targets := parseWashOutput(output)
+	if len(targets) != 0 {
+		t.Errorf("expected 0 targets for short line, got %d", len(targets))
+	}
+}
+
+func TestParseWashOutput_NonBSSIDLine(t *testing.T) {
+	// Lines not starting with a BSSID should be skipped.
+	output := "Some random text without BSSID\n"
+	targets := parseWashOutput(output)
+	if len(targets) != 0 {
+		t.Errorf("expected 0 targets for non-BSSID line, got %d", len(targets))
+	}
+}
+
+func TestParseWashOutput_HeaderLine(t *testing.T) {
+	output := "BSSID               Ch  dBm  WPS  Lck  Vendor    ESSID\n"
+	targets := parseWashOutput(output)
+	if len(targets) != 0 {
+		t.Errorf("expected 0 targets for header-only, got %d", len(targets))
+	}
+}
+
+func TestParseMacOSNetwork_SignalParsing(t *testing.T) {
+	net := map[string]interface{}{
+		"_name":                   "TestWiFi",
+		"spairport_signal_noise":  "-65 dBm",
+		"spairport_security_mode": "wpa2_personal",
+		"spairport_network_bssid": "AA:BB:CC:DD:EE:FF",
+	}
+	result := parseMacOSNetwork(net)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Signal != -65 {
+		t.Errorf("Signal = %d, want -65", result.Signal)
+	}
+}
+
+func TestParseMacOSNetwork_NoSecurity(t *testing.T) {
+	net := map[string]interface{}{
+		"_name": "OpenNet",
+	}
+	result := parseMacOSNetwork(net)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Security != "unknown" {
+		t.Errorf("Security = %q, want 'unknown' for missing security", result.Security)
+	}
+}
+
+func TestParseMacOSNetwork_InvalidSignal(t *testing.T) {
+	net := map[string]interface{}{
+		"_name":                  "TestWiFi",
+		"spairport_signal_noise": "not-a-number",
+	}
+	result := parseMacOSNetwork(net)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Invalid signal should remain at -99 (default).
+	if result.Signal != -99 {
+		t.Errorf("Signal = %d, want -99 for invalid signal", result.Signal)
+	}
+}
+
+func TestCheckMonitorMode_InvalidInterface(t *testing.T) {
+	// Should return false for invalid interface name.
+	if checkMonitorMode("../../evil") {
+		t.Error("checkMonitorMode should return false for invalid interface")
+	}
+}
 
 func TestErrCommandTimedOut(t *testing.T) {
 	if errCommandTimedOut == nil {

@@ -456,6 +456,116 @@ func TestDetectPortal_FirewallBlock(t *testing.T) {
 	}
 }
 
+func TestDetectPortal_PartialCanaryFailure(t *testing.T) {
+	// Only 1 of 4 canaries fails -- should NOT trigger portal (need majority).
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/hotspot-detect.html":
+			w.WriteHeader(200)
+			w.Write([]byte("Wrong content")) // Fails
+		case "/generate_204":
+			w.WriteHeader(204)
+		case "/canonical.html":
+			w.WriteHeader(200)
+			w.Write([]byte("success"))
+		case "/connecttest.txt":
+			w.WriteHeader(200)
+			w.Write([]byte("Microsoft Connect Test"))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer ts.Close()
+
+	origCanaries := make([]canary, len(canaryURLs))
+	copy(origCanaries, canaryURLs)
+	canaryURLs[0].URL = ts.URL + "/hotspot-detect.html"
+	canaryURLs[1].URL = ts.URL + "/generate_204"
+	canaryURLs[2].URL = ts.URL + "/canonical.html"
+	canaryURLs[3].URL = ts.URL + "/connecttest.txt"
+	defer func() { copy(canaryURLs, origCanaries) }()
+
+	info := DetectPortal("en0")
+	// 1 failure, 3 successes -- should NOT trigger canary-based portal.
+	if info.Type == PortalTransparent || info.Type == PortalFirewall {
+		t.Errorf("partial failure should not trigger portal, got Type=%q", info.Type)
+	}
+}
+
+func TestDetectPortal_MixedCanaryFailures(t *testing.T) {
+	// 3 canaries fail, 1 succeeds -- should trigger portal (majority fail).
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/generate_204":
+			w.WriteHeader(204) // Only one succeeds.
+		default:
+			w.WriteHeader(200)
+			w.Write([]byte("Wrong content"))
+		}
+	}))
+	defer ts.Close()
+
+	origCanaries := make([]canary, len(canaryURLs))
+	copy(origCanaries, canaryURLs)
+	canaryURLs[0].URL = ts.URL + "/hotspot-detect.html"
+	canaryURLs[1].URL = ts.URL + "/generate_204"
+	canaryURLs[2].URL = ts.URL + "/canonical.html"
+	canaryURLs[3].URL = ts.URL + "/connecttest.txt"
+	defer func() { copy(canaryURLs, origCanaries) }()
+
+	info := DetectPortal("en0")
+	if !info.IsCaptive {
+		t.Error("majority canary failure should detect captive portal")
+	}
+}
+
+func TestCheckCanary_GoogleExpectedBodyEmpty(t *testing.T) {
+	// Google canary expects no body check (empty ExpectedBody).
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	}))
+	defer ts.Close()
+
+	client := ts.Client()
+	c := canary{
+		URL:            ts.URL + "/generate_204",
+		ExpectedBody:   "",
+		ExpectedStatus: 204,
+		Name:           "Google 204",
+	}
+
+	result := checkCanary(client, c)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.StatusCode != 204 {
+		t.Errorf("status = %d, want 204", result.StatusCode)
+	}
+}
+
+func TestCheckCanary_WrongStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer ts.Close()
+
+	client := ts.Client()
+	c := canary{
+		URL:            ts.URL + "/hotspot",
+		ExpectedBody:   "Success",
+		ExpectedStatus: 200,
+		Name:           "Test",
+	}
+
+	result := checkCanary(client, c)
+	if result == nil {
+		t.Fatal("expected non-nil result for wrong status")
+	}
+	if result.StatusCode != 500 {
+		t.Errorf("status = %d, want 500", result.StatusCode)
+	}
+}
+
 func TestCanaryURLs_Defined(t *testing.T) {
 	if len(canaryURLs) < 4 {
 		t.Fatalf("expected at least 4 canary URLs, got %d", len(canaryURLs))
@@ -478,6 +588,214 @@ func TestCanaryURLs_Defined(t *testing.T) {
 	}
 	if !names["Google 204"] {
 		t.Error("missing Google 204 canary")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fingerprintPortal — vendor-specific tests
+// ---------------------------------------------------------------------------
+
+func TestFingerprintPortal_Mikrotik(t *testing.T) {
+	info := &PortalInfo{}
+	body := `<html><head><title>mikrotik hotspot</title></head><body><div class="routeros">Login</div></body></html>`
+	fingerprintPortal(info, body, "http://192.168.1.1/login", http.Header{})
+	if info.Vendor != "mikrotik" {
+		t.Errorf("Vendor = %q, want mikrotik", info.Vendor)
+	}
+}
+
+func TestFingerprintPortal_Fortinet(t *testing.T) {
+	info := &PortalInfo{}
+	body := `<html><body><div class="ftnt_login">FortiGate Auth</div></body></html>`
+	headers := http.Header{"Server": {"FortiGate"}}
+	fingerprintPortal(info, body, "http://portal.example.com/fgtauth", headers)
+	if info.Vendor != "fortinet" {
+		t.Errorf("Vendor = %q, want fortinet", info.Vendor)
+	}
+}
+
+func TestFingerprintPortal_Ruckus(t *testing.T) {
+	info := &PortalInfo{}
+	body := `<html><body class="ruckus-portal"><form>SmartZone login</form></body></html>`
+	fingerprintPortal(info, body, "http://ruckus.local/login.html", http.Header{})
+	if info.Vendor != "ruckus" {
+		t.Errorf("Vendor = %q, want ruckus", info.Vendor)
+	}
+}
+
+func TestFingerprintPortal_PanasonicViaKong(t *testing.T) {
+	info := &PortalInfo{}
+	body := `<html><body>Inflight WiFi</body></html>`
+	headers := http.Header{"X-Kong-Proxy-Latency": {"42"}}
+	fingerprintPortal(info, body, "http://portal.example.com/wifi", headers)
+	if info.Vendor != "panasonic_avionics" {
+		t.Errorf("Vendor = %q, want panasonic_avionics", info.Vendor)
+	}
+}
+
+func TestFingerprintPortal_PanasonicViaHeader(t *testing.T) {
+	info := &PortalInfo{}
+	body := `<html><body>Inflight WiFi</body></html>`
+	headers := http.Header{"Via": {"1.1 kong"}}
+	fingerprintPortal(info, body, "http://portal.example.com/wifi", headers)
+	if info.Vendor != "panasonic_avionics" {
+		t.Errorf("Vendor = %q, want panasonic_avionics", info.Vendor)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// scoreVendorSignature
+// ---------------------------------------------------------------------------
+
+func TestScoreVendorSignature_AllMatch(t *testing.T) {
+	sig := vendorSignature{
+		URLPatterns:    []string{"/login"},
+		HTMLMarkers:    []string{"portal", "wifi"},
+		HeaderPatterns: []string{"MyServer"},
+	}
+	score, matchCount := scoreVendorSignature("/login", "portal wifi page", "myserver: v1", sig)
+	// URL match=1*2, HTML match=2*1, header match=1*2 = 6.
+	if score < 4 {
+		t.Errorf("score = %d, want >= 4", score)
+	}
+	if matchCount < 3 {
+		t.Errorf("matchCount = %d, want >= 3", matchCount)
+	}
+}
+
+func TestScoreVendorSignature_NoMatch(t *testing.T) {
+	sig := vendorSignature{
+		URLPatterns:    []string{"/meraki"},
+		HTMLMarkers:    []string{"meraki"},
+		HeaderPatterns: []string{"Meraki"},
+	}
+	score, matchCount := scoreVendorSignature("/other", "no match", "apache: 2.4", sig)
+	if score != 0 {
+		t.Errorf("score = %d, want 0", score)
+	}
+	if matchCount != 0 {
+		t.Errorf("matchCount = %d, want 0", matchCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// countVendorPatternMatches
+// ---------------------------------------------------------------------------
+
+func TestCountVendorPatternMatches(t *testing.T) {
+	if c := countVendorPatternMatches("abc def ghi", []string{"abc", "ghi"}); c != 2 {
+		t.Errorf("expected 2 matches, got %d", c)
+	}
+	if c := countVendorPatternMatches("nothing here", []string{"xyz"}); c != 0 {
+		t.Errorf("expected 0 matches, got %d", c)
+	}
+	if c := countVendorPatternMatches("test", nil); c != 0 {
+		t.Errorf("expected 0 for nil patterns, got %d", c)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// detectAuthMethods — edge cases
+// ---------------------------------------------------------------------------
+
+func TestDetectAuthMethods_CaseInsensitive(t *testing.T) {
+	methods := detectAuthMethods(`<form><INPUT TYPE="EMAIL" NAME="USER_EMAIL" /></form>`)
+	if len(methods) == 0 {
+		t.Error("expected email to be detected case-insensitively")
+	}
+}
+
+func TestDetectAuthMethods_Empty(t *testing.T) {
+	methods := detectAuthMethods("")
+	if len(methods) != 0 {
+		t.Errorf("expected 0 methods for empty html, got %d", len(methods))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// hostFromURL — additional cases
+// ---------------------------------------------------------------------------
+
+func TestHostFromURL_IPv6(t *testing.T) {
+	got := hostFromURL("http://[::1]:8080/path")
+	if got != "::1" {
+		t.Errorf("hostFromURL IPv6 = %q, want ::1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolvePortalIP — empty hostname
+// ---------------------------------------------------------------------------
+
+func TestResolvePortalIP_EmptyURL(t *testing.T) {
+	ip := resolvePortalIP("")
+	if ip != "" {
+		t.Errorf("resolvePortalIP empty = %q, want empty", ip)
+	}
+}
+
+func TestResolvePortalIP_InvalidURL(t *testing.T) {
+	ip := resolvePortalIP("://bad")
+	if ip != "" {
+		t.Errorf("resolvePortalIP invalid = %q, want empty", ip)
+	}
+}
+
+func TestResolvePortalIP_ValidDomain(t *testing.T) {
+	// localhost should resolve.
+	ip := resolvePortalIP("http://localhost/login")
+	// May or may not resolve depending on environment; just verify no panic.
+	_ = ip
+}
+
+func TestResolvePortalIP_IPAddress(t *testing.T) {
+	ip := resolvePortalIP("http://127.0.0.1/login")
+	// Should resolve 127.0.0.1 to itself.
+	if ip != "" && ip != "127.0.0.1" && ip != "::1" {
+		t.Errorf("resolvePortalIP(127.0.0.1) = %q", ip)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PortalType constants
+// ---------------------------------------------------------------------------
+
+func TestPortalTypeConstants(t *testing.T) {
+	types := []PortalType{
+		PortalHTTPRedirect, PortalDNSHijack, PortalTransparent,
+		PortalFirewall, PortalWalledGarden, PortalNone,
+	}
+	seen := make(map[PortalType]bool)
+	for _, pt := range types {
+		if seen[pt] {
+			t.Errorf("duplicate portal type: %s", pt)
+		}
+		seen[pt] = true
+		if string(pt) == "" {
+			t.Error("portal type should not be empty")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Inflight vendor signatures
+// ---------------------------------------------------------------------------
+
+func TestVendorSignatures_Inflight(t *testing.T) {
+	inflightVendors := []string{
+		"panasonic_avionics", "gogo_inflight", "viasat_inflight",
+		"inmarsat_gx", "thales_inflyt", "sita_onair",
+		"anuvu_inflight", "boingo_inflight",
+	}
+	for _, v := range inflightVendors {
+		sig, ok := vendorSignatures[v]
+		if !ok {
+			t.Errorf("missing inflight vendor signature: %s", v)
+			continue
+		}
+		if len(sig.URLPatterns) == 0 && len(sig.HTMLMarkers) == 0 {
+			t.Errorf("vendor %s has no URL or HTML patterns", v)
+		}
 	}
 }
 

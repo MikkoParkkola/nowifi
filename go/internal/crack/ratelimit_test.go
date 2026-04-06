@@ -314,6 +314,54 @@ func TestDetectLockoutSignal(t *testing.T) {
 // Wait after abort
 // ---------------------------------------------------------------------------
 
+func TestWait_NormalOperation(t *testing.T) {
+	rl := &RateLimiter{
+		BaseDelay:    1 * time.Millisecond,
+		currentDelay: 1 * time.Millisecond,
+	}
+
+	err := rl.Wait()
+	if err != nil {
+		t.Fatalf("Wait should not error: %v", err)
+	}
+
+	attempts, _, _ := rl.Stats()
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestWait_RespectsDelay(t *testing.T) {
+	rl := &RateLimiter{
+		BaseDelay:    50 * time.Millisecond,
+		currentDelay: 50 * time.Millisecond,
+		lastAttempt:  time.Now(),
+	}
+
+	start := time.Now()
+	err := rl.Wait()
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Wait error: %v", err)
+	}
+	if elapsed < 40*time.Millisecond {
+		t.Errorf("Wait should respect delay, elapsed = %v", elapsed)
+	}
+}
+
+func TestHandleLockout_Nil(t *testing.T) {
+	rl := WPSRateLimiter()
+	// Should not panic.
+	rl.HandleLockout(nil)
+}
+
+func TestHandleLockout_PermanentNoop(t *testing.T) {
+	rl := WPSRateLimiter()
+	// Permanent lockout should not sleep.
+	rl.HandleLockout(&LockoutError{Permanent: true, Message: "permanent"})
+}
+
 func TestWait_AfterAbort(t *testing.T) {
 	rl := &RateLimiter{
 		aborted:     true,
