@@ -787,8 +787,10 @@ func (d *Dashboard) bannerRow(inner int, bannerLine, rightText string) string {
 	b.WriteRune('\u2551') // ║
 	b.WriteString(dReset)
 
+	// Use visLen for accurate width of the banner (handles Unicode block chars).
+	bl := d.visLen(bannerLine)
+
 	// Banner portion (bold cyan).
-	bl := len([]rune(bannerLine))
 	b.WriteString(dBoldCyan())
 	b.WriteString(bannerLine)
 	b.WriteString(dReset)
@@ -798,6 +800,15 @@ func (d *Dashboard) bannerRow(inner int, bannerLine, rightText string) string {
 	gap := inner - bl - rtLen
 	if gap < 1 {
 		gap = 1
+		// Truncate right text if it doesn't fit.
+		if bl+1 >= inner {
+			rightText = ""
+			rtLen = 0
+			gap = inner - bl
+			if gap < 0 {
+				gap = 0
+			}
+		}
 	}
 	b.WriteString(strings.Repeat(" ", gap))
 	if rightText != "" {
@@ -813,16 +824,30 @@ func (d *Dashboard) bannerRow(inner int, bannerLine, rightText string) string {
 	return b.String()
 }
 
-func (d *Dashboard) dualPaneRow(leftW, rightW int, leftText, rightText string, leftVL, rightVL int) string {
+func (d *Dashboard) dualPaneRow(leftW, rightW int, leftText, rightText string, _, _ int) string {
 	var b strings.Builder
+
+	// Compute actual visual lengths (ignores ANSI escape codes).
+	leftVL := d.visLen(leftText)
+	rightVL := d.visLen(rightText)
 
 	// Left border.
 	b.WriteString(dDim())
 	b.WriteRune('\u2551')
 	b.WriteString(dReset)
 
-	// Left pane content.
-	b.WriteString(leftText)
+	// Left pane content — truncate if too long.
+	if leftVL > leftW {
+		// Brute-force truncate: strip ANSI, truncate, lose color. Safe fallback.
+		plain := d.stripANSI(leftText)
+		if len(plain) > leftW-3 {
+			plain = plain[:leftW-3] + "..."
+		}
+		b.WriteString(plain)
+		leftVL = len(plain)
+	} else {
+		b.WriteString(leftText)
+	}
 	leftPad := leftW - leftVL
 	if leftPad < 0 {
 		leftPad = 0
@@ -834,8 +859,17 @@ func (d *Dashboard) dualPaneRow(leftW, rightW int, leftText, rightText string, l
 	b.WriteRune('\u2551')
 	b.WriteString(dReset)
 
-	// Right pane content.
-	b.WriteString(rightText)
+	// Right pane content — truncate if too long.
+	if rightVL > rightW {
+		plain := d.stripANSI(rightText)
+		if len(plain) > rightW-3 {
+			plain = plain[:rightW-3] + "..."
+		}
+		b.WriteString(plain)
+		rightVL = len(plain)
+	} else {
+		b.WriteString(rightText)
+	}
 	rightPad := rightW - rightVL
 	if rightPad < 0 {
 		rightPad = 0
@@ -850,16 +884,27 @@ func (d *Dashboard) dualPaneRow(leftW, rightW int, leftText, rightText string, l
 	return b.String()
 }
 
-func (d *Dashboard) contentRow(inner int, text string, visLen int) string {
+func (d *Dashboard) contentRow(inner int, text string, _ int) string {
 	var b strings.Builder
+	vl := d.visLen(text)
 
 	// Left border.
 	b.WriteString(dDim())
 	b.WriteRune('\u2551')
 	b.WriteString(dReset)
 
-	b.WriteString(text)
-	pad := inner - visLen
+	// Truncate if too wide.
+	if vl > inner {
+		plain := d.stripANSI(text)
+		if len(plain) > inner-3 {
+			plain = plain[:inner-3] + "..."
+		}
+		b.WriteString(plain)
+		vl = len(plain)
+	} else {
+		b.WriteString(text)
+	}
+	pad := inner - vl
 	if pad < 0 {
 		pad = 0
 	}
@@ -896,6 +941,25 @@ func (d *Dashboard) visLen(s string) int {
 		n++
 	}
 	return n
+}
+
+func (d *Dashboard) stripANSI(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for _, r := range s {
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if r == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func formatUptime(dur time.Duration) string {
