@@ -112,9 +112,11 @@ func (g *Guard) Restore() {
 		platform.DisableStealth(g.stealthState)
 	}
 
-	// 3. Clear system SOCKS proxy.
-	if err := platform.ClearSystemProxy(g.iface); err != nil {
-		fmt.Fprintf(os.Stderr, "nowifi: warning: failed to clear SOCKS proxy: %v\n", err)
+	// 3. Clear system SOCKS proxy (only if tunnels were registered — they set the proxy).
+	if len(tunnels) > 0 {
+		if err := platform.ClearSystemProxy(g.iface); err != nil {
+			fmt.Fprintf(os.Stderr, "nowifi: warning: failed to clear SOCKS proxy: %v\n", err)
+		}
 	}
 
 	// 4. Restore original MAC address if it was changed.
