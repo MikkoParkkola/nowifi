@@ -199,6 +199,7 @@ func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 // ---------------------------------------------------------------------------
 
 func tryMACRotate(iface string, plat PlatformOps) Result {
+	originalMAC := plat.GetCurrentMAC(iface)
 	newMAC := plat.GenerateRandomMAC()
 	if !plat.SetMAC(iface, newMAC) {
 		return Result{Method: MACRotate, Success: false, Details: "Need sudo for MAC change"}
@@ -217,6 +218,12 @@ func tryMACRotate(iface string, plat PlatformOps) Result {
 			Details:     "No authentication required for new MAC addresses. Infinite sessions by rotating.",
 			Remediation: "Require explicit authentication for all new devices. Don't auto-approve.",
 		}
+	}
+
+	if originalMAC != "" && originalMAC != newMAC {
+		plat.SetMAC(iface, originalMAC)
+		time.Sleep(time.Second)
+		plat.RenewDHCP(iface)
 	}
 
 	return Result{

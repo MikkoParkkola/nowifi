@@ -17,6 +17,11 @@ import (
 	"time"
 )
 
+var (
+	networkServiceRE = regexp.MustCompile(`Hardware Port:\s*(.+)`)
+	serviceNameRE    = regexp.MustCompile(`^[a-zA-Z0-9 ./_-]+$`)
+)
+
 // GetWifiInfo returns the current WiFi connection info on macOS.
 //
 // Tries, in order: system_profiler (JSON), the legacy airport command,
@@ -486,7 +491,8 @@ func FlushDNS() error {
 
 // SetSystemProxy configures a system-wide SOCKS proxy on the given interface.
 func SetSystemProxy(iface string, port int) error {
-	if _, err := ValidateInterface(iface); err != nil {
+	service, err := resolveNetworkService(iface)
+	if err != nil {
 		return fmt.Errorf("set proxy: %w", err)
 	}
 
@@ -494,32 +500,67 @@ func SetSystemProxy(iface string, port int) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxy",
-		iface, "127.0.0.1", strconv.Itoa(port))
+		service, "127.0.0.1", strconv.Itoa(port))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("set SOCKS proxy on %s: %w: %s", iface, err, string(out))
+		return fmt.Errorf("set SOCKS proxy on %s: %w: %s", service, err, string(out))
 	}
 
-	cmd = exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxystate", iface, "on")
+	cmd = exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxystate", service, "on")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("enable SOCKS proxy on %s: %w: %s", iface, err, string(out))
+		return fmt.Errorf("enable SOCKS proxy on %s: %w: %s", service, err, string(out))
 	}
 	return nil
 }
 
 // ClearSystemProxy removes the system-wide SOCKS proxy on the given interface.
 func ClearSystemProxy(iface string) error {
-	if _, err := ValidateInterface(iface); err != nil {
+	service, err := resolveNetworkService(iface)
+	if err != nil {
 		return fmt.Errorf("clear proxy: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxystate", iface, "off")
+	cmd := exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxystate", service, "off")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("clear SOCKS proxy on %s: %w: %s", iface, err, string(out))
+		return fmt.Errorf("clear SOCKS proxy on %s: %w: %s", service, err, string(out))
 	}
 	return nil
+}
+
+func resolveNetworkService(iface string) (string, error) {
+	iface, err := ValidateInterface(iface)
+	if err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "networksetup", "-listallhardwareports").Output()
+	if err != nil {
+		return iface, nil
+	}
+
+	lines := strings.Split(string(out), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "Device: "+iface) || i == 0 {
+			continue
+		}
+
+		match := networkServiceRE.FindStringSubmatch(lines[i-1])
+		if len(match) < 2 {
+			continue
+		}
+
+		service := strings.TrimSpace(match[1])
+		if serviceNameRE.MatchString(service) {
+			return service, nil
+		}
+	}
+
+	return iface, nil
 }
 
 // DisconnectWifi turns off WiFi on the given interface.

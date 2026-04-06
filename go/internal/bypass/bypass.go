@@ -35,9 +35,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
-	"regexp"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -219,11 +216,7 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 // ClearSystemSOCKSProxy removes the system-wide SOCKS proxy.
 // Called by the guard package on cleanup.
 func ClearSystemSOCKSProxy(iface string) {
-	service := getNetworkService(iface)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_ = exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxystate", service, "off").Run()
+	_ = platform.ClearSystemProxy(iface)
 }
 
 // ---------------------------------------------------------------------------
@@ -231,48 +224,7 @@ func ClearSystemSOCKSProxy(iface string) {
 // ---------------------------------------------------------------------------
 
 func setSystemSOCKSProxy(iface string, port int) {
-	service := getNetworkService(iface)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_ = exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxy", service, "127.0.0.1", fmt.Sprintf("%d", port)).Run()
-	_ = exec.CommandContext(ctx, "networksetup", "-setsocksfirewallproxystate", service, "on").Run()
-}
-
-var networkServiceRE = regexp.MustCompile(`Hardware Port:\s*(.+)`)
-
-// serviceNameRE ensures a network service name contains only safe characters.
-// macOS service names like "Wi-Fi", "Ethernet", "USB 10/100/1000 LAN" etc.
-var serviceNameRE = regexp.MustCompile(`^[a-zA-Z0-9 ./_-]+$`)
-
-func getNetworkService(iface string) string {
-	// Validate interface before using in output comparison.
-	if _, err := platform.ValidateInterface(iface); err != nil {
-		return "Wi-Fi"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, "networksetup", "-listallhardwareports").Output()
-	if err != nil {
-		return "Wi-Fi" // fallback
-	}
-
-	lines := strings.Split(string(out), "\n")
-	for i, line := range lines {
-		if strings.Contains(line, "Device: "+iface) && i > 0 {
-			m := networkServiceRE.FindStringSubmatch(lines[i-1])
-			if len(m) > 1 {
-				service := strings.TrimSpace(m[1])
-				// Validate the parsed service name to prevent injection.
-				if serviceNameRE.MatchString(service) {
-					return service
-				}
-			}
-		}
-	}
-	return "Wi-Fi" // fallback
+	_ = platform.SetSystemProxy(iface, port)
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +234,7 @@ func getNetworkService(iface string) string {
 // internetCheckURL is the URL used by HasInternet(). Tests override this
 // to point at httptest servers so no real network call is made.
 var internetCheckURL = "http://connectivitycheck.gstatic.com/generate_204"
+var internetCheckClient = &http.Client{Timeout: 10 * time.Second}
 
 // HasInternet checks if we have real internet connectivity by hitting
 // Google's connectivity check URL (HTTP 204 = connected).
@@ -291,7 +244,7 @@ func HasInternet() bool {
 	defer cancel()
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", internetCheckURL, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := internetCheckClient.Do(req)
 	if err != nil {
 		return false
 	}

@@ -21,7 +21,7 @@ var serverCmd = &cobra.Command{
 Three options for getting a tunnel endpoint:
   A. Cloudflare Workers (FREE) — HTTPS proxy on CF edge, 100K req/day
   B. Ephemeral VPS            — DigitalOcean ($0.007/hr) or Hetzner ($0.005/hr)
-  C. No server at all         — 10 of 23 techniques need no server`,
+  C. No server at all         — 15 of 27 techniques are local/serverless`,
 }
 
 // --- server create ---
@@ -77,8 +77,9 @@ var serverInfoCmd = &cobra.Command{
 	Short: "Show which techniques need a server and which don't",
 	Long: `Show which techniques need a server and which don't.
 
-10 of 23 bypass techniques work without any server infrastructure.
-The other 13 need a tunnel endpoint you control.`,
+15 of 27 techniques work without any server infrastructure.
+The 8 tunnel-based portal bypass techniques need an endpoint you control.
+WPA cracking techniques are all local.`,
 	Run: runServerInfo,
 }
 

@@ -16,7 +16,7 @@
 One command. 27 techniques. Browser works immediately.
 
 ```bash
-sudo ./nowifi
+sudo nowifi
 ```
 
 <p align="center">
@@ -31,34 +31,30 @@ Need the actual WiFi password instead? `nowifi crack` runs a multi-step WPA crac
 
 ## Installation
 
-### Download Binary (Recommended)
+### Build from Source (Current Supported Path)
 
-```bash
-# macOS (Apple Silicon)
-curl -sL https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-arm64 -o nowifi
-chmod +x nowifi
-
-# macOS (Intel)
-curl -sL https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-amd64 -o nowifi
-chmod +x nowifi
-
-# Linux (amd64)
-curl -sL https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-amd64 -o nowifi
-chmod +x nowifi
-```
-
-### Build from Source
+Packaged GitHub release binaries and a published Homebrew tap formula are not
+available yet. The supported install path today is to build the Go CLI from
+source.
 
 ```bash
 git clone https://github.com/MikkoParkkola/nowifi.git
 cd nowifi/go
-go build -o nowifi ./cmd/nowifi
+make build
+sudo install -m 0755 bin/nowifi /usr/local/bin/nowifi  # optional
 ```
 
-### Homebrew
+Requires Go 1.26+.
+
+### Local Homebrew Formula (Builds Tagged Source)
+
+If you want Homebrew to manage a source build from the latest tagged nowifi
+source snapshot, use the formula in this repo:
 
 ```bash
-brew install MikkoParkkola/tap/nowifi
+git clone https://github.com/MikkoParkkola/nowifi.git
+cd nowifi
+brew install --build-from-source ./homebrew/nowifi.rb
 ```
 
 ---
@@ -67,16 +63,16 @@ brew install MikkoParkkola/tap/nowifi
 
 ```bash
 # One command. Detect, bypass, cloak, and stay connected until you stop.
-sudo ./nowifi
+sudo nowifi
 
 # Read-only assessment (no changes to network)
-./nowifi diagnose
+nowifi diagnose
 
 # WPA password cracking
-sudo ./nowifi crack
+sudo nowifi crack
 
 # Check system health
-./nowifi doctor
+nowifi doctor
 ```
 
 `sudo nowifi` does everything automatically: detects the portal, probes for leaks, bypasses using the most powerful technique available, applies traffic stealth (anti-tethering), and **maintains your connection** until you press `Ctrl+C`. All network changes are restored on exit.
@@ -94,7 +90,7 @@ sudo ./nowifi crack
 
 ---
 
-## All 21 Commands
+## Common Commands and Examples
 
 | Command | What it does |
 |---------|-------------|
@@ -119,6 +115,9 @@ sudo ./nowifi crack
 | `nowifi ecosystem` | Show complementary tools (bettercap, wifiphisher, etc.) |
 | `nowifi setup` | Interactive first-time setup wizard |
 | `nowifi doctor` | System health check |
+| `nowifi ui` | Launch the web dashboard |
+| `nowifi menubar` | Launch the macOS menubar app |
+| `nowifi score` | Grade nearby WiFi networks (A-F) |
 | `sudo nowifi reset` | Emergency network reset after crash/kill |
 
 ---

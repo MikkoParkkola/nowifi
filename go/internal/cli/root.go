@@ -29,17 +29,22 @@ var rootCmd = &cobra.Command{
 	Long: `nowifi — WiFi security assessment tool.
 
 Just run: sudo nowifi
-Detects portal, probes leaks, tries 23 bypass techniques.
+Detects portal, probes leaks, tries 19 portal bypass techniques.
 Browser works immediately. Ctrl+C restores everything.
 
-23 techniques (in order):
+27 techniques overall:
+  Portal bypass (19): nowifi
+  WPA cracking (4):   nowifi crack
+  Smart cracking (4): nowifi crack
+
+Portal bypass techniques (in order):
    1. IPv6 bypass        9. ICMP tunnel       17. CF Workers
    2. HTTPS tunnel      10. VPN port 53       18. NTP tunnel
    3. CNA UA spoof      11. Whitelist         19. DoH tunnel
-   4. JS-only bypass    12. Session cookie    20. PMKID capture
-   5. HTTP CONNECT      13. Portal creds      21. WPS Pixie-Dust
-   6. MAC clone idle    14. MAC rotate        22. WPA handshake
-   7. MAC clone any     15. DHCP rotate       23. WPS PIN brute
+   4. JS-only bypass    12. Session cookie
+   5. HTTP CONNECT      13. Portal creds
+   6. MAC clone idle    14. MAC rotate
+   7. MAC clone any     15. DHCP rotate
    8. DNS tunnel        16. QUIC tunnel`,
 	Version:           version,
 	PersistentPreRunE: validateFlags,

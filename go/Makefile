@@ -1,4 +1,4 @@
-VERSION := 0.2.0
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 LDFLAGS := -X main.version=$(VERSION)
 
 .PHONY: build clean test all darwin-arm64 darwin-amd64 linux-arm64 linux-amd64

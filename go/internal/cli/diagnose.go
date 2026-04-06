@@ -25,7 +25,7 @@ var diagnoseCmd = &cobra.Command{
 	Short: "Read-only network security assessment",
 	Long: `Diagnose network security without exploiting anything.
 
-Scans all protocols, detects portal, checks which of the 27 bypass
+Scans all protocols, detects portal, checks which of the 19 portal bypass
 methods WOULD work — without changing any network settings.
 No MAC changes. No tunnels. No proxy. Pure read-only assessment.`,
 	Run: runDiagnose,
@@ -75,7 +75,7 @@ func runDiagnose(cmd *cobra.Command, args []string) {
 	// --- Assess bypass methods ---
 	fmt.Print("  Assessing bypass methods... ")
 	feasible := assessMethods(probes, portalInfo)
-	fmt.Printf("%d of 27 techniques feasible\n", feasible)
+	fmt.Printf("%d of 19 portal bypass techniques feasible\n", feasible)
 
 	// --- Build report data ---
 	rPortal := mapPortalInfo(portalInfo, wifi)

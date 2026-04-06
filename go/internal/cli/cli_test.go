@@ -99,10 +99,10 @@ func TestVersionFlag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// --help contains "23 techniques"
+// --help contains "19 portal bypass techniques"
 // ---------------------------------------------------------------------------
 
-func TestHelpContains23Techniques(t *testing.T) {
+func TestHelpContainsBypassTechniqueCount(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
@@ -113,8 +113,8 @@ func TestHelpContains23Techniques(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "23 techniques") {
-		t.Errorf("--help output should contain '23 techniques', got:\n%s", output)
+	if !strings.Contains(output, "19 portal bypass techniques") {
+		t.Errorf("--help output should contain '19 portal bypass techniques', got:\n%s", output)
 	}
 }
 
@@ -339,14 +339,15 @@ func TestAutoFlag(t *testing.T) {
 
 func TestRootLongDescription(t *testing.T) {
 	tests := []struct {
-		name    string
-		substr  string
+		name   string
+		substr string
 	}{
 		{"mentions sudo", "sudo nowifi"},
-		{"mentions 23", "23 techniques"},
+		{"mentions overall technique count", "27 techniques overall"},
 		{"mentions IPv6", "IPv6"},
 		{"mentions DNS tunnel", "DNS tunnel"},
-		{"mentions PMKID", "PMKID"},
+		{"mentions portal bypass split", "Portal bypass (19): nowifi"},
+		{"mentions crack split", "WPA cracking (4):   nowifi crack"},
 	}
 
 	for _, tt := range tests {
@@ -393,13 +394,13 @@ func TestExtractHost(t *testing.T) {
 		want  string
 	}{
 		{"empty", "", ""},
-		{"bare hostname no scheme", "example.com", ""},          // url.Parse puts this in Path, not Host
+		{"bare hostname no scheme", "example.com", ""}, // url.Parse puts this in Path, not Host
 		{"https URL", "https://tunnel.example.com:8443/path", "tunnel.example.com"},
 		{"http URL", "http://192.168.1.1:8080", "192.168.1.1"},
 		{"URL with path", "https://host.com/some/path?q=1", "host.com"},
 		{"scheme only host", "https://myserver", "myserver"},
 		{"IP address URL", "https://10.0.0.1:443", "10.0.0.1"},
-		{"no scheme with port", "myserver:8080", ""},         // parsed as scheme:opaque by url.Parse
+		{"no scheme with port", "myserver:8080", ""}, // parsed as scheme:opaque by url.Parse
 		{"IPv6 URL", "https://[::1]:443/path", "::1"},
 	}
 

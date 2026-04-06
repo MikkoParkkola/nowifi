@@ -115,7 +115,6 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 	var wifiErr error
 	var portalInfo *detect.PortalInfo
 
-
 	// Suppress bypass log output during TUI mode.
 	bypass.SetSuppressLog(true)
 	defer bypass.SetSuppressLog(false)
@@ -176,6 +175,9 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 // runAuditPipeline drives all audit phases in a background goroutine,
 // sending typed messages to the Bubbletea program as state changes.
 func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *platform.WifiInfo, wifiErr error, portalInfo *detect.PortalInfo, done <-chan struct{}) {
+	g := guard.New(flagInterface)
+	defer g.Restore()
+
 	// Check for root.
 	if os.Geteuid() != 0 {
 		p.Send(statusMsg{text: "Warning: running without sudo. MAC spoofing and tunnels won't work."})
@@ -200,6 +202,9 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		p.Send(portalMsg{portalType: string(portalInfo.Type), vendor: portalInfo.Vendor, captive: true})
 		if portalInfo.Gateway != "" {
 			p.Send(networkMsg{gateway: portalInfo.Gateway})
+		}
+		if portalInfo.PortalURL != "" {
+			flagPortalURL = portalInfo.PortalURL
 		}
 	} else {
 		p.Send(portalMsg{portalType: "none", captive: false})
@@ -296,8 +301,6 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 
 	// --- Phase 6: Session persistence ---
 	if record.Success {
-		g := guard.New(flagInterface)
-
 		// Register tunnel cleanup.
 		for _, r := range bypassResults {
 			if r.Success && r.Tunnel != nil && r.Tunnel.Active {
@@ -324,7 +327,6 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		maintainSessionTUI(p, flagInterface, bypassResults, bpConfig, probes, stealth, done)
 
 		// Cleanup.
-		g.Restore()
 		return
 	}
 
@@ -498,6 +500,9 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 			fmt.Printf(" (%s)", portalInfo.Vendor)
 		}
 		fmt.Println()
+		if portalInfo.PortalURL != "" {
+			flagPortalURL = portalInfo.PortalURL
+		}
 	} else {
 		fmt.Println("no captive portal detected")
 	}
@@ -536,6 +541,7 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 
 	// --- Phase 4: Bypass ---
 	var bypassResults []bypass.Result
+	var g *guard.Guard
 	bpConfig := &bypass.Config{
 		Interface:    flagInterface,
 		TunnelServer: flagTunnelServer,
@@ -547,6 +553,9 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		Stealth:      stealth,
 	}
 	if !flagProbeOnly {
+		g = guard.New(flagInterface)
+		defer g.Restore()
+
 		if !portalInfo.IsCaptive || flagAutoBypass {
 			fmt.Printf("4. Bypass  ")
 		}
@@ -606,9 +615,6 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 
 	// --- Phase 7: Session persistence ---
 	if !flagProbeOnly && record.Success {
-		g := guard.New(flagInterface)
-		defer g.Restore()
-
 		for _, r := range bypassResults {
 			if r.Success && r.Tunnel != nil && r.Tunnel.Active {
 				g.RegisterTunnel(tunnelCloser{r.Tunnel})
