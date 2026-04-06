@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,8 +29,41 @@ import (
 
 var flagAutoBypass bool
 
+// tuiBypassMu protects tuiBypassResults from concurrent goroutine access.
+var tuiBypassMu sync.Mutex
+
 // tuiBypassResults stores bypass results from the pipeline for the exit report.
 var tuiBypassResults []bypass.Result
+
+// realPlatformOps delegates PlatformOps to the platform package.
+type realPlatformOps struct{}
+
+func (r *realPlatformOps) GetGateway(iface string) string {
+	gw, _ := platform.GetGateway(iface)
+	return gw
+}
+
+func (r *realPlatformOps) GetCurrentMAC(iface string) string {
+	mac, _ := platform.GetCurrentMAC(iface)
+	return mac
+}
+
+func (r *realPlatformOps) GetArpTable() []platform.ArpEntry {
+	entries, _ := platform.GetARPTable()
+	return entries
+}
+
+func (r *realPlatformOps) SetMAC(iface, mac string) bool {
+	return platform.SetMAC(iface, mac) == nil
+}
+
+func (r *realPlatformOps) RenewDHCP(iface string) {
+	_ = platform.RenewDHCP(iface)
+}
+
+func (r *realPlatformOps) GenerateRandomMAC() string {
+	return platform.GenerateRandomMAC()
+}
 
 func anySuccess(results []bypass.Result) bool {
 	for _, r := range results {
@@ -80,48 +115,38 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 	var wifiErr error
 	var portalInfo *detect.PortalInfo
 
-	if false && !flagAutoBypass { // Portal prompt disabled — runs inside TUI now.
-		printBanner("No WiFi? Now WiFi.")
-		choice := promptBypassChoice()
-		switch choice {
-		case 2:
-			// Diagnose only.
-			tunnelIP := extractHost(flagTunnelServer)
-			probes := probe.ProbeAll(flagInterface, stealth, tunnelIP)
-			rPortal := mapPortalInfo(portalInfo, wifi)
-			rProbes := mapReportProbes(probes)
-			report.PrintTerminal(rPortal, rProbes, nil)
-			fmt.Println()
-			return
-		case 4:
-			fmt.Println()
-			return
-		}
-	}
 
 	// Suppress bypass log output during TUI mode.
-	bypass.SuppressLog = true
-	defer func() { bypass.SuppressLog = false }()
+	bypass.SetSuppressLog(true)
+	defer bypass.SetSuppressLog(false)
 
 	// Create the Bubbletea TUI program.
 	m := newTuiModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
+	// done is closed when p.Run() returns, signalling the pipeline to stop.
+	done := make(chan struct{})
+
 	// Run the full audit pipeline in a background goroutine,
 	// communicating state changes to the TUI via p.Send().
-	go runAuditPipeline(p, startTime, stealth, wifi, wifiErr, portalInfo)
+	go runAuditPipeline(p, startTime, stealth, wifi, wifiErr, portalInfo, done)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 	}
+	close(done)
 
 	// After TUI exits, print summary report.
 	fmt.Println()
 	fmt.Println("  All changes restored. Network is back to original state.")
 	fmt.Println()
 	// Print concise findings summary.
+	tuiBypassMu.Lock()
+	results := make([]bypass.Result, len(tuiBypassResults))
+	copy(results, tuiBypassResults)
+	tuiBypassMu.Unlock()
 	fmt.Println("  " + bold("Security Findings:"))
-	for _, r := range tuiBypassResults {
+	for _, r := range results {
 		if r.Success {
 			sev := r.Severity
 			if sev == "" {
@@ -142,7 +167,7 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 			}
 		}
 	}
-	if len(tuiBypassResults) == 0 || !anySuccess(tuiBypassResults) {
+	if len(results) == 0 || !anySuccess(results) {
 		fmt.Println("  " + dim("No vulnerabilities found."))
 	}
 	fmt.Println()
@@ -150,7 +175,7 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 
 // runAuditPipeline drives all audit phases in a background goroutine,
 // sending typed messages to the Bubbletea program as state changes.
-func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *platform.WifiInfo, wifiErr error, portalInfo *detect.PortalInfo) {
+func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *platform.WifiInfo, wifiErr error, portalInfo *detect.PortalInfo, done <-chan struct{}) {
 	// Check for root.
 	if os.Geteuid() != 0 {
 		p.Send(statusMsg{text: "Warning: running without sudo. MAC spoofing and tunnels won't work."})
@@ -193,6 +218,12 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	p.Send(probeMsg{name: "NTP", open: probes.NTP.IsOpen})
 	p.Send(probeMsg{name: "DoH", open: probes.DoH.IsOpen})
 
+	// Populate network panel: client count from ARP table, RTT to gateway.
+	arpEntries, _ := platform.GetARPTable()
+	clientCount := len(arpEntries)
+	gwRTT := measureGatewayRTT(portalInfo.Gateway)
+	p.Send(networkMsg{gateway: portalInfo.Gateway, clients: clientCount, rttMs: gwRTT})
+
 	// --- Phase 4: Bypass ---
 	bpConfig := &bypass.Config{
 		Interface:    flagInterface,
@@ -207,8 +238,11 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 
 	p.Send(statusMsg{text: "Running bypass techniques..."})
 	bpProbes := mapProbeResults(probes)
-	bypassResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
-	tuiBypassResults = bypassResults // Store for exit report.
+	platOps := &realPlatformOps{}
+	bypassResults := bypass.RunBypasses(bpProbes, bpConfig, platOps)
+	tuiBypassMu.Lock()
+	tuiBypassResults = bypassResults
+	tuiBypassMu.Unlock()
 
 	for _, r := range bypassResults {
 		detail := r.Details
@@ -287,7 +321,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		}
 
 		// Session maintenance loop -- runs until TUI quits.
-		maintainSessionTUI(p, flagInterface, bypassResults, bpConfig, probes, stealth)
+		maintainSessionTUI(p, flagInterface, bypassResults, bpConfig, probes, stealth, done)
 
 		// Cleanup.
 		g.Restore()
@@ -301,7 +335,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 
 // maintainSessionTUI is the Bubbletea-aware session maintenance loop.
 // It runs in the audit pipeline goroutine and sends state to the TUI.
-func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, bpConfig *bypass.Config, probes *probe.ProbeResults, stealth bool) {
+func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, bpConfig *bypass.Config, probes *probe.ProbeResults, stealth bool, done <-chan struct{}) {
 	var successMethod string
 	for _, r := range results {
 		if r.Success {
@@ -326,12 +360,15 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 
 	for {
 		select {
+		case <-done:
+			return
+
 		case <-uptimeTicker.C:
 			uptime := time.Since(connectTime).Round(time.Second)
 			p.Send(sessionTickMsg{uptime: uptime, renewals: renewCount})
 
 		case <-checkTicker.C:
-			if checkInternet() {
+			if bypass.HasInternet() {
 				consecutiveOK++
 				if consecutiveOK > 5 && checkInterval < 60*time.Second {
 					checkInterval = 60 * time.Second
@@ -355,7 +392,7 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 			if err := platform.SetMAC(iface, newMAC); err == nil {
 				if err := platform.RenewDHCP(iface); err == nil {
 					time.Sleep(3 * time.Second)
-					if checkInternet() {
+					if bypass.HasInternet() {
 						reconnected = true
 						renewCount++
 						p.Send(bypassResultMsg{technique: "MAC rotate", success: true, detail: newMAC})
@@ -370,7 +407,7 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 			if !reconnected {
 				p.Send(bypassStartMsg{technique: "Full bypass re-run"})
 				bpProbes := mapProbeResults(probes)
-				newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+				newResults := bypass.RunBypasses(bpProbes, bpConfig, &realPlatformOps{})
 				for _, r := range newResults {
 					if r.Success {
 						reconnected = true
@@ -401,7 +438,7 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 				p.Send(probeMsg{name: "DoH", open: newProbes.DoH.IsOpen})
 
 				bpProbes := mapProbeResults(newProbes)
-				newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+				newResults := bypass.RunBypasses(bpProbes, bpConfig, &realPlatformOps{})
 				for _, r := range newResults {
 					if r.Success {
 						reconnected = true
@@ -515,7 +552,7 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		}
 
 		bpProbes := mapProbeResults(probes)
-		bypassResults = bypass.RunBypasses(bpProbes, bpConfig, nil)
+		bypassResults = bypass.RunBypasses(bpProbes, bpConfig, &realPlatformOps{})
 
 		successCount := 0
 		for _, r := range bypassResults {
@@ -636,7 +673,6 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 	checkInterval := 30 * time.Second
 	connectTime := time.Now()
 	var lastDisconnect time.Time
-	sessionCount := 0
 	renewCount := 0
 
 	fmt.Println()
@@ -658,7 +694,7 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 		ts := time.Now().Format("15:04:05")
 		uptime := time.Since(connectTime).Round(time.Second)
 
-		if checkInternet() {
+		if bypass.HasInternet() {
 			consecutiveOK++
 			// After 5 consecutive OKs, extend interval to reduce noise.
 			if consecutiveOK > 5 && checkInterval < 60*time.Second {
@@ -673,9 +709,6 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 		checkInterval = 30 * time.Second // Reset to aggressive checking.
 
 		// Track timeout pattern for future prediction.
-		if !lastDisconnect.IsZero() {
-			sessionCount++
-		}
 		lastDisconnect = time.Now()
 		sessionDuration := lastDisconnect.Sub(connectTime).Round(time.Second)
 
@@ -690,7 +723,7 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 		if err := platform.SetMAC(iface, newMAC); err == nil {
 			if err := platform.RenewDHCP(iface); err == nil {
 				time.Sleep(3 * time.Second)
-				if checkInternet() {
+				if bypass.HasInternet() {
 					reconnected = true
 					renewCount++
 					fmt.Printf("  %s  %s  Reconnected via MAC rotate (%s)\n", dim(ts), green("OK"), newMAC)
@@ -702,7 +735,7 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 		if !reconnected {
 			fmt.Printf("  %s  %s  MAC rotate failed, re-running full bypass...\n", dim(ts), yellow("RETRY"))
 			bpProbes := mapProbeResults(probes)
-			newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+			newResults := bypass.RunBypasses(bpProbes, bpConfig, &realPlatformOps{})
 			for _, r := range newResults {
 				if r.Success {
 					reconnected = true
@@ -721,7 +754,7 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 			newProbes := probe.ProbeAll(iface, stealth, tunnelIP)
 			probes = newProbes // Update for next cycle.
 			bpProbes := mapProbeResults(newProbes)
-			newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+			newResults := bypass.RunBypasses(bpProbes, bpConfig, &realPlatformOps{})
 			for _, r := range newResults {
 				if r.Success {
 					reconnected = true
@@ -742,6 +775,22 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 			connectTime = time.Now()
 		}
 	}
+}
+
+// measureGatewayRTT pings the gateway and returns the round-trip time in ms.
+// Returns 0 if the gateway is unreachable or empty.
+func measureGatewayRTT(gateway string) int {
+	if gateway == "" {
+		return 0
+	}
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// Single ICMP ping with 2s deadline.
+	if err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "2", gateway).Run(); err != nil {
+		return 0
+	}
+	return int(time.Since(start).Milliseconds())
 }
 
 // extractHost extracts the hostname or IP from a URL string.

@@ -6,12 +6,12 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/guard"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/portal"
@@ -84,7 +84,7 @@ func runWatch(cmd *cobra.Command, args []string) {
 
 		ts := time.Now().Format("15:04:05")
 
-		if checkInternet() {
+		if bypass.HasInternet() {
 			fmt.Printf("  %s  %s  Connected\n", dim(ts), green("OK"))
 			disconnectCount = 0
 		} else {
@@ -108,7 +108,7 @@ func runWatch(cmd *cobra.Command, args []string) {
 				time.Sleep(3 * time.Second)
 
 				// Try auto-login.
-				if !checkInternet() {
+				if !bypass.HasInternet() {
 					fmt.Printf("  %s  %s  Trying auto-login...\n", dim(ts), yellow("LOGIN"))
 					result, err := portal.AutoLogin(flagPortalURL)
 					if err != nil {
@@ -122,7 +122,7 @@ func runWatch(cmd *cobra.Command, args []string) {
 
 				// Final connectivity check.
 				time.Sleep(2 * time.Second)
-				if checkInternet() {
+				if bypass.HasInternet() {
 					fmt.Printf("  %s  %s  Reconnected!\n", dim(ts), green("OK"))
 				} else {
 					fmt.Printf("  %s  %s  Still disconnected\n", dim(ts), red("FAIL"))
@@ -145,22 +145,3 @@ func runWatch(cmd *cobra.Command, args []string) {
 // flagPortalURL is used by watch mode to remember the portal URL for auto-login.
 var flagPortalURL string
 
-// checkInternet tests connectivity via the Google canary URL.
-func checkInternet() bool {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://connectivitycheck.gstatic.com/generate_204", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == 204
-}

@@ -188,7 +188,7 @@ func tryVPNPort53(config *Config, probes *ProbeResults) Result {
 
 		if err == nil {
 			time.Sleep(3 * time.Second)
-			if hasInternet() {
+			if HasInternet() {
 				return Result{
 					Method:      VPNPort53,
 					Success:     true,

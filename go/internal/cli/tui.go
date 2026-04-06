@@ -116,8 +116,6 @@ type networkMsg struct {
 	rttMs   int
 }
 
-type probeRunningMsg struct{ name string }
-
 type probeMsg struct {
 	name string
 	open bool
@@ -143,9 +141,6 @@ type stealthMsg struct{ ttl, pf bool }
 type statusMsg struct{ text string }
 
 type doneMsg struct{}
-
-// sessionPulseMsg drives the progress bar animation in session mode.
-type sessionPulseMsg struct{}
 
 // ---------------------------------------------------------------------------
 // TUI model
@@ -296,11 +291,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rttMs = msg.rttMs
 		return m, nil
 
-	case probeRunningMsg:
-		m.phase = "probe"
-		m.probeRunning = msg.name
-		m.probes[msg.name] = "running"
-		return m, nil
 
 	case probeMsg:
 		m.phase = "probe"
@@ -358,8 +348,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = "done"
 		return m, nil
 
-	case sessionPulseMsg:
-		return m, nil
 
 	// Spinner tick
 	case spinner.TickMsg:
@@ -780,4 +768,12 @@ func indicatorDot(active bool) string {
 		return okStyle.Render("\u25C9") // ◉
 	}
 	return dimStyle.Render("\u25CB") // ○
+}
+
+// formatUptime formats a duration as HH:MM:SS.
+func formatUptime(dur time.Duration) string {
+	h := int(dur.Hours())
+	m := int(dur.Minutes()) % 60
+	s := int(dur.Seconds()) % 60
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }

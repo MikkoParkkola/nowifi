@@ -153,7 +153,7 @@ func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 		plat.RenewDHCP(iface)
 		time.Sleep(3 * time.Second)
 
-		if hasInternet() {
+		if HasInternet() {
 			label := "Direct clone."
 			if idleOnly {
 				label = "Targeted idle device to avoid collision."
@@ -208,7 +208,7 @@ func tryMACRotate(iface string, plat PlatformOps) Result {
 	plat.RenewDHCP(iface)
 	time.Sleep(3 * time.Second)
 
-	if hasInternet() {
+	if HasInternet() {
 		return Result{
 			Method:      MACRotate,
 			Success:     true,
@@ -236,7 +236,7 @@ func tryDHCPRotate(iface string, plat PlatformOps) Result {
 	plat.RenewDHCP(iface)
 	time.Sleep(3 * time.Second)
 
-	if hasInternet() {
+	if HasInternet() {
 		return Result{
 			Method:      DHCPRotate,
 			Success:     true,

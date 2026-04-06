@@ -38,6 +38,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/platform"
@@ -189,11 +190,12 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 
 	var results []Result
 	for _, t := range techniques {
-		logStatus("Trying: %s...", t.name)
+		tName := t.name // capture for panic recovery
+		logStatus("Trying: %s...", tName)
 		r := func() (result Result) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					result = Result{Method: MACRotate, Success: false, Details: fmt.Sprintf("panic: %v", rec)}
+					result = Result{Success: false, Details: fmt.Sprintf("panic in %s: %v", tName, rec)}
 				}
 			}()
 			return t.fn()
@@ -277,11 +279,13 @@ func getNetworkService(iface string) string {
 // Internet connectivity check
 // ---------------------------------------------------------------------------
 
-// internetCheckURL is the URL used by hasInternet(). Tests override this
+// internetCheckURL is the URL used by HasInternet(). Tests override this
 // to point at httptest servers so no real network call is made.
 var internetCheckURL = "http://connectivitycheck.gstatic.com/generate_204"
 
-func hasInternet() bool {
+// HasInternet checks if we have real internet connectivity by hitting
+// Google's connectivity check URL (HTTP 204 = connected).
+func HasInternet() bool {
 	// Use 10s timeout to accommodate satellite links (RTT 500-2500ms).
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -311,12 +315,14 @@ func (d *defaultPlatformOps) SetMAC(iface, mac string) bool     { return false }
 func (d *defaultPlatformOps) RenewDHCP(iface string)            {}
 func (d *defaultPlatformOps) GenerateRandomMAC() string         { return platform.GenerateRandomMAC() }
 
-// logStatus prints inline status during bypass attempts.
-// SuppressLog disables bypass log output (set true during TUI mode).
-var SuppressLog bool
+// suppressLog controls whether bypass log output is suppressed (TUI mode).
+var suppressLog atomic.Bool
+
+// SetSuppressLog sets whether bypass log output is suppressed.
+func SetSuppressLog(v bool) { suppressLog.Store(v) }
 
 func logStatus(format string, args ...any) {
-	if !SuppressLog {
+	if !suppressLog.Load() {
 		log.Printf("  "+format, args...)
 	}
 }
