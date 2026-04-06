@@ -27,6 +27,18 @@ import (
 
 var flagAutoBypass bool
 
+// tuiBypassResults stores bypass results from the pipeline for the exit report.
+var tuiBypassResults []bypass.Result
+
+func anySuccess(results []bypass.Result) bool {
+	for _, r := range results {
+		if r.Success {
+			return true
+		}
+	}
+	return false
+}
+
 // runAudit is the default command -- the full audit pipeline.
 // Flow: WiFi info -> portal detection -> leak probing -> interactive choice -> bypass -> report.
 func runAudit(cmd *cobra.Command, args []string) {
@@ -103,9 +115,23 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 	}
 
-	// After TUI exits, print clean exit message.
+	// After TUI exits, print summary report.
 	fmt.Println()
 	fmt.Println("  All changes restored. Network is back to original state.")
+	fmt.Println()
+	// Print concise findings summary.
+	fmt.Println("  " + bold("Security Findings:"))
+	for _, r := range tuiBypassResults {
+		if r.Success {
+			fmt.Printf("  %s %s  %s\n", green("✓"), bold(string(r.Method)), r.Details)
+			if r.Remediation != "" {
+				fmt.Printf("    %s %s\n", dim("Fix:"), r.Remediation)
+			}
+		}
+	}
+	if len(tuiBypassResults) == 0 || !anySuccess(tuiBypassResults) {
+		fmt.Println("  " + dim("No vulnerabilities found."))
+	}
 	fmt.Println()
 }
 
@@ -169,6 +195,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	p.Send(statusMsg{text: "Running bypass techniques..."})
 	bpProbes := mapProbeResults(probes)
 	bypassResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+	tuiBypassResults = bypassResults // Store for exit report.
 
 	for _, r := range bypassResults {
 		detail := r.Details
