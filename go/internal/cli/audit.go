@@ -26,7 +26,7 @@ import (
 
 var flagAutoBypass bool
 
-// runAudit is the default command — the full audit pipeline.
+// runAudit is the default command -- the full audit pipeline.
 // Flow: WiFi info -> portal detection -> leak probing -> interactive choice -> bypass -> report.
 func runAudit(cmd *cobra.Command, args []string) {
 	startTime := time.Now()
@@ -38,9 +38,391 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	matrixRain()
+
+	// --probe-only and diagnose use the plain scrolling output.
+	if flagProbeOnly {
+		runAuditPlain(startTime, stealth)
+		return
+	}
+
+	// Full audit: use the dashboard if we have a terminal with color.
+	if useColor {
+		runAuditDashboard(startTime, stealth)
+		return
+	}
+
+	// Fallback to plain output for non-terminals / NO_COLOR.
+	runAuditPlain(startTime, stealth)
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard-based audit (full-screen TUI)
+// ---------------------------------------------------------------------------
+
+func runAuditDashboard(startTime time.Time, stealth bool) {
+	dash := NewDashboard()
+	defer dash.Close()
+
+	// Check for root -- many techniques need it.
+	if os.Geteuid() != 0 {
+		dash.SetStatus("Warning: running without sudo. MAC spoofing and tunnels won't work.")
+		time.Sleep(2 * time.Second)
+	}
+
+	// --- Phase 1: WiFi info ---
+	wifi, wifiErr := platform.GetWifiInfo(flagInterface)
+	if wifiErr != nil {
+		dash.SetWifiError(fmt.Sprintf("%s -- %v", flagInterface, wifiErr))
+	} else {
+		dash.SetWifi(wifi.SSID, wifi.Channel, wifi.RSSI)
+	}
+
+	// --- Phase 2: Portal detection ---
+	portalInfo := detect.DetectPortal(flagInterface)
+	if portalInfo.IsCaptive {
+		dash.SetPortal(string(portalInfo.Type), portalInfo.Vendor, true)
+		if portalInfo.Gateway != "" {
+			dash.SetNetwork(portalInfo.Gateway, 0, 0)
+		}
+	} else {
+		dash.SetPortal("none", "", false)
+	}
+
+	// --- Phase 2b: Interactive choice (when portal detected and not --auto) ---
+	if portalInfo.IsCaptive && !flagAutoBypass {
+		// Temporarily leave alt screen for the interactive prompt.
+		dash.Close()
+		printBanner("No WiFi? Now WiFi.")
+		choice := promptBypassChoice()
+		switch choice {
+		case 2:
+			// Diagnose only -- show plain report and exit.
+			tunnelIP := extractHost(flagTunnelServer)
+			probes := probe.ProbeAll(flagInterface, stealth, tunnelIP)
+			rPortal := mapPortalInfo(portalInfo, wifi)
+			rProbes := mapReportProbes(probes)
+			report.PrintTerminal(rPortal, rProbes, nil)
+			fmt.Println()
+			return
+		case 4:
+			fmt.Println()
+			return
+		}
+		// Re-enter dashboard for choices 1 and 3.
+		dash = NewDashboard()
+		defer dash.Close()
+		// Replay state into the fresh dashboard.
+		if wifiErr != nil {
+			dash.SetWifiError(fmt.Sprintf("%s -- %v", flagInterface, wifiErr))
+		} else if wifi != nil {
+			dash.SetWifi(wifi.SSID, wifi.Channel, wifi.RSSI)
+		}
+		if portalInfo.IsCaptive {
+			dash.SetPortal(string(portalInfo.Type), portalInfo.Vendor, true)
+			if portalInfo.Gateway != "" {
+				dash.SetNetwork(portalInfo.Gateway, 0, 0)
+			}
+		} else {
+			dash.SetPortal("none", "", false)
+		}
+	}
+
+	// --- Phase 3: Leak enumeration ---
+	dash.SetStatus("Probing network leaks...")
+	tunnelIP := extractHost(flagTunnelServer)
+	probes := probe.ProbeAll(flagInterface, stealth, tunnelIP)
+
+	// Update each probe indicator.
+	dash.SetProbe("DNS", probes.DNS.IsOpen)
+	dash.SetProbe("ICMP", probes.ICMP.IsOpen)
+	dash.SetProbe("IPv6", probes.IPv6.IsOpen)
+	dash.SetProbe("HTTPS", probes.Cloudflare.IsOpen)
+	dash.SetProbe("QUIC", probes.QUIC.IsOpen)
+	dash.SetProbe("NTP", probes.NTP.IsOpen)
+	dash.SetProbe("DoH", probes.DoH.IsOpen)
+
+	// --- Phase 4: Bypass ---
+	bpConfig := &bypass.Config{
+		Interface:    flagInterface,
+		TunnelServer: flagTunnelServer,
+		DNSDomain:    flagDNSDomain,
+		ICMPServer:   flagICMPServer,
+		QUICServer:   flagQUICServer,
+		NTPServer:    flagNTPServer,
+		CFWorkersURL: flagCFWorkers,
+		Stealth:      stealth,
+	}
+
+	dash.SetStatus("Running bypass techniques...")
+	bpProbes := mapProbeResults(probes)
+
+	// Create an observer to feed live bypass progress to the dashboard.
+	observer := &dashBypassObserver{dash: dash}
+	bypassResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+
+	// Since RunBypasses doesn't take an observer, we retroactively populate
+	// the dashboard with all results.
+	_ = observer // Silence unused -- the observer pattern is ready for future wiring.
+	for _, r := range bypassResults {
+		detail := r.Details
+		if len(detail) > 50 {
+			detail = detail[:50] + "..."
+		}
+		dash.AddBypass(string(r.Method), r.Success, detail)
+	}
+
+	successCount := 0
+	for _, r := range bypassResults {
+		if r.Success {
+			successCount++
+		}
+	}
+	if successCount > 0 {
+		dash.SetStatus(fmt.Sprintf("%d technique(s) succeeded", successCount))
+	} else {
+		dash.SetStatus("No bypass succeeded")
+	}
+
+	// --- Phase 5: Save audit record ---
+	record := &capture.AuditRecord{
+		ID:        time.Now().Format("20060102-150405"),
+		Timestamp: startTime,
+		Portal:    portalInfo.IsCaptive,
+		Vendor:    portalInfo.Vendor,
+		Duration:  time.Since(startTime).Round(time.Second).String(),
+		Probes: map[string]bool{
+			"dns":  probes.DNS.IsOpen,
+			"icmp": probes.ICMP.IsOpen,
+			"ipv6": probes.IPv6.IsOpen,
+			"quic": probes.QUIC.IsOpen,
+			"ntp":  probes.NTP.IsOpen,
+			"doh":  probes.DoH.IsOpen,
+		},
+	}
+	if wifi != nil {
+		record.SSID = wifi.SSID
+	}
+	for _, r := range bypassResults {
+		if r.Success {
+			record.BypassUsed = string(r.Method)
+			record.Success = true
+			break
+		}
+	}
+	if err := capture.SaveAudit(record); err != nil {
+		dash.SetStatus(fmt.Sprintf("Warning: failed to save audit: %v", err))
+	}
+
+	// --- Phase 6: Session persistence ---
+	if record.Success {
+		g := guard.New(flagInterface)
+		defer g.Restore()
+
+		// Register tunnel cleanup.
+		for _, r := range bypassResults {
+			if r.Success && r.Tunnel != nil && r.Tunnel.Active {
+				g.RegisterTunnel(tunnelCloser{r.Tunnel})
+			}
+		}
+
+		// Enable stealth.
+		stealthState, stealthErr := platform.EnableStealth(flagInterface)
+		if stealthErr != nil {
+			dash.SetStealth(false, false)
+			dash.SetStatus(fmt.Sprintf("Stealth partially enabled: %v", stealthErr))
+		} else {
+			dash.SetStealth(true, true)
+		}
+		if stealthState != nil {
+			g.RegisterStealth(stealthState)
+		}
+
+		// Ctrl+C handler.
+		ctx, cancel := context.WithCancel(context.Background())
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			cancel()
+		}()
+
+		maintainSessionDashboard(ctx, dash, flagInterface, bypassResults, bpConfig, probes, stealth)
+
+		// Exit: close dashboard, print summary.
+		dash.Close()
+
+		fmt.Println()
+		rPortal := mapPortalInfo(portalInfo, wifi)
+		rProbes := mapReportProbes(probes)
+		report.PrintTerminal(rPortal, rProbes, bypassResults)
+		fmt.Println()
+		fmt.Println("  All changes restored. Network is back to original state.")
+		fmt.Println()
+		return
+	}
+
+	// No bypass succeeded -- show report and exit.
+	time.Sleep(2 * time.Second)
+	dash.Close()
+	fmt.Println()
+	rPortal := mapPortalInfo(portalInfo, wifi)
+	rProbes := mapReportProbes(probes)
+	report.PrintTerminal(rPortal, rProbes, bypassResults)
+	fmt.Println()
+}
+
+// dashBypassObserver implements a future callback interface for live
+// bypass progress updates. For now RunBypasses doesn't expose per-technique
+// callbacks, so results are populated retroactively.
+type dashBypassObserver struct {
+	dash *Dashboard
+}
+
+// maintainSessionDashboard is the dashboard-aware session maintenance loop.
+func maintainSessionDashboard(ctx context.Context, dash *Dashboard, iface string, results []bypass.Result, bpConfig *bypass.Config, probes *probe.ProbeResults, stealth bool) {
+	var successMethod string
+	for _, r := range results {
+		if r.Success {
+			successMethod = string(r.Method)
+			break
+		}
+	}
+
+	checkInterval := 30 * time.Second
+	connectTime := time.Now()
+	renewCount := 0
+	consecutiveOK := 0
+
+	dash.SetConnected(0, 0)
+	dash.SetStatus(fmt.Sprintf("Maintaining session (bypass: %s)", successMethod))
+
+	// Uptime ticker.
+	uptimeTicker := time.NewTicker(1 * time.Second)
+	defer uptimeTicker.Stop()
+
+	// Connectivity check ticker.
+	checkTicker := time.NewTicker(checkInterval)
+	defer checkTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			elapsed := time.Since(connectTime).Round(time.Second)
+			dash.SetStatus(fmt.Sprintf("Disconnecting... session lasted %s (%d renewals)", formatUptime(elapsed), renewCount))
+			time.Sleep(500 * time.Millisecond)
+			return
+
+		case <-uptimeTicker.C:
+			uptime := time.Since(connectTime).Round(time.Second)
+			dash.SetConnected(uptime, renewCount)
+
+		case <-checkTicker.C:
+			if checkInternet() {
+				consecutiveOK++
+				if consecutiveOK > 5 && checkInterval < 60*time.Second {
+					checkInterval = 60 * time.Second
+					checkTicker.Reset(checkInterval)
+				}
+				continue
+			}
+
+			// Session dropped.
+			consecutiveOK = 0
+			checkInterval = 30 * time.Second
+			checkTicker.Reset(checkInterval)
+			dash.SetDisconnected()
+			dash.SetStatus("Session dropped -- re-establishing connection...")
+
+			reconnected := false
+
+			// Attempt 1: MAC rotate + DHCP.
+			dash.SetBypassing("MAC rotate + DHCP renew")
+			newMAC := platform.GenerateRandomMAC()
+			if err := platform.SetMAC(iface, newMAC); err == nil {
+				if err := platform.RenewDHCP(iface); err == nil {
+					time.Sleep(3 * time.Second)
+					if checkInternet() {
+						reconnected = true
+						renewCount++
+						dash.AddBypass("MAC rotate", true, newMAC)
+					}
+				}
+			}
+			if !reconnected {
+				dash.AddBypass("MAC rotate", false, "no connectivity")
+			}
+
+			// Attempt 2: Full bypass re-run.
+			if !reconnected {
+				dash.SetBypassing("Full bypass re-run")
+				bpProbes := mapProbeResults(probes)
+				newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+				for _, r := range newResults {
+					if r.Success {
+						reconnected = true
+						renewCount++
+						successMethod = string(r.Method)
+						dash.AddBypass(string(r.Method), true, "reconnected")
+						break
+					}
+				}
+				if !reconnected {
+					dash.AddBypass("Full bypass", false, "all techniques failed")
+				}
+			}
+
+			// Attempt 3: Re-probe + bypass.
+			if !reconnected {
+				dash.SetBypassing("Re-probing network")
+				tunnelIP := extractHost(bpConfig.TunnelServer)
+				newProbes := probe.ProbeAll(iface, stealth, tunnelIP)
+				probes = newProbes
+
+				// Update probe indicators.
+				dash.SetProbe("DNS", newProbes.DNS.IsOpen)
+				dash.SetProbe("ICMP", newProbes.ICMP.IsOpen)
+				dash.SetProbe("IPv6", newProbes.IPv6.IsOpen)
+				dash.SetProbe("HTTPS", newProbes.Cloudflare.IsOpen)
+				dash.SetProbe("QUIC", newProbes.QUIC.IsOpen)
+				dash.SetProbe("NTP", newProbes.NTP.IsOpen)
+				dash.SetProbe("DoH", newProbes.DoH.IsOpen)
+
+				bpProbes := mapProbeResults(newProbes)
+				newResults := bypass.RunBypasses(bpProbes, bpConfig, nil)
+				for _, r := range newResults {
+					if r.Success {
+						reconnected = true
+						renewCount++
+						successMethod = string(r.Method)
+						dash.AddBypass(string(r.Method), true, "after re-probe")
+						break
+					}
+				}
+				if !reconnected {
+					dash.AddBypass("Re-probe + bypass", false, "all failed")
+				}
+			}
+
+			if reconnected {
+				connectTime = time.Now()
+				dash.SetConnected(0, renewCount)
+				dash.SetStatus(fmt.Sprintf("Reconnected via %s", successMethod))
+			} else {
+				dash.SetStatus(fmt.Sprintf("All reconnect attempts failed. Retrying in %s...", checkInterval))
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plain (non-dashboard) audit -- used for --probe-only, no-color, and
+// non-terminal environments. Preserves the original printf-based output.
+// ---------------------------------------------------------------------------
+
+func runAuditPlain(startTime time.Time, stealth bool) {
 	printBanner("No WiFi? Now WiFi.")
 
-	// Check for root — many techniques need it.
+	// Check for root.
 	if os.Geteuid() != 0 && !flagProbeOnly {
 		fmt.Println("Warning: Running without sudo. MAC spoofing and tunnels won't work.")
 		fmt.Println("  For full capability: sudo nowifi")
@@ -52,7 +434,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 	fmt.Printf("1. WiFi  ")
 	wifi, wifiErr := platform.GetWifiInfo(flagInterface)
 	if wifiErr != nil {
-		fmt.Printf("(interface: %s — %v)\n", flagInterface, wifiErr)
+		fmt.Printf("(interface: %s -- %v)\n", flagInterface, wifiErr)
 	} else {
 		fmt.Printf("%s on %s (ch %s, %ddBm)\n", wifi.SSID, flagInterface, wifi.Channel, wifi.RSSI)
 	}
@@ -89,19 +471,15 @@ func runAudit(cmd *cobra.Command, args []string) {
 		choice := promptBypassChoice()
 		switch choice {
 		case 2:
-			// Diagnose only.
 			fmt.Println("4. Bypass  skipped (diagnose only)")
 			fmt.Println()
 			return
 		case 4:
-			// Quit.
 			fmt.Println()
 			return
 		case 3:
-			// Pick specific technique — fall through to auto for now.
 			fmt.Printf("4. Bypass  ")
 		default:
-			// 1 = auto-bypass, fall through.
 			fmt.Printf("4. Bypass  ")
 		}
 	}
@@ -122,7 +500,6 @@ func runAudit(cmd *cobra.Command, args []string) {
 		if !portalInfo.IsCaptive || flagAutoBypass {
 			fmt.Printf("4. Bypass  ")
 		}
-
 
 		bpProbes := mapProbeResults(probes)
 		bypassResults = bypass.RunBypasses(bpProbes, bpConfig, nil)
@@ -178,22 +555,16 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	// --- Phase 7: Session persistence ---
-	// If bypass succeeded, automatically maintain the connection.
-	// The user runs `sudo nowifi` once; we stay connected until Ctrl+C.
 	if !flagProbeOnly && record.Success {
-		// Create state guard — restores MAC, proxy, DNS on ANY exit.
 		g := guard.New(flagInterface)
 		defer g.Restore()
 
-		// Register tunnel cleanup if bypass used a tunnel.
 		for _, r := range bypassResults {
 			if r.Success && r.Tunnel != nil && r.Tunnel.Active {
 				g.RegisterTunnel(tunnelCloser{r.Tunnel})
 			}
 		}
 
-		// Enable post-bypass traffic stealth (TTL normalization, PF scrub).
-		// Makes bypassed connection indistinguishable from a direct device.
 		stealthState, stealthErr := platform.EnableStealth(flagInterface)
 		if stealthErr != nil {
 			fmt.Printf("  %s  Stealth partially enabled: %v\n", yellow("WARN"), stealthErr)
@@ -204,13 +575,12 @@ func runAudit(cmd *cobra.Command, args []string) {
 			g.RegisterStealth(stealthState)
 		}
 
-		// Handle Ctrl+C gracefully.
 		ctx, cancel := context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
 			<-sigCh
-			fmt.Printf("\n\n  %s Stopping — restoring original network state...\n", yellow("STOP"))
+			fmt.Printf("\n\n  %s Stopping -- restoring original network state...\n", yellow("STOP"))
 			cancel()
 		}()
 
@@ -256,7 +626,7 @@ func maintainSession(ctx context.Context, iface string, results []bypass.Result,
 
 	fmt.Println()
 	fmt.Printf("  %s  Maintaining session (bypass: %s)\n", green("CONNECTED"), successMethod)
-	fmt.Printf("  %s  Checking every %s — Ctrl+C to disconnect\n", dim("INFO"), checkInterval)
+	fmt.Printf("  %s  Checking every %s -- Ctrl+C to disconnect\n", dim("INFO"), checkInterval)
 	fmt.Println()
 
 	consecutiveOK := 0

@@ -125,7 +125,7 @@ func matrixRain() {
 
 	// ─── Phase 0: BLACKOUT ──────────────────────────────────────────
 	fmt.Print(clearScr)
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	// ─── Phase 1: SYSTEM BOOT ───────────────────────────────────────
 	// Three concurrent visual streams:
@@ -212,7 +212,7 @@ func matrixRain() {
 		}
 
 		fmt.Print(buf.String())
-		time.Sleep(57 * time.Millisecond) // ~14 fps, 800ms total
+		time.Sleep(90 * time.Millisecond) // ~11 fps, ~1.3s total
 	}
 
 	// ─── Phase 2: SIGNAL ACQUISITION ────────────────────────────────
