@@ -15,7 +15,8 @@
 //   - Thales InFlyt (FlytLIVE): Air France, KLM, SAS, Turkish Airlines
 //   - SITA OnAir: Older European carriers
 //   - Anuvu (Global Eagle): Budget carriers
-//   - Boingo: Ground infrastructure + some inflight partnerships
+//
+// Note: Boingo is omitted as it primarily operates ground hotspots, not inflight.
 package inflight
 
 import "strings"
@@ -31,7 +32,6 @@ const (
 	Thales    Provider = "thales_inflyt"
 	SITA      Provider = "sita_onair"
 	Anuvu     Provider = "anuvu_inflight"
-	Boingo    Provider = "boingo_inflight"
 	Unknown   Provider = "unknown"
 )
 

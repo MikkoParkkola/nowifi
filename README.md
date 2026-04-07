@@ -82,11 +82,11 @@ nowifi doctor
 ## Key Features
 
 - **Session persistence** — stays connected after bypass. Auto-renews on session expiry (MAC rotate → full re-bypass → re-probe). One command at boarding, connected for the entire flight.
-- **Traffic stealth** — normalizes TTL, IP ID, and MSS to defeat anti-tethering detection. Your bypassed connection looks identical to a directly-connected device.
+- **Traffic stealth** — TTL normalization to defeat anti-tethering detection (macOS also adds IP ID randomization and MSS clamping via PF). Your bypassed connection looks identical to a directly-connected device.
 - **Inflight WiFi intelligence** — profiles for 7 major providers (Panasonic, Gogo, Viasat, Inmarsat, Thales, SITA, Anuvu) covering 40+ airlines. Auto-detects provider and optimizes technique ordering.
-- **Satellite-aware** — detects high-latency links (650-2400ms RTT) and adjusts all timeouts dynamically. Prevents false-positive idle detection on inflight networks.
+- **Satellite-aware** — detects high-latency links (RTT > 400ms) and adjusts all timeouts dynamically. Prevents false-positive idle detection on inflight networks.
 - **Zero-config tunnels** — auto-deploys Cloudflare Workers proxy if no tunnel server is configured. Checksum-verifies and auto-downloads `cloudflared` for DoH tunneling.
-- **Clean restore guarantee** — `Ctrl+C` always restores original MAC, proxy, DNS, TTL, PF rules, and tunnel processes. Works on SIGINT, SIGTERM, and panics.
+- **Clean restore guarantee** — `Ctrl+C` always restores original MAC, proxy, DNS, TTL, PF rules, and tunnel processes. Handles SIGINT/SIGTERM via signal handlers and any clean exit via `defer`.
 
 ---
 
@@ -170,6 +170,8 @@ These crack the actual WiFi password when you don't have it. The stages run in o
 | 26 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
 | 27 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
 
+The smart-crack pipeline also runs dictionary, smart-brute, and (opt-in) full-brute stages between rules and online brute force, in increasing cost order.
+
 ---
 
 ## External Tools
@@ -252,6 +254,7 @@ internal/
   portal/                  Auto-login to known portal types
   clone/                   MAC address cloning
   inflight/                Airline portal intelligence: 7 provider profiles, 40+ airlines
+  score/                   WiFi network scoring (A-F grade)
   ui/                      Web dashboard + menubar app
 ```
 

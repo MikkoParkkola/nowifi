@@ -136,6 +136,7 @@ var systemTools = map[string]string{
 	"hcxdumptool":    "brew install hcxdumptool",
 	"hcxpcapngtool":  "brew install hcxtools",
 	"aircrack-ng":    "brew install aircrack-ng",
+	"reaver":         "brew install reaver",
 	"ntpescape":      "https://github.com/evallen/ntpescape",
 	"dnscrypt-proxy": "brew install dnscrypt-proxy",
 }

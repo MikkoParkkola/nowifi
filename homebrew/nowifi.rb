@@ -1,8 +1,8 @@
 class Nowifi < Formula
   desc "WiFi security assessment tool for captive portals and WPA audits"
   homepage "https://github.com/MikkoParkkola/nowifi"
-  url "https://github.com/MikkoParkkola/nowifi/archive/refs/tags/v0.5.1.tar.gz"
-  sha256 "a490a249cc5b08eca22ab8700992a2500e143e96227b9f26c75fa3d2e35ed546"
+  url "https://github.com/MikkoParkkola/nowifi/archive/refs/tags/v0.5.2.tar.gz"
+  sha256 "b338350fa4e3512f3115c62da66473308e78c194e5af0598839b5914467904d9"
   license "AGPL-3.0-or-later"
 
   depends_on "go" => :build
