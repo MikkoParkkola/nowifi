@@ -581,7 +581,7 @@ Flag parity with Python version:
 
 | Purpose | Library | Why |
 |---------|---------|-----|
-| CLI framework | `github.com/spf13/cobra` | Industry standard (kubectl, gh, hugo) |
+| CLI framework | `github.com/spf13/cobra` | Widely used (kubectl, gh, hugo) |
 | CLI flags | `github.com/spf13/pflag` | POSIX flags (comes with cobra) |
 | Terminal styling | `github.com/charmbracelet/lipgloss` | Declarative styling, panels, borders |
 | Terminal color | `github.com/fatih/color` | Lightweight inline color |
