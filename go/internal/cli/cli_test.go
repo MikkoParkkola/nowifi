@@ -359,6 +359,27 @@ func TestRootLongDescription(t *testing.T) {
 	}
 }
 
+func TestCrackLongDescription(t *testing.T) {
+	tests := []struct {
+		name   string
+		substr string
+	}{
+		{"mentions 8-technique pipeline", "8-technique pipeline"},
+		{"mentions WPS Pixie-Dust", "WPS Pixie-Dust"},
+		{"mentions WPS PIN brute force", "WPS PIN brute force"},
+		{"mentions smart common passwords", "Smart common passwords"},
+		{"mentions online brute force", "Online brute force"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(crackCmd.Long, tt.substr) {
+				t.Errorf("crackCmd.Long should contain %q", tt.substr)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // extractHost (audit.go helper) — including error path
 // ---------------------------------------------------------------------------

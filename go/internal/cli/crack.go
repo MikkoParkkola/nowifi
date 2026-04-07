@@ -22,13 +22,20 @@ var (
 var crackCmd = &cobra.Command{
 	Use:   "crack",
 	Short: "Crack WPA/WPA2 passwords",
-	Long: `Crack WPA/WPA2 passwords (PMKID + handshake capture + hashcat).
+	Long: `Crack WPA/WPA2 passwords with an 8-technique pipeline
+(PMKID, WPS, handshake + hashcat, and smart cracking).
 
-Pipeline (ordered by effectiveness):
-  1. PMKID capture     — client-less, ~60% of APs vulnerable
-  2. Handshake capture — deauth a client, capture 4-way handshake
-  3. Hashcat crack     — GPU-accelerated dictionary/brute-force
-  4. Aircrack-ng       — CPU fallback if hashcat unavailable
+The implementation runs these in an effectiveness-first order:
+  1. PMKID capture            — client-less, ~60% of APs vulnerable
+  2. WPS Pixie-Dust           — fast (5-30s) on weak WPS implementations
+  3. Handshake + hashcat      — capture a 4-way handshake, then crack offline
+  4. WPS PIN brute force      — 11,000 PIN combinations, slow last resort
+  5. Smart common passwords   — embedded top WiFi passwords
+  6. Smart numeric masks      — ISP/router-style number patterns
+  7. Smart word+number rules  — dictionary words with common numeric suffixes
+  8. Online brute force       — no monitor mode needed, absolute last resort
+
+Hashcat uses aircrack-ng as the CPU fallback when a GPU path is unavailable.
 
 On macOS, monitor mode requires an external USB WiFi adapter
 (e.g., Alfa AWUS036ACH). The built-in card does not support it.
