@@ -3,7 +3,13 @@
 
 package inflight
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestDetectProvider_Panasonic(t *testing.T) {
 	p := DetectProvider("00:A0:BC:C0:84:40", "", "", nil)
@@ -72,5 +78,27 @@ func TestGetProfile(t *testing.T) {
 	}
 	if !p.HasFreeTier && len(p.FreeTierDomains) > 0 {
 		t.Error("inconsistent: HasFreeTier=false but FreeTierDomains not empty")
+	}
+}
+
+func TestReadmeInflightClaimsMatchRegistry(t *testing.T) {
+	providerCount := len(Profiles)
+	airlineFloor := (len(AllAirlines()) / 10) * 10
+
+	readmePath := filepath.Join("..", "..", "..", "README.md")
+	data, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", readmePath, err)
+	}
+	text := string(data)
+
+	if !strings.Contains(text, fmt.Sprintf("profiles for %d major providers", providerCount)) {
+		t.Fatalf("README should advertise %d provider profiles", providerCount)
+	}
+	if !strings.Contains(text, fmt.Sprintf("%d+ airlines", airlineFloor)) {
+		t.Fatalf("README should advertise the current airline floor of %d+", airlineFloor)
+	}
+	if strings.Contains(text, "50+ airlines") {
+		t.Fatal("README should not advertise the stale 50+ airline claim")
 	}
 }

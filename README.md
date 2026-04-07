@@ -83,7 +83,7 @@ nowifi doctor
 
 - **Session persistence** — stays connected after bypass. Auto-renews on session expiry (MAC rotate → full re-bypass → re-probe). One command at boarding, connected for the entire flight.
 - **Traffic stealth** — normalizes TTL, IP ID, and MSS to defeat anti-tethering detection. Your bypassed connection looks identical to a directly-connected device.
-- **Inflight WiFi intelligence** — profiles for 7 major providers (Panasonic, Gogo, Viasat, Inmarsat, Thales, SITA, Anuvu) covering 50+ airlines. Auto-detects provider and optimizes technique ordering.
+- **Inflight WiFi intelligence** — profiles for 7 major providers (Panasonic, Gogo, Viasat, Inmarsat, Thales, SITA, Anuvu) covering 40+ airlines. Auto-detects provider and optimizes technique ordering.
 - **Satellite-aware** — detects high-latency links (650-2400ms RTT) and adjusts all timeouts dynamically. Prevents false-positive idle detection on inflight networks.
 - **Zero-config tunnels** — auto-deploys Cloudflare Workers proxy if no tunnel server is configured. Checksum-verifies and auto-downloads `cloudflared` for DoH tunneling.
 - **Clean restore guarantee** — `Ctrl+C` always restores original MAC, proxy, DNS, TTL, PF rules, and tunnel processes. Works on SIGINT, SIGTERM, and panics.
@@ -251,7 +251,7 @@ internal/
   discover/                WiFi network scanning
   portal/                  Auto-login to known portal types
   clone/                   MAC address cloning
-  inflight/                Airline portal intelligence: 7 provider profiles, 50+ airlines
+  inflight/                Airline portal intelligence: 7 provider profiles, 40+ airlines
   ui/                      Web dashboard + menubar app
 ```
 
