@@ -64,7 +64,10 @@ func SaveAudit(record *AuditRecord) error {
 	}
 
 	// Append to index.
-	index, _ := loadIndex()
+	index, err := loadIndex()
+	if err != nil {
+		return fmt.Errorf("load index: %w", err)
+	}
 	index = append(index, *record)
 	return saveIndex(index)
 }

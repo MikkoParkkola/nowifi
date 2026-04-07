@@ -173,6 +173,43 @@ func TestListAuditsCorruptedIndex(t *testing.T) {
 	}
 }
 
+func TestSaveAuditCorruptedIndex(t *testing.T) {
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+
+	captDir := tmp + "/.nowifi/captures"
+	if err := os.MkdirAll(captDir, 0700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	const corrupted = "{not valid json["
+	if err := os.WriteFile(captDir+"/index.json", []byte(corrupted), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	record := &AuditRecord{
+		ID:        "save-corrupted-index",
+		Timestamp: time.Now(),
+		SSID:      "TestNetwork",
+		Probes:    map[string]bool{},
+	}
+
+	err := SaveAudit(record)
+	if err == nil {
+		t.Fatal("SaveAudit should fail with corrupted index")
+	}
+
+	data, readErr := os.ReadFile(captDir + "/index.json")
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if got := string(data); got != corrupted {
+		t.Fatalf("index contents = %q, want %q", got, corrupted)
+	}
+}
+
 func TestLoadIndexEmptyFile(t *testing.T) {
 	tmp := t.TempDir()
 	origHome := os.Getenv("HOME")
