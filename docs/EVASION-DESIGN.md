@@ -145,7 +145,7 @@ When client isolation prevents ARP scanning, discover devices through passive mo
 
 ---
 
-## Part 4: Novel Innovation — New Attack Vectors
+## Part 4: Emerging Attack Vectors
 
 ### Innovation 1: "Ghost DHCP" — Predict and Pre-Claim Target's IP
 
@@ -250,7 +250,7 @@ When client isolation prevents ARP scanning, discover devices through passive mo
 | 4* | Layered Tunnel Stack | Belt-and-suspenders tunnel evasion | High | **P3** |
 | 5* | Sympathetic Resonance | Portal-specific, not universal | Medium | **P3** |
 | 2* | Portal Reflection | High risk (ARP spoof needed) | High | **P4** |
-| 6* | Quantum MAC | Novel but impractical on most OSes | Very High | **Defer** |
+| 6* | Quantum MAC | Interesting but impractical on most OSes | Very High | **Defer** |
 
 ---
 

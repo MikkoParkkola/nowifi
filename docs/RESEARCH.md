@@ -8,7 +8,7 @@
 
 ## 1. WiFi Password Recovery / Bypass (WPA2/WPA3)
 
-### 1.1 PMKID Client-less Attack (HIGH VALUE)
+### 1.1 PMKID Client-less Attack (HIGH IMPACT)
 
 **How it works:** Some APs pre-calculate and cache a Pairwise Master Key Identifier (PMKID) to support IEEE 802.11r fast roaming. An attacker can simply attempt to connect to the AP, which sends the PMKID in its response. This single value is enough for offline brute-force of the PSK, requiring zero clients present.
 
@@ -18,7 +18,7 @@
 - **Automatable:** YES -- `hcxdumptool -i wlan0 -o pmkid.pcapng --enable_status=1` then `hashcat -m 22000`
 - **Source:** Synacktiv "Wireless-(in)Fidelity: Pentesting Wi-Fi in 2025" (Jan 2026); hashcat forum thread-7717
 
-### 1.2 WPA2-PSK Online Brute Force via Modified wpa_supplicant (NOVEL)
+### 1.2 WPA2-PSK Online Brute Force via Modified wpa_supplicant (EMERGING)
 
 **How it works:** Synacktiv demonstrated patching wpa_supplicant 2.11 to remove the authentication failure backoff timer, then using the Unix socket API in daemon mode to cycle PSK attempts without restarting the process. Achieves ~100 attempts per 5 minutes against live APs. Notably, no AP they tested blocked the attempts.
 
@@ -28,7 +28,7 @@
 - **Automatable:** YES -- Synacktiv's bf_psk_connection.py PoC
 - **Source:** Synacktiv (Jan 2026)
 
-### 1.3 WPA3-Enterprise PEAP-MSCHAPv2 Relay Attack (NOVEL, HIGH VALUE)
+### 1.3 WPA3-Enterprise PEAP-MSCHAPv2 Relay Attack (EMERGING, HIGH IMPACT)
 
 **How it works:** Even on WPA3-Enterprise, the EAP authentication methods (PEAP-MSCHAPv2) remain the same as WPA2. If the client does not validate the RADIUS server certificate, an attacker can relay the NTLM challenge-response to the legitimate AP using hostapd-mana and wpa_sycophant. Synacktiv updated both tools to version 2.11 to support WPA3 (802.11w, WPA-EAP-SHA256). The relay gives the attacker authenticated network access even when machine account passwords (240-byte random) make cracking impossible.
 
@@ -38,7 +38,7 @@
 - **Automatable:** PARTIALLY -- tools exist but require manual configuration per target
 - **Source:** Synacktiv (Jan 2026); SensePost DEFCON 2018; wpa_sycophant + hostapd-mana repos
 
-### 1.4 WPA2-Enterprise GTC Downgrade (HIGH VALUE)
+### 1.4 WPA2-Enterprise GTC Downgrade (HIGH IMPACT)
 
 **How it works:** EAPHammer or hostapd-mana Evil Twin can negotiate EAP-GTC as the Phase 2 method instead of MSCHAPv2. If the client accepts, credentials are transmitted in cleartext inside the PEAP tunnel, requiring zero cracking. Many Android devices and older wpa_supplicant configurations accept GTC.
 
@@ -48,7 +48,7 @@
 - **Automatable:** YES -- `eaphammer --creds --interface wlan1 --essid TARGET --auth wpa-eap`
 - **Source:** Synacktiv (Jan 2026); EAPHammer documentation
 
-### 1.5 Open WiFi + Responder LLMNR/mDNS Poisoning (HIGH VALUE, OFTEN OVERLOOKED)
+### 1.5 Open WiFi + Responder LLMNR/mDNS Poisoning (HIGH IMPACT, OFTEN OVERLOOKED)
 
 **How it works:** Even on Open WiFi with VPN enforcement, Windows devices broadcast LLMNR and mDNS name resolution requests. Running Responder.py on the Open WiFi segment poisons these broadcasts, capturing NTLMv2 hashes of domain accounts. Synacktiv collected "hundreds of hashed credentials within minutes" during a real engagement.
 
@@ -333,7 +333,7 @@
 
 ---
 
-## 7. Emerging / Novel Techniques (2024-2026)
+## 7. Emerging Techniques (2024-2026)
 
 ### 7.1 Passpoint/Hotspot 2.0 ANQP Spoofing
 
