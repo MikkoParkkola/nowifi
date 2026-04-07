@@ -25,7 +25,7 @@ sudo nowifi
 
 Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 19 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
-Need the actual WiFi password instead? `nowifi crack` runs an 8-technique WPA and smart-cracking pipeline.
+Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-technique WPA/WPA2 cracking pipeline. It escalates from PMKID and WPS Pixie-Dust through handshake capture, dictionary/smart cracking, and only then to WPS PIN or online brute force, stopping as soon as a password is recovered.
 
 ---
 
@@ -101,7 +101,7 @@ nowifi doctor
 | `sudo nowifi -i en1` | Use a different WiFi interface (default: `en0`) |
 | `nowifi diagnose` | Read-only security assessment (no changes to network) |
 | `nowifi diagnose -r json -o report.json` | Save diagnosis as JSON file |
-| `nowifi crack` | 8-technique WPA/WPA2 cracking pipeline (PMKID, WPS, handshake + hashcat, smart cracking) |
+| `nowifi crack` | 8-technique WPA/WPA2 cracking pipeline (ordered fastest-to-slowest, stops on first recovered password) |
 | `nowifi crack --scan-only` | Scan for WiFi networks without attacking |
 | `nowifi scan` | Scan nearby WiFi networks with signal/security info |
 | `nowifi watch` | Maintain access -- auto-reconnect on session expiry |
@@ -152,7 +152,7 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 
 ### WPA Cracking (4 techniques)
 
-These crack the actual WiFi password when you don't have it.
+These crack the actual WiFi password when you don't have it. The stages run in order, and slower fallback steps only run if the earlier capture and smart-crack stages fail.
 
 | # | Technique | How it works |
 |---|-----------|-------------|

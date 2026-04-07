@@ -5,6 +5,7 @@ package crack
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -264,6 +265,39 @@ func TestRunCrackPipelineOrder(t *testing.T) {
 	}
 	if wpsPinIdx > onlineIdx {
 		t.Errorf("WPS PIN (idx %d) should come before online brute (idx %d)", wpsPinIdx, onlineIdx)
+	}
+}
+
+func TestReadmeCrackPipelineMatchesImplementation(t *testing.T) {
+	readmePath := filepath.Join("..", "..", "..", "README.md")
+	data, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", readmePath, err)
+	}
+
+	readme := string(data)
+	techniques := []Method{
+		PMKID,
+		Handshake,
+		Hashcat,
+		Dictionary,
+		WPSPixie,
+		WPSPin,
+		OnlineBrute,
+		SmartCrackM,
+	}
+
+	if !strings.Contains(readme, fmt.Sprintf("ordered %d-technique WPA/WPA2 cracking pipeline", len(techniques))) {
+		t.Fatalf("README should advertise the current crack technique count of %d", len(techniques))
+	}
+	if !strings.Contains(readme, "ordered fastest-to-slowest, stops on first recovered password") {
+		t.Fatal("README command summary should describe the ordered stop-on-success crack pipeline")
+	}
+	if !strings.Contains(readme, "stopping as soon as a password is recovered") {
+		t.Fatal("README intro should explain that crack stops once it recovers a password")
+	}
+	if strings.Contains(readme, "8-technique WPA and smart-cracking pipeline") {
+		t.Fatal("README should not use the older underspecified crack pipeline wording")
 	}
 }
 
