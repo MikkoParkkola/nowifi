@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+          - os: macos-13   # Intel runner
+            target: darwin-amd64
+            goos: darwin
+            goarch: amd64
+          - os: ubuntu-latest
+            target: linux-amd64
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            target: linux-arm64
+            goos: linux
+            goarch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Build
+        working-directory: go
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o "bin/nowifi-${{ matrix.target }}" \
+            ./cmd/nowifi
+
+      - name: Package
+        working-directory: go/bin
+        run: |
+          tar czf "nowifi-${{ matrix.target }}.tar.gz" "nowifi-${{ matrix.target }}"
+          shasum -a 256 "nowifi-${{ matrix.target }}.tar.gz" > "nowifi-${{ matrix.target }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nowifi-${{ matrix.target }}
+          path: |
+            go/bin/nowifi-${{ matrix.target }}.tar.gz
+            go/bin/nowifi-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Aggregate checksums
+        working-directory: dist
+        run: |
+          ls -la
+          cat *.sha256 > /tmp/checksums.sha256
+          rm -f *.sha256
+          mv /tmp/checksums.sha256 checksums.sha256
+          ls -la
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/*.tar.gz dist/checksums.sha256 --clobber

@@ -31,11 +31,44 @@ Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-techniqu
 
 ## Installation
 
-### Build from Source (Current Supported Path)
+### Pre-built Binaries (Recommended)
 
-Packaged GitHub release binaries and a published Homebrew tap formula are not
-available yet. The supported install path today is to build the Go CLI from
-source.
+Download the latest release for your platform from
+[GitHub Releases](https://github.com/MikkoParkkola/nowifi/releases/latest).
+
+```bash
+# macOS Apple Silicon
+curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-arm64.tar.gz | tar xz
+sudo install -m 0755 nowifi-darwin-arm64 /usr/local/bin/nowifi
+
+# macOS Intel
+curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-amd64.tar.gz | tar xz
+sudo install -m 0755 nowifi-darwin-amd64 /usr/local/bin/nowifi
+
+# Linux x86_64
+curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-amd64.tar.gz | tar xz
+sudo install -m 0755 nowifi-linux-amd64 /usr/local/bin/nowifi
+
+# Linux ARM64
+curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-arm64.tar.gz | tar xz
+sudo install -m 0755 nowifi-linux-arm64 /usr/local/bin/nowifi
+```
+
+Verify checksums against
+[`checksums.sha256`](https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256)
+before installing.
+
+### Local Homebrew Formula
+
+A formula is bundled in this repo (no published tap yet):
+
+```bash
+git clone https://github.com/MikkoParkkola/nowifi.git
+cd nowifi
+brew install --build-from-source ./homebrew/nowifi.rb
+```
+
+### Build from Source
 
 ```bash
 git clone https://github.com/MikkoParkkola/nowifi.git
@@ -44,18 +77,8 @@ make build
 sudo install -m 0755 bin/nowifi /usr/local/bin/nowifi  # optional
 ```
 
-Requires Go 1.26+.
-
-### Local Homebrew Formula (Builds Tagged Source)
-
-If you want Homebrew to manage a source build from the latest tagged nowifi
-source snapshot, use the formula in this repo:
-
-```bash
-git clone https://github.com/MikkoParkkola/nowifi.git
-cd nowifi
-brew install --build-from-source ./homebrew/nowifi.rb
-```
+Requires Go 1.26+. The macOS menubar (`nowifi menubar`) requires CGO and is
+only included in native macOS builds.
 
 ---
 

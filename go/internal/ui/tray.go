@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && cgo
 
 // Copyright (C) 2026 Mikko Parkkola. All rights reserved.
 // Licensed under AGPL-3.0. See LICENSE file.
