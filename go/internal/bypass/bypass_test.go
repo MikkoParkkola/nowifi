@@ -8,10 +8,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 )
 
@@ -95,6 +98,61 @@ func TestAllMethodConstants(t *testing.T) {
 				t.Errorf("Method %s = %q, want %q", tc.name, tc.method, tc.want)
 			}
 		})
+	}
+}
+
+func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
+	readmePath := filepath.Join("..", "..", "..", "README.md")
+	data, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", readmePath, err)
+	}
+
+	readme := string(data)
+	bypassMethods := []Method{
+		IPv6Bypass,
+		ChiselTunnel,
+		CNASpoof,
+		JSBypass,
+		HTTPConnect,
+		MACCloneIdle,
+		MACClone,
+		DNSTunnel,
+		ICMPTunnel,
+		VPNPort53,
+		WhitelistDomain,
+		SessionReplay,
+		PortalCreds,
+		MACRotate,
+		DHCPRotate,
+		QUICTunnel,
+		CFWorkers,
+		NTPTunnel,
+		DoHTunnel,
+	}
+	crackMethods := []crack.Method{
+		crack.PMKID,
+		crack.Handshake,
+		crack.Hashcat,
+		crack.Dictionary,
+		crack.WPSPixie,
+		crack.WPSPin,
+		crack.OnlineBrute,
+		crack.SmartCrackM,
+	}
+	totalTechniques := len(bypassMethods) + len(crackMethods)
+
+	if !strings.Contains(readme, fmt.Sprintf("One command. %d techniques.", totalTechniques)) {
+		t.Fatalf("README should advertise the current overall technique count of %d", totalTechniques)
+	}
+	if !strings.Contains(readme, fmt.Sprintf("tries %d bypass techniques automatically", len(bypassMethods))) {
+		t.Fatalf("README should advertise the current bypass technique count of %d", len(bypassMethods))
+	}
+	if !strings.Contains(readme, fmt.Sprintf("## %d Techniques", totalTechniques)) {
+		t.Fatalf("README should headline the current total technique count of %d", totalTechniques)
+	}
+	if !strings.Contains(readme, fmt.Sprintf("### Portal Bypass (%d techniques)", len(bypassMethods))) {
+		t.Fatalf("README should headline the current portal bypass count of %d", len(bypassMethods))
 	}
 }
 
