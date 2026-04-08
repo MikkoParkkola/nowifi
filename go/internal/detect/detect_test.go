@@ -4,8 +4,11 @@
 package detect
 
 import (
+	"bytes"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -873,10 +876,7 @@ func TestCheckCanary_EmptyBody(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCheckCanary_LargeBody(t *testing.T) {
-	largeBody := make([]byte, 512*1024) // 512KB
-	for i := range largeBody {
-		largeBody[i] = 'A'
-	}
+	largeBody := bytes.Repeat([]byte{'A'}, 512*1024) // 512KB
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
@@ -897,8 +897,53 @@ func TestCheckCanary_LargeBody(t *testing.T) {
 		t.Fatal("expected non-nil result for large body")
 	}
 	// Body should be truncated to 256KB.
-	if len(result.Body) > 256*1024 {
+	if int64(len(result.Body)) > maxCanaryBodyBytes {
 		t.Errorf("body length = %d, should be truncated to 256KB", len(result.Body))
+	}
+}
+
+func TestCheckCanary_LargeBodyReusesConnection(t *testing.T) {
+	largeBody := bytes.Repeat([]byte{'A'}, 512*1024) // 512KB
+	seenConnections := map[string]struct{}{}
+	var mu sync.Mutex
+
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		if _, err := w.Write(largeBody); err != nil {
+			t.Errorf("write body: %v", err)
+		}
+	}))
+	ts.Config.ConnState = func(conn net.Conn, state http.ConnState) {
+		if state != http.StateNew {
+			return
+		}
+		mu.Lock()
+		seenConnections[conn.RemoteAddr().String()] = struct{}{}
+		mu.Unlock()
+	}
+	ts.Start()
+	defer ts.Close()
+
+	client := ts.Client()
+	c := canary{
+		URL:            ts.URL + "/large",
+		ExpectedBody:   "",
+		ExpectedStatus: 200,
+		Name:           "Test Large Body Reuse",
+	}
+
+	for i := 0; i < 2; i++ {
+		result := checkCanary(client, c)
+		if result == nil {
+			t.Fatalf("request %d returned nil result", i+1)
+		}
+	}
+
+	mu.Lock()
+	connectionCount := len(seenConnections)
+	mu.Unlock()
+	if connectionCount != 1 {
+		t.Fatalf("connection count = %d, want 1", connectionCount)
 	}
 }
 

@@ -56,6 +56,8 @@ type canary struct {
 	Name           string
 }
 
+const maxCanaryBodyBytes int64 = 256 * 1024
+
 var canaryURLs = []canary{
 	{
 		URL:            "http://captive.apple.com/hotspot-detect.html",
@@ -302,11 +304,19 @@ func checkCanary(client *http.Client, c canary) *canaryResult {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
 
-	// Read up to 256KB of the body (portal pages are typically small).
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	// Read and retain only the first 256KB while draining the rest so the
+	// transport can still reuse keep-alive connections across canary probes.
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxCanaryBodyBytes))
 	if err != nil {
+		resp.Body.Close()
+		return nil
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		resp.Body.Close()
+		return nil
+	}
+	if err := resp.Body.Close(); err != nil {
 		return nil
 	}
 
