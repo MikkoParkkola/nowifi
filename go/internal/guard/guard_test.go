@@ -16,9 +16,9 @@ import (
 
 // mockCloser is a test double for io.Closer that tracks Close() calls.
 type mockCloser struct {
-	closed    bool
-	closeErr  error
-	mu        sync.Mutex
+	closed   bool
+	closeErr error
+	mu       sync.Mutex
 }
 
 func (m *mockCloser) Close() error {
@@ -40,9 +40,12 @@ var _ io.Closer = (*mockCloser)(nil)
 func TestNew(t *testing.T) {
 	// New captures the current MAC. On a test machine without en0 configured,
 	// the MAC may be empty, but the guard should still be created.
-	g := New("en0")
+	g, err := New("en0")
 	if g == nil {
 		t.Fatal("New returned nil")
+	}
+	if err != nil && g.originalMAC != "" {
+		t.Fatalf("New returned originalMAC %q with error %v", g.originalMAC, err)
 	}
 	if g.iface != "en0" {
 		t.Errorf("iface = %q, want %q", g.iface, "en0")
@@ -287,15 +290,48 @@ func TestStartSignalHandler_NoPanic(t *testing.T) {
 
 func TestNew_EmptyInterface(t *testing.T) {
 	// New with empty interface should still create a guard.
-	g := New("")
+	g, err := New("")
 	if g == nil {
 		t.Fatal("New('') returned nil")
+	}
+	if err != nil && g.originalMAC != "" {
+		t.Fatalf("New returned originalMAC %q with error %v", g.originalMAC, err)
 	}
 	if g.iface != "" {
 		t.Errorf("iface = %q, want empty", g.iface)
 	}
 	if g.sigCh == nil {
 		t.Error("sigCh should be initialized")
+	}
+}
+
+func TestNew_ReturnsGuardWhenMACCaptureFails(t *testing.T) {
+	origGetCurrentMAC := getCurrentMAC
+	getCurrentMAC = func(iface string) (string, error) {
+		return "", errors.New("link unavailable")
+	}
+	t.Cleanup(func() {
+		getCurrentMAC = origGetCurrentMAC
+	})
+
+	g, err := New("en0")
+	if g == nil {
+		t.Fatal("New returned nil guard on MAC capture error")
+	}
+	if err == nil {
+		t.Fatal("expected MAC capture error")
+	}
+	if got := err.Error(); got != "failed to capture original MAC address: link unavailable" {
+		t.Fatalf("unexpected error: %q", got)
+	}
+	if g.iface != "en0" {
+		t.Errorf("iface = %q, want %q", g.iface, "en0")
+	}
+	if g.originalMAC != "" {
+		t.Errorf("originalMAC = %q, want empty", g.originalMAC)
+	}
+	if g.sigCh == nil {
+		t.Fatal("sigCh should be initialized")
 	}
 }
 

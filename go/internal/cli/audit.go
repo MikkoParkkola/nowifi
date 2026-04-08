@@ -175,7 +175,10 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 // runAuditPipeline drives all audit phases in a background goroutine,
 // sending typed messages to the Bubbletea program as state changes.
 func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *platform.WifiInfo, wifiErr error, portalInfo *detect.PortalInfo, done <-chan struct{}) {
-	g := guard.New(flagInterface)
+	g, err := guard.New(flagInterface)
+	if err != nil {
+		p.Send(statusMsg{text: fmt.Sprintf("Warning: %v", err)})
+	}
 	defer g.Restore()
 
 	// Check for root.
@@ -555,7 +558,11 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		Stealth:      stealth,
 	}
 	if !flagProbeOnly {
-		g = guard.New(flagInterface)
+		var guardErr error
+		g, guardErr = guard.New(flagInterface)
+		if guardErr != nil {
+			fmt.Printf("  (warning: %v)\n", guardErr)
+		}
 		defer g.Restore()
 
 		if !portalInfo.IsCaptive || flagAutoBypass {

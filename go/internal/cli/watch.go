@@ -52,7 +52,10 @@ func runWatch(cmd *cobra.Command, args []string) {
 	}
 
 	// Create state guard to restore on exit.
-	g := guard.New(iface)
+	g, err := guard.New(iface)
+	if err != nil {
+		fmt.Printf("  Warning: %v\n\n", err)
+	}
 	defer g.Restore()
 
 	// Handle Ctrl+C gracefully.
@@ -144,4 +147,3 @@ func runWatch(cmd *cobra.Command, args []string) {
 
 // flagPortalURL is used by watch mode to remember the portal URL for auto-login.
 var flagPortalURL string
-

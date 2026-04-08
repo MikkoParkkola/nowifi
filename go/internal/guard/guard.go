@@ -20,34 +20,47 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 )
 
+var getCurrentMAC = platform.GetCurrentMAC
+
 // Guard saves and restores network state. Create with New(), register
 // tunnels with RegisterTunnel(), and call Restore() on exit (or use defer).
 //
 // Typical usage:
 //
-//	g := guard.New("en0")
+//	g, err := guard.New("en0")
+//	if err != nil {
+//		fmt.Fprintf(os.Stderr, "nowifi: warning: %v\n", err)
+//	}
 //	defer g.Restore()
 //	g.StartSignalHandler()
 //	// ... run audit ...
 type Guard struct {
-	iface       string
-	originalMAC string
+	iface        string
+	originalMAC  string
 	tunnels      []io.Closer
 	stealthState *platform.StealthState
 	restored     bool
-	mu          sync.Mutex
-	sigCh       chan os.Signal
+	mu           sync.Mutex
+	sigCh        chan os.Signal
 }
 
 // New creates a new Guard for the given interface.
 // It captures the current MAC address as the restore target.
-func New(iface string) *Guard {
-	mac, _ := platform.GetCurrentMAC(iface)
-	return &Guard{
+//
+// If MAC capture fails, the returned Guard still restores all other state,
+// but the caller must surface the returned error because MAC restoration
+// will be unavailable for that session.
+func New(iface string) (*Guard, error) {
+	mac, err := getCurrentMAC(iface)
+	g := &Guard{
 		iface:       iface,
 		originalMAC: mac,
 		sigCh:       make(chan os.Signal, 1),
 	}
+	if err != nil {
+		return g, fmt.Errorf("failed to capture original MAC address: %w", err)
+	}
+	return g, nil
 }
 
 // RegisterTunnel adds a tunnel (or any io.Closer) to be stopped on Restore().
