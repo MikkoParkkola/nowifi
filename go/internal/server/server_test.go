@@ -725,7 +725,9 @@ func TestMarkDestroyed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	markDestroyed("digitalocean", "42")
+	if err := markDestroyed("digitalocean", "42"); err != nil {
+		t.Fatalf("markDestroyed: %v", err)
+	}
 
 	servers, _ := LoadServers()
 	if len(servers) != 1 {
@@ -740,8 +742,9 @@ func TestMarkDestroyed_NonExistent(t *testing.T) {
 	_, cleanup := setupTestDir(t)
 	defer cleanup()
 
-	// Should not panic on non-existent server.
-	markDestroyed("digitalocean", "9999")
+	if err := markDestroyed("digitalocean", "9999"); err != nil {
+		t.Fatalf("markDestroyed on non-existent server: %v", err)
+	}
 }
 
 func TestMarkDestroyed_OnlyMatchingServer(t *testing.T) {
@@ -751,7 +754,9 @@ func TestMarkDestroyed_OnlyMatchingServer(t *testing.T) {
 	SaveServer(&Info{Provider: "do", ServerID: "1", Status: "active"})
 	SaveServer(&Info{Provider: "do", ServerID: "2", Status: "active"})
 
-	markDestroyed("do", "1")
+	if err := markDestroyed("do", "1"); err != nil {
+		t.Fatalf("markDestroyed: %v", err)
+	}
 
 	servers, _ := LoadServers()
 	for _, s := range servers {
@@ -787,6 +792,37 @@ func TestSaveConfigAndLoadConfig_RoundTrip(t *testing.T) {
 		if loaded[k] != v {
 			t.Errorf("LoadConfig[%q] = %q, want %q", k, loaded[k], v)
 		}
+	}
+}
+
+func TestPersistConfigValue_RoundTrip(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	if err := persistConfigValue("tunnel_server", "https://1.2.3.4:443"); err != nil {
+		t.Fatalf("persistConfigValue: %v", err)
+	}
+
+	loaded := LoadConfig()
+	if loaded["tunnel_server"] != "https://1.2.3.4:443" {
+		t.Fatalf("tunnel_server = %q, want https://1.2.3.4:443", loaded["tunnel_server"])
+	}
+}
+
+func TestPersistConfigValue_ReturnsWriteError(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	if err := os.MkdirAll(configFile(), 0o755); err != nil {
+		t.Fatalf("mkdir config path: %v", err)
+	}
+
+	err := persistConfigValue("tunnel_server", "https://1.2.3.4:443")
+	if err == nil {
+		t.Fatal("expected persistConfigValue to return an error")
+	}
+	if !strings.Contains(err.Error(), "save config") {
+		t.Fatalf("error = %q, want save config context", err)
 	}
 }
 
@@ -846,6 +882,19 @@ func TestSaveConfig_EmptyMap(t *testing.T) {
 	loaded := LoadConfig()
 	if len(loaded) != 0 {
 		t.Errorf("expected empty config, got %d entries", len(loaded))
+	}
+}
+
+func TestMarkDestroyed_ReturnsPersistenceError(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	if err := os.MkdirAll(serversFile(), 0o755); err != nil {
+		t.Fatalf("mkdir servers path: %v", err)
+	}
+
+	if err := markDestroyed("digitalocean", "42"); err == nil {
+		t.Fatal("expected markDestroyed to return a persistence error")
 	}
 }
 

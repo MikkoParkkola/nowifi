@@ -182,6 +182,15 @@ func SaveConfig(cfg map[string]string) error {
 	return os.WriteFile(configFile(), data, 0o600)
 }
 
+func persistConfigValue(key, value string) error {
+	cfg := LoadConfig()
+	cfg[key] = value
+	if err := SaveConfig(cfg); err != nil {
+		return fmt.Errorf("save config %q: %w", key, err)
+	}
+	return nil
+}
+
 // getToken gets an API token: explicit arg > config file > error.
 func getToken(provider, explicitToken string) (string, error) {
 	if explicitToken != "" {
@@ -348,10 +357,9 @@ func SetupCloudflareWorker() (*Info, error) {
 		return info, fmt.Errorf("save server info: %w", err)
 	}
 
-	// Update config with worker URL.
-	cfg := LoadConfig()
-	cfg["cf_workers_url"] = workerURL
-	_ = SaveConfig(cfg)
+	if err := persistConfigValue("cf_workers_url", workerURL); err != nil {
+		return info, err
+	}
 
 	return info, nil
 }
@@ -452,9 +460,9 @@ func createDigitalOcean(token string, ttlHours int) (*Info, error) {
 		return info, fmt.Errorf("save server info: %w", err)
 	}
 
-	cfg := LoadConfig()
-	cfg["tunnel_server"] = info.URL
-	_ = SaveConfig(cfg)
+	if err := persistConfigValue("tunnel_server", info.URL); err != nil {
+		return info, err
+	}
 
 	return info, nil
 }
@@ -579,9 +587,9 @@ func createHetzner(token string, ttlHours int) (*Info, error) {
 		return info, fmt.Errorf("save server info: %w", err)
 	}
 
-	cfg := LoadConfig()
-	cfg["tunnel_server"] = info.URL
-	_ = SaveConfig(cfg)
+	if err := persistConfigValue("tunnel_server", info.URL); err != nil {
+		return info, err
+	}
 
 	return info, nil
 }
@@ -678,7 +686,9 @@ func destroyDigitalOcean(token, dropletID string) error {
 		return fmt.Errorf("DigitalOcean delete returned status %d", resp.StatusCode)
 	}
 
-	markDestroyed("digitalocean", dropletID)
+	if err := markDestroyed("digitalocean", dropletID); err != nil {
+		return fmt.Errorf("mark destroyed: %w", err)
+	}
 	return nil
 }
 
@@ -700,7 +710,9 @@ func destroyHetzner(token, serverID string) error {
 		return fmt.Errorf("Hetzner delete returned status %d", resp.StatusCode)
 	}
 
-	markDestroyed("hetzner", serverID)
+	if err := markDestroyed("hetzner", serverID); err != nil {
+		return fmt.Errorf("mark destroyed: %w", err)
+	}
 	return nil
 }
 
@@ -715,19 +727,27 @@ func destroyCloudflareWorker(workerName string) error {
 		return fmt.Errorf("wrangler delete failed: %s", truncate(string(out), 500))
 	}
 
-	markDestroyed("cloudflare_worker", workerName)
+	if err := markDestroyed("cloudflare_worker", workerName); err != nil {
+		return fmt.Errorf("mark destroyed: %w", err)
+	}
 	return nil
 }
 
-func markDestroyed(provider, serverID string) {
-	servers, _ := LoadServers()
+func markDestroyed(provider, serverID string) error {
+	servers, err := LoadServers()
+	if err != nil {
+		return err
+	}
 	for i := range servers {
 		if servers[i].ServerID == serverID && servers[i].Provider == provider {
 			servers[i].Status = "destroyed"
 		}
 	}
 	ensureDir()
-	_ = writeServers(servers)
+	if err := writeServers(servers); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
