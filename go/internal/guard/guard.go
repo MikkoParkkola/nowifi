@@ -21,6 +21,8 @@ import (
 )
 
 var getCurrentMAC = platform.GetCurrentMAC
+var flushDNS = platform.FlushDNS
+var geteuid = os.Geteuid
 
 // Guard saves and restores network state. Create with New(), register
 // tunnels with RegisterTunnel(), and call Restore() on exit (or use defer).
@@ -133,7 +135,7 @@ func (g *Guard) Restore() {
 	}
 
 	// 4. Restore original MAC address if it was changed (requires root).
-	if g.originalMAC != "" && os.Geteuid() == 0 {
+	if g.originalMAC != "" && geteuid() == 0 {
 		current, err := platform.GetCurrentMAC(g.iface)
 		if err == nil && current != g.originalMAC {
 			if err := platform.SetMAC(g.iface, g.originalMAC); err != nil {
@@ -147,8 +149,10 @@ func (g *Guard) Restore() {
 	}
 
 	// 5. Flush DNS cache (best-effort, may need root).
-	if os.Geteuid() == 0 {
-		_ = platform.FlushDNS()
+	if geteuid() == 0 {
+		if err := flushDNS(); err != nil {
+			fmt.Fprintf(os.Stderr, "nowifi: warning: failed to flush DNS cache: %v\n", err)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"testing"
 
@@ -36,6 +37,34 @@ func (m *mockCloser) isClosed() bool {
 
 // Compile-time check.
 var _ io.Closer = (*mockCloser)(nil)
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+
+	os.Stderr = w
+	fn()
+	os.Stderr = origStderr
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close(stderr writer): %v", err)
+	}
+
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll(stderr): %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close(stderr reader): %v", err)
+	}
+
+	return string(output)
+}
 
 func TestNew(t *testing.T) {
 	// New captures the current MAC. On a test machine without en0 configured,
@@ -347,6 +376,32 @@ func TestGuard_RestoreWithoutTunnels(t *testing.T) {
 
 	if !g.restored {
 		t.Error("guard should be marked restored")
+	}
+}
+
+func TestRestore_WarnsWhenFlushDNSFails(t *testing.T) {
+	origFlushDNS := flushDNS
+	origGeteuid := geteuid
+	flushDNS = func() error {
+		return errors.New("dns flush failed")
+	}
+	geteuid = func() int {
+		return 0
+	}
+	t.Cleanup(func() {
+		flushDNS = origFlushDNS
+		geteuid = origGeteuid
+	})
+
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	output := captureStderr(t, g.Restore)
+	if !strings.Contains(output, "nowifi: warning: failed to flush DNS cache: dns flush failed") {
+		t.Fatalf("expected DNS flush warning, got %q", output)
 	}
 }
 
