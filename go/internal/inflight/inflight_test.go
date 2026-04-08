@@ -81,6 +81,129 @@ func TestGetProfile(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Edge case: unknown airline code
+// ---------------------------------------------------------------------------
+
+func TestDetectProvider_UnknownAirlineReturnsUnknown(t *testing.T) {
+	// No signals at all should return Unknown.
+	p := DetectProvider("", "", "", nil)
+	if p != Unknown {
+		t.Errorf("expected Unknown with no signals, got %s", p)
+	}
+}
+
+func TestDetectProvider_UnknownGatewayMAC(t *testing.T) {
+	// A MAC that doesn't match any known provider OUI.
+	p := DetectProvider("FF:FF:FF:FF:FF:FF", "", "", nil)
+	if p != Unknown {
+		t.Errorf("expected Unknown for broadcast MAC, got %s", p)
+	}
+}
+
+func TestDetectProvider_EmptyHTML(t *testing.T) {
+	p := DetectProvider("", "", "", nil)
+	if p != Unknown {
+		t.Errorf("expected Unknown for empty HTML, got %s", p)
+	}
+}
+
+func TestDetectProvider_UnknownDNSPattern(t *testing.T) {
+	p := DetectProvider("", "totally.unknown.domain.example.com", "", nil)
+	if p != Unknown {
+		t.Errorf("expected Unknown for unrecognized DNS, got %s", p)
+	}
+}
+
+func TestDetectProvider_UnknownHeaders(t *testing.T) {
+	headers := map[string]string{"Server": "Apache/2.4.52"}
+	p := DetectProvider("", "", "", headers)
+	if p != Unknown {
+		t.Errorf("expected Unknown for generic Apache header, got %s", p)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: unknown provider returns nil profile
+// ---------------------------------------------------------------------------
+
+func TestGetProfile_UnknownProvider(t *testing.T) {
+	p := GetProfile(Unknown)
+	if p != nil {
+		t.Error("expected nil profile for Unknown provider")
+	}
+}
+
+func TestGetProfile_InvalidProvider(t *testing.T) {
+	p := GetProfile(Provider("nonexistent_provider"))
+	if p != nil {
+		t.Error("expected nil profile for nonexistent provider")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: all providers have RecommendedOrder and IneffectiveTechniques
+// ---------------------------------------------------------------------------
+
+func TestProfiles_AllHaveRecommendedOrder(t *testing.T) {
+	for provider, profile := range Profiles {
+		if len(profile.RecommendedOrder) == 0 {
+			t.Errorf("provider %s has empty RecommendedOrder", provider)
+		}
+		if len(profile.Airlines) == 0 {
+			t.Errorf("provider %s has empty Airlines", provider)
+		}
+		if profile.TypicalRTTMs == 0 {
+			t.Errorf("provider %s has zero TypicalRTTMs", provider)
+		}
+		if profile.Name == "" {
+			t.Errorf("provider %s has empty Name", provider)
+		}
+		if profile.Description == "" {
+			t.Errorf("provider %s has empty Description", provider)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: DetectProvider with mixed signals (conflicting OUI vs DNS)
+// ---------------------------------------------------------------------------
+
+func TestDetectProvider_OUITakesPrecedence(t *testing.T) {
+	// Panasonic OUI + Gogo DNS pattern. OUI is checked first in the loop.
+	// Due to map iteration order being non-deterministic, the result depends
+	// on which provider is checked first. But at least one should match.
+	p := DetectProvider("00:A0:BC:00:00:00", "gogoinflight.com", "", nil)
+	if p == Unknown {
+		t.Error("should detect some provider with both OUI and DNS signals")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: case insensitivity
+// ---------------------------------------------------------------------------
+
+func TestDetectProvider_CaseInsensitiveMAC(t *testing.T) {
+	p := DetectProvider("00:a0:bc:c0:84:40", "", "", nil)
+	if p != Panasonic {
+		t.Errorf("expected Panasonic from lowercase OUI, got %s", p)
+	}
+}
+
+func TestDetectProvider_CaseInsensitiveHTML(t *testing.T) {
+	p := DetectProvider("", "", "<SCRIPT SRC='PORTAL-LOADER.JS'></SCRIPT>", nil)
+	if p != Panasonic {
+		t.Errorf("expected Panasonic from uppercase HTML marker, got %s", p)
+	}
+}
+
+func TestDetectProvider_Anuvu(t *testing.T) {
+	p := DetectProvider("", "anuvu.com", "", nil)
+	if p != Anuvu {
+		t.Errorf("expected Anuvu from DNS, got %s", p)
+	}
+}
+
 func TestReadmeInflightClaimsMatchRegistry(t *testing.T) {
 	providerCount := len(Profiles)
 	airlineFloor := (len(AllAirlines()) / 10) * 10

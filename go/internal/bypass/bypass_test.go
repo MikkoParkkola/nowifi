@@ -2399,6 +2399,141 @@ func TestTryDefaultCreds_SecondPathHasForm(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Edge case: All 19 techniques fail -- error report clarity
+// ---------------------------------------------------------------------------
+
+func TestRunBypasses_AllFail_ClearErrorReport(t *testing.T) {
+	// All probes closed, no servers, no tunnel config.
+	probes := &ProbeResults{}
+	config := &Config{Interface: "en0"}
+	plat := &mockPlatform{
+		gateway:    "",
+		currentMAC: "",
+		setMACOK:   false,
+		randomMAC:  "02:00:00:00:00:01",
+	}
+
+	results := RunBypasses(probes, config, plat)
+
+	// Every technique should have been tried.
+	if len(results) != 19 {
+		// Some techniques (CNA, JS) may succeed if the test machine has internet.
+		// If any succeeded, RunBypasses stops early (correct behavior).
+		lastSuccess := results[len(results)-1].Success
+		if !lastSuccess && len(results) != 19 {
+			t.Errorf("all failed but got %d results instead of 19", len(results))
+		}
+		return
+	}
+
+	// Every result should have a non-empty Details explaining the failure.
+	for i, r := range results {
+		if r.Details == "" {
+			t.Errorf("result[%d] (%s) has empty Details", i, r.Method)
+		}
+		if r.Success {
+			t.Errorf("result[%d] (%s) unexpectedly succeeded", i, r.Method)
+		}
+	}
+
+	// Verify all 19 methods are represented.
+	seen := make(map[Method]bool)
+	for _, r := range results {
+		seen[r.Method] = true
+	}
+	expectedMethods := []Method{
+		IPv6Bypass, ChiselTunnel, CNASpoof, JSBypass, HTTPConnect,
+		MACCloneIdle, MACClone, DNSTunnel, ICMPTunnel, VPNPort53,
+		WhitelistDomain, SessionReplay, PortalCreds, MACRotate,
+		DHCPRotate, QUICTunnel, CFWorkers, NTPTunnel, DoHTunnel,
+	}
+	for _, m := range expectedMethods {
+		if !seen[m] {
+			t.Errorf("method %s not present in results", m)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: HasInternet with mock server
+// ---------------------------------------------------------------------------
+
+func TestHasInternet_Mock204(t *testing.T) {
+	defer saveHooks(t)()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	}))
+	defer ts.Close()
+	internetCheckURL = ts.URL
+
+	if !HasInternet() {
+		t.Error("HasInternet should return true for 204")
+	}
+}
+
+func TestHasInternet_Mock403(t *testing.T) {
+	defer saveHooks(t)()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+	}))
+	defer ts.Close()
+	internetCheckURL = ts.URL
+
+	if HasInternet() {
+		t.Error("HasInternet should return false for 403")
+	}
+}
+
+func TestHasInternet_Unreachable(t *testing.T) {
+	defer saveHooks(t)()
+
+	internetCheckURL = "http://192.0.2.1:1/unreachable"
+	if HasInternet() {
+		t.Error("HasInternet should return false for unreachable URL")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: SetSuppressLog toggle
+// ---------------------------------------------------------------------------
+
+func TestSetSuppressLog(t *testing.T) {
+	// Should not panic.
+	SetSuppressLog(true)
+	SetSuppressLog(false)
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: measureNetworkLatency with unreachable IP
+// ---------------------------------------------------------------------------
+
+func TestMeasureNetworkLatency_UnreachableIP(t *testing.T) {
+	// Non-routable IP should return the 2s default.
+	d := measureNetworkLatency("192.0.2.1")
+	if d != 2*time.Second {
+		t.Errorf("measureNetworkLatency(unreachable) = %v, want 2s default", d)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: empty interface name
+// ---------------------------------------------------------------------------
+
+func TestRunBypasses_EmptyInterface(t *testing.T) {
+	probes := &ProbeResults{IPv6: ProbeResult{IsOpen: true}}
+	config := &Config{Interface: ""}
+	plat := &mockPlatform{}
+
+	// Should not panic with empty interface.
+	results := RunBypasses(probes, config, plat)
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 

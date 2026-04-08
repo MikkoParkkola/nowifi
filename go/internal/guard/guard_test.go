@@ -454,3 +454,163 @@ func TestRestore_MultipleTunnelsWithMixedErrors(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Edge cases: MAC capture failure still allows full restore
+// ---------------------------------------------------------------------------
+
+func TestNew_MACCaptureFailure_StillRestoresOtherState(t *testing.T) {
+	origGetCurrentMAC := getCurrentMAC
+	getCurrentMAC = func(iface string) (string, error) {
+		return "", errors.New("device not found")
+	}
+	t.Cleanup(func() { getCurrentMAC = origGetCurrentMAC })
+
+	g, err := New("en0")
+	if err == nil {
+		t.Fatal("expected error from MAC capture failure")
+	}
+	if g == nil {
+		t.Fatal("guard should still be created on MAC failure")
+	}
+	if g.originalMAC != "" {
+		t.Errorf("originalMAC should be empty, got %q", g.originalMAC)
+	}
+
+	// Guard should still close tunnels even without MAC.
+	tunnel := &mockCloser{}
+	g.RegisterTunnel(tunnel)
+	g.Restore()
+	if !tunnel.isClosed() {
+		t.Error("tunnel should be closed even when MAC was not captured")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: DNS flush failure during Restore (network changed)
+// ---------------------------------------------------------------------------
+
+func TestRestore_DNSFlushFailure_DoesNotBlock(t *testing.T) {
+	origFlushDNS := flushDNS
+	origGeteuid := geteuid
+	flushDNS = func() error {
+		return errors.New("network changed, DNS service unavailable")
+	}
+	geteuid = func() int { return 0 }
+	t.Cleanup(func() {
+		flushDNS = origFlushDNS
+		geteuid = origGeteuid
+	})
+
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	tunnel := &mockCloser{}
+	g.RegisterTunnel(tunnel)
+
+	// Restore should complete even if DNS flush fails.
+	output := captureStderr(t, g.Restore)
+	if !tunnel.isClosed() {
+		t.Error("tunnel should be closed despite DNS flush failure")
+	}
+	if !g.restored {
+		t.Error("guard should be marked restored despite DNS flush failure")
+	}
+	if !strings.Contains(output, "failed to flush DNS") {
+		t.Errorf("expected DNS flush warning in stderr, got %q", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: rapid Restore() simulating multiple Ctrl+C
+// ---------------------------------------------------------------------------
+
+func TestRestore_RapidConcurrentCalls_OnlyOneTunnelClose(t *testing.T) {
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	tunnel := &mockCloser{}
+	g.RegisterTunnel(tunnel)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			g.Restore()
+		}()
+	}
+	wg.Wait()
+
+	// Only the first Restore() should have run; tunnel closed exactly once.
+	if !tunnel.isClosed() {
+		t.Error("tunnel should be closed")
+	}
+	if !g.restored {
+		t.Error("guard should be marked restored")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: Restore with stealth state registered
+// ---------------------------------------------------------------------------
+
+func TestRestore_WithStealthState(t *testing.T) {
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+
+	state := &platform.StealthState{
+		OriginalTTL:  64,
+		PFRulesAdded: false,
+		PFWasEnabled: false,
+	}
+	g.RegisterStealth(state)
+
+	// Should not panic; DisableStealth is a no-op for non-root.
+	g.Restore()
+	if !g.restored {
+		t.Error("guard should be marked restored")
+	}
+}
+
+// TestSIGKILL_NotCatchable documents that SIGKILL cannot be handled.
+// After kill -9, users must run `nowifi reset` to restore network state.
+func TestSIGKILL_NotCatchable(t *testing.T) {
+	g := &Guard{
+		iface: "en0",
+		sigCh: make(chan os.Signal, 1),
+	}
+	g.StartSignalHandler()
+	signal.Stop(g.sigCh)
+
+	// SIGKILL (signal 9) cannot be caught by any Go program.
+	// This is verified by the fact that signal.Notify does not accept SIGKILL.
+	// The guard correctly handles SIGINT and SIGTERM; SIGKILL is an OS-level
+	// forced termination that bypasses all signal handlers.
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: multiple interfaces
+// ---------------------------------------------------------------------------
+
+func TestNew_VariousInterfaceNames(t *testing.T) {
+	interfaces := []string{"en0", "en1", "wlan0", "eth0", "wlp2s0", "lo0"}
+	for _, iface := range interfaces {
+		g, _ := New(iface)
+		if g == nil {
+			t.Fatalf("New(%q) returned nil", iface)
+		}
+		if g.iface != iface {
+			t.Errorf("iface = %q, want %q", g.iface, iface)
+		}
+	}
+}

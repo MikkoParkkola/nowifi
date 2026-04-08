@@ -812,3 +812,197 @@ func TestVendorSignatures_Defined(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Edge cases: DNS completely broken (no resolution at all)
+// ---------------------------------------------------------------------------
+
+func TestDetectPortal_AllCanariesTimeout(t *testing.T) {
+	// Simulate DNS completely broken by pointing all canaries at unreachable host.
+	origCanaries := make([]canary, len(canaryURLs))
+	copy(origCanaries, canaryURLs)
+	// Use a non-routable IP with a very short timeout. RFC 5737 TEST-NET.
+	for i := range canaryURLs {
+		canaryURLs[i].URL = "http://192.0.2.1:1/path"
+	}
+	defer func() { copy(canaryURLs, origCanaries) }()
+
+	info := DetectPortal("en0")
+	// All 4 canaries should fail (connection timeout/refused).
+	// failures(4) >= 2 -> IsCaptive=true, Type=PortalFirewall (no redirects).
+	if !info.IsCaptive {
+		t.Error("expected IsCaptive=true when all canaries are unreachable")
+	}
+	if info.Type != PortalFirewall {
+		t.Errorf("Type = %q, want %q when all canaries timeout", info.Type, PortalFirewall)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: canary returns empty body
+// ---------------------------------------------------------------------------
+
+func TestCheckCanary_EmptyBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		// Empty body
+	}))
+	defer ts.Close()
+
+	client := ts.Client()
+	c := canary{
+		URL:            ts.URL + "/test",
+		ExpectedBody:   "Success",
+		ExpectedStatus: 200,
+		Name:           "Test Empty Body",
+	}
+
+	result := checkCanary(client, c)
+	if result == nil {
+		t.Fatal("expected non-nil result even with empty body")
+	}
+	if result.Body != "" {
+		t.Errorf("body = %q, want empty", result.Body)
+	}
+	// Status matches but body does not -> this canary would count as a failure
+	// in the consensus algorithm because ExpectedBody is non-empty.
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: canary with very large response body (> 256KB truncation)
+// ---------------------------------------------------------------------------
+
+func TestCheckCanary_LargeBody(t *testing.T) {
+	largeBody := make([]byte, 512*1024) // 512KB
+	for i := range largeBody {
+		largeBody[i] = 'A'
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write(largeBody)
+	}))
+	defer ts.Close()
+
+	client := ts.Client()
+	c := canary{
+		URL:            ts.URL + "/large",
+		ExpectedBody:   "",
+		ExpectedStatus: 200,
+		Name:           "Test Large Body",
+	}
+
+	result := checkCanary(client, c)
+	if result == nil {
+		t.Fatal("expected non-nil result for large body")
+	}
+	// Body should be truncated to 256KB.
+	if len(result.Body) > 256*1024 {
+		t.Errorf("body length = %d, should be truncated to 256KB", len(result.Body))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: no default gateway (fingerprintFromDNS returns empty)
+// ---------------------------------------------------------------------------
+
+func TestFingerprintPortal_EmptyInputs(t *testing.T) {
+	info := &PortalInfo{}
+	fingerprintPortal(info, "", "", http.Header{})
+	if info.Vendor != "" {
+		t.Errorf("Vendor = %q, want empty for all-empty inputs", info.Vendor)
+	}
+	if info.VendorScore != 0 {
+		t.Errorf("VendorScore = %d, want 0", info.VendorScore)
+	}
+	if len(info.AuthMethods) != 0 {
+		t.Errorf("AuthMethods = %v, want empty", info.AuthMethods)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: multiple auth methods in one page
+// ---------------------------------------------------------------------------
+
+func TestDetectAuthMethods_AllMethodsInOnePage(t *testing.T) {
+	html := `<html><body>
+		<form>
+			<input type="email" name="email"/>
+			<input type="password" name="pw"/>
+			<input type="tel" name="phone"/>
+			<a href="https://accounts.google.com/o/oauth2">Google</a>
+			<a href="https://www.facebook.com/dialog/oauth">Facebook</a>
+			<label>Room Number: <input name="room_no"/></label>
+			<label>Voucher Code: <input name="voucher"/></label>
+			<label><input type="checkbox"/> I accept the terms and conditions</label>
+		</form>
+	</body></html>`
+
+	methods := detectAuthMethods(html)
+	expected := []string{"email", "password", "phone", "social_google", "social_facebook", "room_number", "voucher", "terms_only"}
+	if len(methods) != len(expected) {
+		t.Fatalf("detectAuthMethods returned %d methods, want %d: %v", len(methods), len(expected), methods)
+	}
+	for i, m := range methods {
+		if m != expected[i] {
+			t.Errorf("method[%d] = %q, want %q", i, m, expected[i])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: canary with too many redirects
+// ---------------------------------------------------------------------------
+
+func TestCheckCanary_TooManyRedirects(t *testing.T) {
+	redirectCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectCount++
+		// Always redirect to self -- will hit the 10-redirect limit.
+		http.Redirect(w, r, r.URL.String(), http.StatusFound)
+	}))
+	defer ts.Close()
+
+	client := ts.Client()
+	// Override the client's redirect policy to match DetectPortal's.
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}
+
+	c := canary{
+		URL:            ts.URL + "/loop",
+		ExpectedBody:   "Success",
+		ExpectedStatus: 200,
+		Name:           "Test Redirect Loop",
+	}
+
+	result := checkCanary(client, c)
+	// Should not return nil (the last redirect response is returned).
+	// The key assertion: no panic, no infinite loop.
+	if result == nil {
+		// Acceptable: the client may return an error on redirect loop.
+		return
+	}
+	// If we got a result, verify the status is a redirect.
+	if result.StatusCode != http.StatusFound {
+		t.Errorf("status = %d, want 302 for redirect loop", result.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: PortalInfo fields set correctly for walled garden
+// ---------------------------------------------------------------------------
+
+func TestPortalInfo_WalledGardenType(t *testing.T) {
+	info := &PortalInfo{
+		IsCaptive: true,
+		Type:      PortalWalledGarden,
+		Vendor:    "custom",
+	}
+	if info.Type != PortalWalledGarden {
+		t.Errorf("Type = %q, want %q", info.Type, PortalWalledGarden)
+	}
+}

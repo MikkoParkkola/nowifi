@@ -1223,3 +1223,208 @@ func TestSmartCrackTimeout(t *testing.T) {
 		t.Errorf("CaptureFile = %q, want /tmp/hash.22000", result.CaptureFile)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Edge case: hashcat not installed and GPU cracking requested
+// ---------------------------------------------------------------------------
+
+func TestCrackWithHashcat_HashcatNotInstalled(t *testing.T) {
+	// Create a valid hash file so we reach the hashcat lookup step.
+	tmpDir := t.TempDir()
+	hashFile := filepath.Join(tmpDir, "test.22000")
+	if err := os.WriteFile(hashFile, []byte("WPA*02*aabbccdd*1122*3344*5566\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := crackWithHashcatMode(hashFile, "brute", "", 5*time.Second)
+	if err != nil {
+		t.Fatalf("crackWithHashcatMode returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	// If hashcat is not installed (common in CI), should fail gracefully.
+	// If hashcat IS installed, it will fail because the hash format is fake.
+	if result.Method != Hashcat {
+		t.Errorf("Method = %q, want %q", result.Method, Hashcat)
+	}
+	// Either "hashcat not found" or a hashcat execution error -- both are fine.
+	if result.Details == "" {
+		t.Error("Details should explain why cracking failed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: CrackWithHashcat in rule mode without wordlists
+// ---------------------------------------------------------------------------
+
+func TestCrackWithHashcat_RuleModeNoWordlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	hashFile := filepath.Join(tmpDir, "test.22000")
+	if err := os.WriteFile(hashFile, []byte("WPA*02*aabb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := crackWithHashcatMode(hashFile, "rule", "", 5*time.Second)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.Success {
+		t.Error("should not succeed without proper wordlist/hashcat")
+	}
+	// Should fail either with "hashcat not found" or "No wordlist found".
+	if result.Details == "" {
+		t.Error("Details should not be empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: CapturePMKID with invalid interface
+// ---------------------------------------------------------------------------
+
+func TestCapturePMKID_InvalidInterface(t *testing.T) {
+	target := WifiTarget{
+		SSID:    "TestNet",
+		BSSID:   "AA:BB:CC:DD:EE:FF",
+		Channel: 6,
+	}
+
+	result, err := CapturePMKID(target, "../../evil", 1*time.Second)
+	if err != nil {
+		t.Fatalf("CapturePMKID returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	if result.Success {
+		t.Error("should fail with invalid interface")
+	}
+	if !strings.Contains(result.Details, "invalid interface") {
+		t.Errorf("Details = %q, should mention invalid interface", result.Details)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: CaptureHandshake with invalid interface
+// ---------------------------------------------------------------------------
+
+func TestCaptureHandshake_InvalidInterface(t *testing.T) {
+	target := WifiTarget{
+		SSID:    "TestNet",
+		BSSID:   "AA:BB:CC:DD:EE:FF",
+		Channel: 6,
+	}
+
+	result, err := CaptureHandshake(target, "../../evil", 1*time.Second)
+	if err != nil {
+		t.Fatalf("CaptureHandshake returned error: %v", err)
+	}
+	if result.Success {
+		t.Error("should fail with invalid interface")
+	}
+	if !strings.Contains(result.Details, "invalid interface") {
+		t.Errorf("Details = %q, should mention invalid interface", result.Details)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: WPS Pixie-Dust with locked AP
+// ---------------------------------------------------------------------------
+
+func TestCrackWPSPixie_LockedAP(t *testing.T) {
+	target := WifiTarget{
+		SSID:       "LockedNet",
+		BSSID:      "AA:BB:CC:DD:EE:FF",
+		Channel:    6,
+		WPSEnabled: true,
+		WPSLocked:  true,
+	}
+
+	result, err := CrackWPSPixie(target, "wlan0", 5*time.Second)
+	if err != nil {
+		t.Fatalf("CrackWPSPixie returned error: %v", err)
+	}
+	if result.Success {
+		t.Error("should fail with WPS locked")
+	}
+	// Should skip the attack entirely (no monitor mode check needed).
+	if !strings.Contains(result.Details, "locked") && !strings.Contains(result.Details, "monitor") {
+		t.Errorf("Details = %q, should mention locked or monitor mode", result.Details)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: WPS PIN brute with locked AP
+// ---------------------------------------------------------------------------
+
+func TestCrackWPSPin_LockedAP(t *testing.T) {
+	target := WifiTarget{
+		SSID:       "LockedNet",
+		BSSID:      "AA:BB:CC:DD:EE:FF",
+		Channel:    6,
+		WPSEnabled: true,
+		WPSLocked:  true,
+	}
+
+	result, err := CrackWPSPin(target, "wlan0", 5*time.Second)
+	if err != nil {
+		t.Fatalf("CrackWPSPin returned error: %v", err)
+	}
+	if result.Success {
+		t.Error("should fail with WPS locked")
+	}
+	if !strings.Contains(result.Details, "locked") && !strings.Contains(result.Details, "monitor") {
+		t.Errorf("Details = %q, should mention locked or monitor mode", result.Details)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: parseWashOutput with various malformed inputs
+// ---------------------------------------------------------------------------
+
+func TestParseWashOutput_MalformedLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   int
+	}{
+		{"empty", "", 0},
+		{"header only", "BSSID  Ch  dBm  WPS  Lck  Vendor  ESSID\n", 0},
+		{"separator only", "---\n", 0},
+		{"non-BSSID start", "Hello World\n", 0},
+		{"BSSID in middle", "Some text AA:BB:CC:DD:EE:FF more\n", 0},
+		{"short fields", "AA:BB:CC:DD:EE:FF 6 -42\n", 0},
+		{"non-numeric channel", "AA:BB:CC:DD:EE:FF abc -42 2.0 No Vendor ESSID\n", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseWashOutput(tt.output)
+			if len(got) != tt.want {
+				t.Errorf("parseWashOutput(%q) returned %d, want %d", tt.output, len(got), tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: parseReaverOutput edge cases
+// ---------------------------------------------------------------------------
+
+func TestParseReaverOutput_UnquotedPSK(t *testing.T) {
+	output := "[+] WPS PIN: 12345670\n[+] WPA PSK: my secret password"
+	pin, psk := parseReaverOutput(output)
+	if pin != "12345670" {
+		t.Errorf("pin = %q, want 12345670", pin)
+	}
+	if psk != "my secret password" {
+		t.Errorf("psk = %q, want 'my secret password'", psk)
+	}
+}
+
+func TestParseReaverOutput_PSKWithSpecialChars(t *testing.T) {
+	output := "[+] WPA PSK: 'p@$$w0rd!#'"
+	_, psk := parseReaverOutput(output)
+	if psk != "p@$$w0rd!#" {
+		t.Errorf("psk = %q, want 'p@$$w0rd!#'", psk)
+	}
+}
