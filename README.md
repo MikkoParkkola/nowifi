@@ -31,10 +31,21 @@ Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-techniqu
 
 ## Installation
 
-### Pre-built Binaries (Recommended)
+### Homebrew (Recommended)
+
+```bash
+brew install MikkoParkkola/tap/nowifi
+```
+
+That's it. Pre-built binary, no Go toolchain, no `sudo install`. Works on
+Apple Silicon, Intel Macs, Linux x86_64, and Linux arm64.
+
+### Pre-built Binaries (Manual)
 
 Download the latest release for your platform from
-[GitHub Releases](https://github.com/MikkoParkkola/nowifi/releases/latest).
+[GitHub Releases](https://github.com/MikkoParkkola/nowifi/releases/latest)
+and verify checksums against
+[`checksums.sha256`](https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256).
 
 ```bash
 # macOS Apple Silicon
@@ -52,20 +63,6 @@ sudo install -m 0755 nowifi-linux-amd64 /usr/local/bin/nowifi
 # Linux ARM64
 curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-arm64.tar.gz | tar xz
 sudo install -m 0755 nowifi-linux-arm64 /usr/local/bin/nowifi
-```
-
-Verify checksums against
-[`checksums.sha256`](https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256)
-before installing.
-
-### Local Homebrew Formula
-
-A formula is bundled in this repo (no published tap yet):
-
-```bash
-git clone https://github.com/MikkoParkkola/nowifi.git
-cd nowifi
-brew install --build-from-source ./homebrew/nowifi.rb
 ```
 
 ### Build from Source
