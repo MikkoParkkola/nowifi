@@ -293,6 +293,17 @@ The authors accept no liability for misuse. This tool is published for defensive
 
 ---
 
+## More Tools
+
+| Tool | What it does |
+|------|-------------|
+| [trvl](https://github.com/MikkoParkkola/trvl) | AI travel agent — flights, hotels, ferries, 33 MCP tools |
+| [axterminator](https://github.com/MikkoParkkola/axterminator) | macOS GUI automation — 30 MCP tools, audio/camera capture |
+| [mcp-gateway](https://github.com/MikkoParkkola/mcp-gateway) | Universal MCP gateway — single-port multiplexing |
+| [nab](https://github.com/MikkoParkkola/nab) | Token-optimized HTTP client for LLMs |
+
+All tools: `brew tap MikkoParkkola/tap && brew install trvl axterminator mcp-gateway nab nowifi`
+
 ## License
 
 [AGPL-3.0](LICENSE) -- Copyright (C) 2026 Mikko Parkkola
