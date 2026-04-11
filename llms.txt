@@ -1,0 +1,45 @@
+# nowifi
+
+> One-command captive portal bypass. 27 techniques. Browser works immediately.
+
+nowifi is a standalone CLI tool (NOT an MCP server) that detects captive portals, probes for weaknesses, and bypasses them automatically. It tries 19 portal bypass techniques (most powerful first), stops on the first success, and maintains your connection until Ctrl+C. Also includes 8 WPA/WPA2 cracking techniques.
+
+## Install
+
+brew install MikkoParkkola/tap/nowifi
+
+## Usage
+
+sudo nowifi                        # Full bypass: detect, probe, bypass, maintain, restore
+sudo nowifi -p                     # Probe only (find leaks, no exploitation)
+sudo nowifi --fast                 # Skip stealth timing
+nowifi diagnose                    # Read-only security assessment
+nowifi diagnose -r json            # Assessment as JSON
+nowifi crack                       # WPA/WPA2 password cracking pipeline
+nowifi scan                        # Scan nearby WiFi networks
+nowifi watch                       # Maintain access (auto-reconnect on session expiry)
+nowifi score                       # Grade nearby networks A-F
+nowifi tools                       # Show installed/missing external tools
+nowifi tools -d                    # Auto-download missing tools
+nowifi server create               # Create tunnel server (CF Worker or VPS)
+nowifi doctor                      # System health check
+nowifi ui                          # Web dashboard
+sudo nowifi reset                  # Emergency network reset
+
+## Techniques (27 total)
+
+Portal bypass (19): IPv6, HTTPS/WS tunnel, CNA spoof, JS-only, HTTP CONNECT, MAC clone (idle/any), DNS tunnel, ICMP tunnel, VPN:53, whitelist domain, cookie replay, default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP tunnel, DoH tunnel.
+
+WPA cracking (8): PMKID, WPS Pixie-Dust, handshake+hashcat, WPS PIN, common passwords, numeric mask, word+number rules, online brute force.
+
+## Notes
+
+- Requires sudo for bypass/crack (network changes need root)
+- Ctrl+C always restores original network state
+- NOT an MCP server -- standalone CLI only
+- For authorized security assessments only
+
+## Detailed docs
+
+- Full README: https://github.com/MikkoParkkola/nowifi/blob/master/README.md
+- Agent setup: https://github.com/MikkoParkkola/nowifi/blob/master/AGENTS.md
