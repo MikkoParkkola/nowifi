@@ -6,9 +6,9 @@
 //
 // Three options:
 //
-//	A. Cloudflare Workers (FREE, no server needed) -- HTTPS proxy on CF edge
+//	A. Cloudflare Workers (FREE, no VPS needed) -- HTTPS proxy on CF edge
 //	B. Ephemeral VPS (DigitalOcean / Hetzner) -- chisel + iodine + hans pre-installed
-//	C. No server -- 10 of 23 techniques need no server at all
+//	C. No external server -- fully local techniques only
 package server
 
 import (
@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 )
 
 // ---------------------------------------------------------------------------
@@ -45,31 +47,19 @@ type Info struct {
 // Technique classification
 // ---------------------------------------------------------------------------
 
-// ServerlessTechniques lists techniques that need no external server.
-var ServerlessTechniques = []string{
-	"ipv6_bypass",
-	"cna_useragent_spoof",
-	"js_only_bypass",
-	"http_connect_abuse",
-	"mac_clone_idle",
-	"mac_clone",
-	"session_cookie_replay",
-	"portal_default_creds",
-	"mac_rotate",
-	"dhcp_rotate",
-}
+// ServerlessTechniques lists bypass techniques that need no external server.
+var ServerlessTechniques = techniqueIDs(techniques.ServerlessBypassTechniqueInfos())
 
-// ServerRequiredTechniques lists techniques that require a tunnel server.
-var ServerRequiredTechniques = []string{
-	"chisel_tunnel",
-	"dns_tunnel",
-	"icmp_tunnel",
-	"vpn_port_53",
-	"whitelist_domain",
-	"quic_tunnel",
-	"cf_workers_proxy",
-	"ntp_tunnel",
-	"doh_tunnel",
+// ServerRequiredTechniques lists bypass techniques that require an external
+// endpoint the user controls.
+var ServerRequiredTechniques = techniqueIDs(techniques.ServerRequiredBypassTechniqueInfos())
+
+func techniqueIDs(infos []techniques.BypassTechniqueInfo) []string {
+	ids := make([]string, len(infos))
+	for i, info := range infos {
+		ids[i] = string(info.ID)
+	}
+	return ids
 }
 
 // ---------------------------------------------------------------------------

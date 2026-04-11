@@ -12,6 +12,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
 	"github.com/MikkoParkkola/nowifi/internal/report"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/spf13/cobra"
 )
 
@@ -106,81 +107,31 @@ func runDiagnose(cmd *cobra.Command, args []string) {
 // assessMethods counts how many bypass techniques would be feasible
 // based on probe results. This is a read-only assessment.
 func assessMethods(probes *probe.ProbeResults, portal *detect.PortalInfo) int {
-	feasible := 0
+	return techniques.CountFeasibleBypassTechniques(diagnoseSignals(probes, portal))
+}
 
-	// IPv6 bypass — feasible if IPv6 is open.
-	if probes.IPv6.IsOpen {
-		feasible++
-	}
-	// HTTPS tunnel — feasible if TCP/443 is open.
-	if portOpen(probes, 443) {
-		feasible++
-	}
-	// CNA spoof — always worth trying if portal detected.
-	if portal.IsCaptive {
-		feasible++
-	}
-	// JS-only bypass — always worth trying if portal detected.
-	if portal.IsCaptive {
-		feasible++
-	}
-	// HTTP CONNECT — feasible if TCP/443 or TCP/8080 is open.
-	if portOpen(probes, 443) || portOpen(probes, 8080) {
-		feasible++
-	}
-	// MAC clone (idle) — always feasible with sudo.
-	feasible++
-	// MAC clone (any) — always feasible with sudo.
-	feasible++
-	// DNS tunnel — feasible if DNS (UDP/53) is open.
-	if probes.DNS.IsOpen {
-		feasible++
-	}
-	// ICMP tunnel — feasible if ICMP is open.
-	if probes.ICMP.IsOpen {
-		feasible++
-	}
-	// VPN on port 53 — feasible if DNS port is open.
-	if probes.DNS.IsOpen {
-		feasible++
-	}
-	// Whitelist domain — feasible if any whitelisted domain is open.
+func diagnoseSignals(probes *probe.ProbeResults, portal *detect.PortalInfo) techniques.BypassTechniqueSignals {
+	whitelistReachable := false
 	for _, wl := range probes.Whitelists {
 		if wl.IsOpen {
-			feasible++
+			whitelistReachable = true
 			break
 		}
 	}
-	// Session cookie replay — always feasible if portal detected.
-	if portal.IsCaptive {
-		feasible++
-	}
-	// Portal default creds — always feasible if portal detected.
-	if portal.IsCaptive {
-		feasible++
-	}
-	// MAC rotate — always feasible with sudo.
-	feasible++
-	// DHCP rotate — always feasible.
-	feasible++
-	// QUIC tunnel — feasible if QUIC (UDP/443) is open.
-	if probes.QUIC.IsOpen {
-		feasible++
-	}
-	// CF Workers proxy — feasible if HTTPS is open.
-	if probes.Cloudflare.IsOpen {
-		feasible++
-	}
-	// NTP tunnel — feasible if NTP (UDP/123) is open.
-	if probes.NTP.IsOpen {
-		feasible++
-	}
-	// DoH tunnel — feasible if DoH is reachable.
-	if probes.DoH.IsOpen {
-		feasible++
-	}
 
-	return feasible
+	return techniques.BypassTechniqueSignals{
+		PortalDetected:     portal != nil && portal.IsCaptive,
+		IPv6Open:           probes.IPv6.IsOpen,
+		DNSOpen:            probes.DNS.IsOpen,
+		ICMPOpen:           probes.ICMP.IsOpen,
+		CloudflareOpen:     probes.Cloudflare.IsOpen,
+		QUICOpen:           probes.QUIC.IsOpen,
+		NTPOpen:            probes.NTP.IsOpen,
+		DoHOpen:            probes.DoH.IsOpen,
+		WhitelistReachable: whitelistReachable,
+		HTTP443Open:        portOpen(probes, 443),
+		HTTP8080Open:       portOpen(probes, 8080),
+	}
 }
 
 // portOpen checks if a specific TCP port was found open in probe results.

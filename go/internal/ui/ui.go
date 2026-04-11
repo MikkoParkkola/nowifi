@@ -22,6 +22,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/detect"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 )
 
 //go:embed static/*
@@ -48,6 +49,8 @@ type State struct {
 
 	// Probe results: protocol key -> status string.
 	Probes map[string]ProbeStatus `json:"probes"`
+	// Exact probed open-port facts for shared feasibility rules.
+	OpenPorts map[int]bool `json:"-"`
 
 	// Bypass method feasibility (from diagnose).
 	Methods []MethodState `json:"methods"`
@@ -450,15 +453,20 @@ func runProbesIncremental() {
 	AppendLog("Probing outbound ports...")
 	ports := probe.ProbePorts("1.1.1.1", false)
 	openPorts := 0
+	exactOpenPorts := make(map[int]bool)
 	for _, p := range ports {
 		if p.IsOpen {
 			openPorts++
+			exactOpenPorts[p.Port] = true
 		}
 	}
 	s = "closed"
 	if openPorts > 0 {
 		s = "open"
 	}
+	state.mu.Lock()
+	state.OpenPorts = exactOpenPorts
+	state.mu.Unlock()
 	setProbeStatus("ports", s, fmt.Sprintf("%d open", openPorts))
 	AppendLog(fmt.Sprintf("  Ports: %d open", openPorts))
 
@@ -597,16 +605,19 @@ func runResetBackground() {
 	state.Methods = nil
 	state.Bypasses = nil
 	state.ActiveTunnel = nil
+	state.OpenPorts = nil
 	state.Message = ""
 	state.mu.Unlock()
 	AppendLog("State cleared. Run a new probe or audit.")
 }
 
-// assessMethods returns a static feasibility assessment based on probe results.
-// This matches the 19 bypass techniques from the bypass package.
+// assessMethods returns a feasibility assessment derived from the shared
+// technique registry.
 func assessMethods() []MethodState {
 	state.mu.RLock()
 	probes := state.Probes
+	openPorts := state.OpenPorts
+	portal := state.Portal
 	state.mu.RUnlock()
 
 	isOpen := func(key string) bool {
@@ -614,27 +625,33 @@ func assessMethods() []MethodState {
 		return ok && p.Status == "open"
 	}
 
-	return []MethodState{
-		{1, "IPv6 bypass", isOpen("ipv6"), "HIGH", "IPv6 unfiltered by portal", "None (read-only)"},
-		{2, "HTTPS/WS tunnel", isOpen("cloudflare"), "HIGH", "HTTPS outbound open", "Needs tunnel server"},
-		{3, "CNA User-Agent spoof", true, "MEDIUM", "Always possible to attempt", "Detected by portal logs"},
-		{4, "JS-only bypass", true, "LOW", "Requires portal analysis", "Portal-dependent"},
-		{5, "HTTP CONNECT abuse", isOpen("cloudflare"), "MEDIUM", "HTTP outbound required", "Transparent proxy needed"},
-		{6, "MAC clone (idle)", true, "HIGH", "ARP table has targets", "MAC change visible"},
-		{7, "MAC clone (any)", true, "HIGH", "ARP table has targets", "Disconnects victim"},
-		{8, "DNS tunnel", isOpen("dns"), "HIGH", "DNS UDP/53 open", "Needs DNS tunnel server"},
-		{9, "ICMP tunnel", isOpen("icmp"), "HIGH", "ICMP open to external", "Needs ICMP tunnel server"},
-		{10, "VPN on port 53", isOpen("dns"), "MEDIUM", "UDP/53 open", "Needs VPN server on 53"},
-		{11, "Whitelist domain abuse", isOpen("whitelists"), "LOW", "Whitelisted domains found", "Domain fronting required"},
-		{12, "Session cookie replay", true, "LOW", "Requires traffic capture", "Needs monitor mode"},
-		{13, "Portal default creds", true, "LOW", "Try common passwords", "Rate-limited by portal"},
-		{14, "MAC rotate", true, "MEDIUM", "Always possible", "MAC change visible"},
-		{15, "DHCP rotate", true, "MEDIUM", "Always possible", "New IP lease"},
-		{16, "QUIC tunnel", isOpen("quic"), "HIGH", "UDP/443 open", "Needs Hysteria2 server"},
-		{17, "CF Workers proxy", isOpen("cloudflare"), "MEDIUM", "HTTPS open to Cloudflare", "Free CF account required"},
-		{18, "NTP tunnel", isOpen("ntp"), "HIGH", "NTP open", "Needs NTP tunnel server"},
-		{19, "DoH tunnel", isOpen("doh"), "MEDIUM", "DoH reachable", "DNS-over-HTTPS channel"},
+	assessments := techniques.AssessBypassTechniques(techniques.BypassTechniqueSignals{
+		PortalDetected:     portal != nil && portal.IsCaptive,
+		IPv6Open:           isOpen("ipv6"),
+		DNSOpen:            isOpen("dns"),
+		ICMPOpen:           isOpen("icmp"),
+		CloudflareOpen:     isOpen("cloudflare"),
+		QUICOpen:           isOpen("quic"),
+		NTPOpen:            isOpen("ntp"),
+		DoHOpen:            isOpen("doh"),
+		WhitelistReachable: isOpen("whitelists"),
+		HTTP443Open:        openPorts != nil && openPorts[443],
+		HTTP8080Open:       openPorts != nil && openPorts[8080],
+	})
+
+	methods := make([]MethodState, len(assessments))
+	for i, assessment := range assessments {
+		methods[i] = MethodState{
+			Number:     assessment.Number,
+			Name:       assessment.Name,
+			Feasible:   assessment.Feasible,
+			Confidence: assessment.Confidence,
+			Reason:     assessment.Reason,
+			Risk:       assessment.Risk,
+		}
 	}
+
+	return methods
 }
 
 func statusLabel(isOpen bool) string {

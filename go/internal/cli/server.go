@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/server"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/spf13/cobra"
 )
 
@@ -16,12 +18,7 @@ import (
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Manage tunnel server infrastructure",
-	Long: `Manage your tunnel server infrastructure.
-
-Three options for getting a tunnel endpoint:
-  A. Cloudflare Workers (FREE) — HTTPS proxy on CF edge, 100K req/day
-  B. Ephemeral VPS            — DigitalOcean ($0.007/hr) or Hetzner ($0.005/hr)
-  C. No server at all         — 15 of 27 techniques are local/serverless`,
+	Long:  buildServerCommandLongDescription(),
 }
 
 // --- server create ---
@@ -75,12 +72,62 @@ Examples:
 var serverInfoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Show which techniques need a server and which don't",
-	Long: `Show which techniques need a server and which don't.
+	Long:  buildServerInfoLongDescription(),
+	Run:   runServerInfo,
+}
 
-15 of 27 techniques work without any server infrastructure.
-The 8 tunnel-based portal bypass techniques need an endpoint you control.
+var localCrackingTechniqueNames = []string{
+	"PMKID capture",
+	"WPS Pixie-Dust",
+	"WPA handshake capture",
+	"WPS PIN brute force",
+	"Smart common passwords",
+	"Smart numeric masks",
+	"Smart word+number rules",
+	"Online brute force",
+}
+
+func buildServerCommandLongDescription() string {
+	totalTechniqueCount := techniques.BypassTechniqueCount() + crack.UserVisibleTechniqueCount
+	return fmt.Sprintf(`Manage your tunnel server infrastructure.
+
+Three options for getting a tunnel endpoint:
+  A. Cloudflare Workers (FREE) — HTTPS proxy on CF edge, 100K req/day
+  B. Ephemeral VPS            — DigitalOcean ($0.007/hr) or Hetzner ($0.005/hr)
+  C. No server at all         — %d of %d techniques are local/serverless`,
+		len(serverlessTechniqueNames()),
+		totalTechniqueCount,
+	)
+}
+
+func buildServerInfoLongDescription() string {
+	totalTechniqueCount := techniques.BypassTechniqueCount() + crack.UserVisibleTechniqueCount
+	return fmt.Sprintf(`Show which techniques need a server and which don't.
+
+%d of %d techniques work without any server infrastructure.
+The remaining %d portal bypass techniques need an external endpoint you control.
 WPA cracking techniques are all local.`,
-	Run: runServerInfo,
+		len(serverlessTechniqueNames()),
+		totalTechniqueCount,
+		len(serverRequiredTechniqueNames()),
+	)
+}
+
+func serverlessTechniqueNames() []string {
+	names := make([]string, 0, len(techniques.ServerlessBypassTechniqueInfos())+len(localCrackingTechniqueNames))
+	for _, info := range techniques.ServerlessBypassTechniqueInfos() {
+		names = append(names, info.Name)
+	}
+	names = append(names, localCrackingTechniqueNames...)
+	return names
+}
+
+func serverRequiredTechniqueNames() []string {
+	names := make([]string, 0, len(techniques.ServerRequiredBypassTechniqueInfos()))
+	for _, info := range techniques.ServerRequiredBypassTechniqueInfos() {
+		names = append(names, info.Name)
+	}
+	return names
 }
 
 func init() {
@@ -247,34 +294,8 @@ func runServerInfo(cmd *cobra.Command, args []string) {
 	fmt.Println("\nnowifi — Server Requirements")
 	fmt.Println()
 
-	serverless := []string{
-		"IPv6 bypass",
-		"CNA User-Agent spoof",
-		"JS-only bypass",
-		"HTTP CONNECT abuse",
-		"MAC clone (idle station)",
-		"MAC clone (any station)",
-		"Whitelist domain abuse",
-		"Session cookie replay",
-		"Portal default credentials",
-		"MAC rotate (fresh identity)",
-		"DHCP rotate",
-		"PMKID capture",
-		"WPS Pixie-Dust",
-		"WPA handshake capture",
-		"WPS PIN brute force",
-	}
-
-	serverRequired := []string{
-		"HTTPS/WS tunnel (chisel)",
-		"DNS tunnel (iodine)",
-		"ICMP tunnel (hans)",
-		"VPN on port 53",
-		"QUIC tunnel (Hysteria2)",
-		"Cloudflare Workers proxy",
-		"NTP tunnel",
-		"DoH tunnel",
-	}
+	serverless := serverlessTechniqueNames()
+	serverRequired := serverRequiredTechniqueNames()
 
 	fmt.Printf("  %d techniques need NO server:\n", len(serverless))
 	for _, t := range serverless {

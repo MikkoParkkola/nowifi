@@ -39,32 +39,33 @@ import (
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
 
 // Method identifies a specific bypass technique.
-type Method string
+type Method = techniques.ID
 
 const (
-	IPv6Bypass      Method = "ipv6_bypass"
-	ChiselTunnel    Method = "chisel_tunnel"
-	CNASpoof        Method = "cna_useragent_spoof"
-	JSBypass        Method = "js_only_bypass" //nolint:gosec // descriptive method name, not a secret
-	HTTPConnect     Method = "http_connect_abuse"
-	MACCloneIdle    Method = "mac_clone_idle"
-	MACClone        Method = "mac_clone"
-	DNSTunnel       Method = "dns_tunnel"
-	ICMPTunnel      Method = "icmp_tunnel"
-	VPNPort53       Method = "vpn_port_53"
-	WhitelistDomain Method = "whitelist_domain"
-	SessionReplay   Method = "session_cookie_replay"
-	PortalCreds     Method = "portal_default_creds"
-	MACRotate       Method = "mac_rotate"
-	DHCPRotate      Method = "dhcp_rotate"
-	QUICTunnel      Method = "quic_tunnel"
-	CFWorkers       Method = "cf_workers_proxy"
-	NTPTunnel       Method = "ntp_tunnel"
-	DoHTunnel       Method = "doh_tunnel"
+	IPv6Bypass      Method = techniques.IPv6Bypass
+	ChiselTunnel    Method = techniques.ChiselTunnel
+	CNASpoof        Method = techniques.CNASpoof
+	JSBypass        Method = techniques.JSOnlyPortal //nolint:gosec // descriptive method name, not a secret
+	HTTPConnect     Method = techniques.HTTPConnect
+	MACCloneIdle    Method = techniques.MACCloneIdle
+	MACClone        Method = techniques.MACClone
+	DNSTunnel       Method = techniques.DNSTunnel
+	ICMPTunnel      Method = techniques.ICMPTunnel
+	VPNPort53       Method = techniques.VPNPort53
+	WhitelistDomain Method = techniques.WhitelistDomain
+	SessionReplay   Method = techniques.SessionReplay
+	PortalCreds     Method = techniques.PortalCreds
+	MACRotate       Method = techniques.MACRotate
+	DHCPRotate      Method = techniques.DHCPRotate
+	QUICTunnel      Method = techniques.QUICTunnel
+	CFWorkers       Method = techniques.CFWorkers
+	NTPTunnel       Method = techniques.NTPTunnel
+	DoHTunnel       Method = techniques.DoHTunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -158,36 +159,9 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 		logStatus("Tip: `nowifi server create` deploys a free Cloudflare Worker (~30s).")
 	}
 
-	type technique struct {
-		name string
-		fn   func() Result
-	}
-
-	techniques := []technique{
-		{"IPv6 bypass", func() Result { return tryIPv6(probes) }},
-		{"HTTPS tunnel (chisel)", func() Result { return tryChisel(config, probes) }},
-		{"CNA User-Agent spoof", func() Result { return tryCNASpoof() }},
-		{"JS-only bypass", func() Result { return tryJSBypass() }},
-		{"HTTP CONNECT abuse", func() Result { return tryHTTPConnect(probes, config, plat) }},
-		{"MAC clone (idle)", func() Result { return tryMACClone(config.Interface, true, plat) }},
-		{"MAC clone (any)", func() Result { return tryMACClone(config.Interface, false, plat) }},
-		{"DNS tunnel", func() Result { return tryDNSTunnel(config, probes) }},
-		{"ICMP tunnel", func() Result { return tryICMPTunnel(config, probes) }},
-		{"VPN port 53", func() Result { return tryVPNPort53(config, probes) }},
-		{"Whitelist tunnel", func() Result { return tryWhitelist(probes) }},
-		{"Session cookie replay", func() Result { return trySessionReplay(config.Interface, plat) }},
-		{"Portal default creds", func() Result { return tryDefaultCreds(config.Interface, plat) }},
-		{"MAC rotate", func() Result { return tryMACRotate(config.Interface, plat) }},
-		{"DHCP rotate", func() Result { return tryDHCPRotate(config.Interface, plat) }},
-		{"QUIC tunnel (Hysteria2)", func() Result { return tryQUICTunnel(config, probes) }},
-		{"Cloudflare Workers proxy", func() Result { return tryCFWorkers(config, probes) }},
-		{"NTP tunnel", func() Result { return tryNTPTunnel(config, probes) }},
-		{"DoH tunnel", func() Result { return tryDoHTunnel(probes) }},
-	}
-
 	var results []Result
-	for _, t := range techniques {
-		tName := t.name // capture for panic recovery
+	for _, t := range orderedTechniqueRunners() {
+		tName := t.runName // capture for panic recovery
 		logStatus("Trying: %s...", tName)
 		r := func() (result Result) {
 			defer func() {
@@ -195,22 +169,119 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 					result = Result{Success: false, Details: fmt.Sprintf("panic in %s: %v", tName, rec)}
 				}
 			}()
-			return t.fn()
+			return t.run(probes, config, plat)
 		}()
 
 		results = append(results, r)
 		if r.Success {
-			logStatus("SUCCESS: %s", t.name)
+			logStatus("SUCCESS: %s", t.runName)
 			// For tunnel-based methods, set system SOCKS proxy so browser works.
 			if r.Tunnel != nil && r.Tunnel.Active && r.Tunnel.LocalPort > 0 {
 				setSystemSOCKSProxy(config.Interface, r.Tunnel.LocalPort)
 			}
 			return results
 		}
-		logStatus("Failed: %s", t.name)
+		logStatus("Failed: %s", t.runName)
 	}
 
 	return results
+}
+
+type techniqueRunner struct {
+	runName string
+	run     func(*ProbeResults, *Config, PlatformOps) Result
+}
+
+var techniqueRunnerByMethod = map[Method]techniqueRunner{
+	IPv6Bypass: {
+		run: func(probes *ProbeResults, _ *Config, _ PlatformOps) Result { return tryIPv6(probes) },
+	},
+	ChiselTunnel: {
+		runName: "HTTPS tunnel (chisel)",
+		run:     func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryChisel(config, probes) },
+	},
+	CNASpoof: {
+		run: func(_ *ProbeResults, _ *Config, _ PlatformOps) Result { return tryCNASpoof() },
+	},
+	JSBypass: {
+		run: func(_ *ProbeResults, _ *Config, _ PlatformOps) Result { return tryJSBypass() },
+	},
+	HTTPConnect: {
+		run: func(probes *ProbeResults, config *Config, plat PlatformOps) Result {
+			return tryHTTPConnect(probes, config, plat)
+		},
+	},
+	MACCloneIdle: {
+		run: func(_ *ProbeResults, config *Config, plat PlatformOps) Result {
+			return tryMACClone(config.Interface, true, plat)
+		},
+	},
+	MACClone: {
+		run: func(_ *ProbeResults, config *Config, plat PlatformOps) Result {
+			return tryMACClone(config.Interface, false, plat)
+		},
+	},
+	DNSTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryDNSTunnel(config, probes) },
+	},
+	ICMPTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryICMPTunnel(config, probes) },
+	},
+	VPNPort53: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryVPNPort53(config, probes) },
+	},
+	WhitelistDomain: {
+		run: func(probes *ProbeResults, _ *Config, _ PlatformOps) Result { return tryWhitelist(probes) },
+	},
+	SessionReplay: {
+		run: func(_ *ProbeResults, config *Config, plat PlatformOps) Result {
+			return trySessionReplay(config.Interface, plat)
+		},
+	},
+	PortalCreds: {
+		run: func(_ *ProbeResults, config *Config, plat PlatformOps) Result {
+			return tryDefaultCreds(config.Interface, plat)
+		},
+	},
+	MACRotate: {
+		run: func(_ *ProbeResults, config *Config, plat PlatformOps) Result {
+			return tryMACRotate(config.Interface, plat)
+		},
+	},
+	DHCPRotate: {
+		run: func(_ *ProbeResults, config *Config, plat PlatformOps) Result {
+			return tryDHCPRotate(config.Interface, plat)
+		},
+	},
+	QUICTunnel: {
+		runName: "QUIC tunnel (Hysteria2)",
+		run:     func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryQUICTunnel(config, probes) },
+	},
+	CFWorkers: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryCFWorkers(config, probes) },
+	},
+	NTPTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryNTPTunnel(config, probes) },
+	},
+	DoHTunnel: {
+		run: func(probes *ProbeResults, _ *Config, _ PlatformOps) Result { return tryDoHTunnel(probes) },
+	},
+}
+
+func orderedTechniqueRunners() []techniqueRunner {
+	infos := techniques.BypassTechniqueInfos()
+	runners := make([]techniqueRunner, 0, len(infos))
+	for _, info := range infos {
+		runner, ok := techniqueRunnerByMethod[Method(info.ID)]
+		if !ok {
+			panic(fmt.Sprintf("missing runner for technique %s", info.ID))
+		}
+		if runner.runName == "" {
+			runner.runName = info.Name
+		}
+		runners = append(runners, runner)
+	}
+	return runners
 }
 
 // ClearSystemSOCKSProxy removes the system-wide SOCKS proxy.

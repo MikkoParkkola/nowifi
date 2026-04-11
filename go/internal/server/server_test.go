@@ -10,8 +10,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 )
 
 // ---------------------------------------------------------------------------
@@ -19,14 +22,16 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestServerlessTechniquesCount(t *testing.T) {
-	if len(ServerlessTechniques) < 10 {
-		t.Errorf("ServerlessTechniques has %d entries, want >= 10", len(ServerlessTechniques))
+	expected := techniqueIDs(techniques.ServerlessBypassTechniqueInfos())
+	if !reflect.DeepEqual(ServerlessTechniques, expected) {
+		t.Errorf("ServerlessTechniques = %v, want %v", ServerlessTechniques, expected)
 	}
 }
 
 func TestServerRequiredTechniquesCount(t *testing.T) {
-	if len(ServerRequiredTechniques) > 10 {
-		t.Errorf("ServerRequiredTechniques has %d entries, want <= 10", len(ServerRequiredTechniques))
+	expected := techniqueIDs(techniques.ServerRequiredBypassTechniqueInfos())
+	if !reflect.DeepEqual(ServerRequiredTechniques, expected) {
+		t.Errorf("ServerRequiredTechniques = %v, want %v", ServerRequiredTechniques, expected)
 	}
 }
 

@@ -11,8 +11,11 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/spf13/cobra"
 )
 
@@ -24,31 +27,35 @@ func SetVersion(v string) {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "nowifi",
-	Short: "No WiFi? Now WiFi.",
-	Long: `nowifi — WiFi security assessment tool.
-
-Just run: sudo nowifi
-Detects portal, probes leaks, tries 19 portal bypass techniques.
-Browser works immediately. Ctrl+C restores everything.
-
-27 techniques overall:
-  Portal bypass (19): nowifi
-  WPA cracking (4):   nowifi crack
-  Smart cracking (4): nowifi crack
-
-Portal bypass techniques (in order):
-   1. IPv6 bypass        9. ICMP tunnel       17. CF Workers
-   2. HTTPS tunnel      10. VPN port 53       18. NTP tunnel
-   3. CNA UA spoof      11. Whitelist         19. DoH tunnel
-   4. JS-only bypass    12. Session cookie
-   5. HTTP CONNECT      13. Portal creds
-   6. MAC clone idle    14. MAC rotate
-   7. MAC clone any     15. DHCP rotate
-   8. DNS tunnel        16. QUIC tunnel`,
+	Use:               "nowifi",
+	Short:             "No WiFi? Now WiFi.",
+	Long:              buildRootLongDescription(),
 	Version:           version,
 	PersistentPreRunE: validateFlags,
 	Run:               runAudit,
+}
+
+func buildRootLongDescription() string {
+	var b strings.Builder
+	totalTechniqueCount := techniques.BypassTechniqueCount() + crack.UserVisibleTechniqueCount
+
+	fmt.Fprintln(&b, "nowifi — WiFi security assessment tool.")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Just run: sudo nowifi")
+	fmt.Fprintf(&b, "Detects portal, probes leaks, tries %d portal bypass techniques.\n", techniques.BypassTechniqueCount())
+	fmt.Fprintln(&b, "Browser works immediately. Ctrl+C restores everything.")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "%d techniques overall:\n", totalTechniqueCount)
+	fmt.Fprintf(&b, "  Portal bypass (%d): nowifi\n", techniques.BypassTechniqueCount())
+	fmt.Fprintf(&b, "  WPA cracking (%d):   nowifi crack\n", crack.WPAGroupTechniqueCount)
+	fmt.Fprintf(&b, "  Smart cracking (%d): nowifi crack\n", crack.SmartGroupTechniqueCount)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Portal bypass techniques (in order):")
+	for _, info := range techniques.BypassTechniqueInfos() {
+		fmt.Fprintf(&b, "  %2d. %s\n", info.Number, info.HelpName)
+	}
+
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // Flags shared across commands or used by the root audit command.

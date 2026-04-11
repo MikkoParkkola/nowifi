@@ -52,6 +52,10 @@ var errCommandTimedOut = errors.New("command timed out")
 type Method string
 
 const (
+	WPAGroupTechniqueCount    = 4
+	SmartGroupTechniqueCount  = 4
+	UserVisibleTechniqueCount = WPAGroupTechniqueCount + SmartGroupTechniqueCount
+
 	PMKID       Method = "pmkid_capture"
 	Handshake   Method = "handshake_capture"
 	Hashcat     Method = "hashcat_crack"
