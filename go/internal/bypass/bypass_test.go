@@ -1464,6 +1464,83 @@ func TestTryDoHTunnel_DoHOpen(t *testing.T) {
 	}
 }
 
+func TestTryDoHTunnel_VerificationFailureStopsHandle(t *testing.T) {
+	oldStartDoHTunnelFn := startDoHTunnelFn
+	oldDoHTunnelVerifyFn := doHTunnelVerifyFn
+	defer func() {
+		startDoHTunnelFn = oldStartDoHTunnelFn
+		doHTunnelVerifyFn = oldDoHTunnelVerifyFn
+	}()
+
+	handle := &tunnel.Handle{Active: true, LocalPort: 1083}
+	startDoHTunnelFn = func(localPort int, dohServer string, timeout time.Duration) (*tunnel.Handle, error) {
+		if localPort != 1083 {
+			t.Fatalf("StartDoHTunnel called with port %d, want 1083", localPort)
+		}
+		return handle, nil
+	}
+	doHTunnelVerifyFn = func() bool { return false }
+
+	r := tryDoHTunnel(&ProbeResults{DoH: ProbeResult{IsOpen: true}})
+	if r.Success {
+		t.Fatal("expected DoH tunnel without internet access to fail")
+	}
+	if r.Method != DoHTunnel {
+		t.Fatalf("Method = %s, want %s", r.Method, DoHTunnel)
+	}
+	if !strings.Contains(r.Details, "no internet access") {
+		t.Fatalf("Details = %q, want no-internet explanation", r.Details)
+	}
+	if handle.Active {
+		t.Fatal("expected failed DoH verification to stop the tunnel handle")
+	}
+}
+
+func TestTryDoHTunnel_SuccessSkipsSOCKSProxySetup(t *testing.T) {
+	oldStartDoHTunnelFn := startDoHTunnelFn
+	oldDoHTunnelVerifyFn := doHTunnelVerifyFn
+	oldSetSystemProxyFn := setSystemProxyFn
+	defer func() {
+		startDoHTunnelFn = oldStartDoHTunnelFn
+		doHTunnelVerifyFn = oldDoHTunnelVerifyFn
+		setSystemProxyFn = oldSetSystemProxyFn
+	}()
+
+	handle := &tunnel.Handle{Active: true, LocalPort: 1083}
+	startDoHTunnelFn = func(localPort int, dohServer string, timeout time.Duration) (*tunnel.Handle, error) {
+		return handle, nil
+	}
+	doHTunnelVerifyFn = func() bool { return true }
+
+	proxyConfigured := false
+	setSystemProxyFn = func(iface string, port int) error {
+		proxyConfigured = true
+		return nil
+	}
+
+	result := tryDoHTunnel(&ProbeResults{DoH: ProbeResult{IsOpen: true}})
+	if !result.Success {
+		t.Fatal("expected verified DoH tunnel to succeed")
+	}
+	if result.Tunnel == nil {
+		t.Fatal("expected verified DoH tunnel to keep the tunnel handle")
+	}
+	if result.Tunnel.LocalPort != 0 {
+		t.Fatalf("LocalPort = %d, want 0 to skip SOCKS auto-configuration", result.Tunnel.LocalPort)
+	}
+
+	finalized := finalizeSuccessfulTunnelResult("en0", result)
+	if proxyConfigured {
+		t.Fatal("expected DoH tunnel success to skip SOCKS proxy configuration")
+	}
+	if !finalized.Success {
+		t.Fatal("expected skipped proxy setup to preserve success result")
+	}
+	if finalized.Tunnel != handle {
+		t.Fatal("expected finalized result to preserve the DoH tunnel handle")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test: tryDNSTunnel with DNS open and domain configured
 // ---------------------------------------------------------------------------

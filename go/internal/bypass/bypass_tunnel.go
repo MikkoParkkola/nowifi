@@ -12,6 +12,11 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
 
+var (
+	startDoHTunnelFn  = tunnel.StartDoHTunnel
+	doHTunnelVerifyFn = tunnel.VerifyDirect
+)
+
 // ---------------------------------------------------------------------------
 // Technique 8: DNS tunnel
 // ---------------------------------------------------------------------------
@@ -214,12 +219,13 @@ func tryDoHTunnel(probes *ProbeResults) Result {
 		return Result{Method: DoHTunnel, Success: false, Details: "DoH endpoints not reachable"}
 	}
 
-	handle, err := tunnel.StartDoHTunnel(1083, "", 15*time.Second)
+	handle, err := startDoHTunnelFn(1083, "", 15*time.Second)
 	if err != nil {
 		return Result{Method: DoHTunnel, Success: false, Details: fmt.Sprintf("Failed: %v", err)}
 	}
 
-	if handle.Active {
+	if doHTunnelVerifyFn() {
+		handle.LocalPort = 0
 		return Result{
 			Method:      DoHTunnel,
 			Success:     true,
@@ -232,5 +238,5 @@ func tryDoHTunnel(probes *ProbeResults) Result {
 	}
 
 	handle.Stop()
-	return Result{Method: DoHTunnel, Success: false, Details: "DoH tunnel did not start"}
+	return Result{Method: DoHTunnel, Success: false, Details: "DoH tunnel connected but no internet access"}
 }
