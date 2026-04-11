@@ -58,3 +58,17 @@ jobs:
           version: latest
           install-mode: goinstall
           working-directory: go
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Staticcheck
+        working-directory: go
+        run: "$(go env GOPATH)/bin/staticcheck" ./...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vulnerability check
+        working-directory: go
+        run: "$(go env GOPATH)/bin/govulncheck" ./...

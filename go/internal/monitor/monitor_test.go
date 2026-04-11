@@ -265,8 +265,8 @@ func TestEnable_DarwinEn0Fails(t *testing.T) {
 	if err == nil {
 		t.Error("Enable(en0) on darwin should return error")
 	}
-	if !strings.Contains(err.Error(), "built-in WiFi") {
-		t.Errorf("error = %q, want to mention built-in WiFi", err.Error())
+	if !strings.Contains(err.Error(), "built-in macOS Wi-Fi") {
+		t.Errorf("error = %q, want to mention built-in macOS Wi-Fi", err.Error())
 	}
 }
 

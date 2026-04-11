@@ -282,8 +282,8 @@ func enableLinux(iface string) (*Interface, error) {
 func enableDarwin(iface string) (*Interface, error) {
 	if iface == "en0" {
 		return nil, fmt.Errorf(
-			"macOS built-in WiFi (en0) does not support monitor mode. " +
-				"Use an external USB WiFi adapter (recommended: Alfa AWUS036ACH with RTL8812AU).")
+			"built-in macOS Wi-Fi (en0) does not support monitor mode; " +
+				"use an external USB Wi-Fi adapter (recommended: Alfa AWUS036ACH with RTL8812AU)")
 	}
 
 	if err := exec.Command("sudo", "ifconfig", iface, "monitor").Run(); err != nil {

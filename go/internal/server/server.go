@@ -530,13 +530,13 @@ func createHetzner(token string, ttlHours int) (*Info, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Hetzner API request failed: %w", err)
+		return nil, fmt.Errorf("hetzner API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
-		return nil, fmt.Errorf("Hetzner API error (%d): %s", resp.StatusCode, truncate(string(respBody), 500))
+		return nil, fmt.Errorf("hetzner API error (%d): %s", resp.StatusCode, truncate(string(respBody), 500))
 	}
 
 	var data struct {
@@ -625,7 +625,7 @@ func waitForHetznerIP(token, serverID string, timeout time.Duration) (string, er
 		time.Sleep(5 * time.Second)
 	}
 
-	return "", fmt.Errorf("Hetzner server %s did not get a public IP within %v", serverID, timeout)
+	return "", fmt.Errorf("hetzner server %s did not get a public IP within %v", serverID, timeout)
 }
 
 // ---------------------------------------------------------------------------
@@ -668,12 +668,12 @@ func destroyDigitalOcean(token, dropletID string) error {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("DigitalOcean delete failed: %w", err)
+		return fmt.Errorf("delete request to digitalocean failed: %w", err)
 	}
 	resp.Body.Close()
 
 	if resp.StatusCode != 204 {
-		return fmt.Errorf("DigitalOcean delete returned status %d", resp.StatusCode)
+		return fmt.Errorf("delete request to digitalocean returned status %d", resp.StatusCode)
 	}
 
 	if err := markDestroyed("digitalocean", dropletID); err != nil {
@@ -692,12 +692,12 @@ func destroyHetzner(token, serverID string) error {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("Hetzner delete failed: %w", err)
+		return fmt.Errorf("delete request to hetzner failed: %w", err)
 	}
 	resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Hetzner delete returned status %d", resp.StatusCode)
+		return fmt.Errorf("delete request to hetzner returned status %d", resp.StatusCode)
 	}
 
 	if err := markDestroyed("hetzner", serverID); err != nil {

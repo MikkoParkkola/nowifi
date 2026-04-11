@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build clean test all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
+.PHONY: build clean test lint all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
 
 # Native build (CGO enabled on darwin → menubar included)
 build:
@@ -33,6 +33,19 @@ release-archives: all
 
 test:
 	go test ./...
+
+lint:
+	go vet ./...
+	@if command -v staticcheck >/dev/null 2>&1; then \
+		staticcheck ./...; \
+	else \
+		echo "staticcheck not installed, skipping"; \
+	fi
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	else \
+		echo "govulncheck not installed, skipping"; \
+	fi
 
 clean:
 	rm -rf bin/

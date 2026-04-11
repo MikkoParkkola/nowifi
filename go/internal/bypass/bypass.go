@@ -96,12 +96,6 @@ type Result struct {
 
 type resultOption func(*Result)
 
-func withSeverity(severity string) resultOption {
-	return func(result *Result) {
-		result.Severity = severity
-	}
-}
-
 func withImpact(impact string) resultOption {
 	return func(result *Result) {
 		result.Impact = impact

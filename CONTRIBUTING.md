@@ -9,6 +9,7 @@ git clone https://github.com/MikkoParkkola/nowifi.git
 cd nowifi/go
 go build ./...
 go test ./...
+make lint
 ```
 
 ## Development
@@ -48,6 +49,8 @@ go test ./internal/bypass/...    # Single package
 ### Code Style
 
 - `go vet` must pass
+- `staticcheck` should pass
+- `govulncheck` should report no actionable vulnerabilities
 - No TODO/FIXME/HACK markers in committed code
 - All exported functions must have GoDoc comments
 - All user inputs reaching `exec.Command` must be validated using `platform.Validate*` functions
