@@ -39,9 +39,7 @@ jobs:
       - name: Test Coverage
         if: matrix.os == 'ubuntu-latest' && matrix.go-version == 'stable'
         working-directory: go
-        run: |
-          go test -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out | tail -1
+        run: make test-coverage
 
   lint:
     runs-on: ubuntu-latest

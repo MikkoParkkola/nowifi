@@ -1,7 +1,8 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+GO_VERSION := $(shell sed -n 's/^go //p' go.mod)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build clean test lint all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
+.PHONY: build clean test test-coverage lint all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
 
 # Native build (CGO enabled on darwin → menubar included)
 build:
@@ -33,6 +34,10 @@ release-archives: all
 
 test:
 	go test ./...
+
+test-coverage:
+	GOTOOLCHAIN=go$(GO_VERSION) go test -coverprofile=coverage.out ./...
+	GOTOOLCHAIN=go$(GO_VERSION) go tool cover -func=coverage.out
 
 lint:
 	go vet ./...
