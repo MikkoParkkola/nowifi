@@ -1,27 +1,29 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 GO_VERSION := $(shell sed -n 's/^go //p' go.mod)
+GO_RUN := GOTOOLCHAIN=go$(GO_VERSION) go
+GO_TESTFLAGS ?=
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build clean test test-coverage lint all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
+.PHONY: build clean test test-coverage vet lint all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
 
 # Native build (CGO enabled on darwin → menubar included)
 build:
-	go build -ldflags "$(LDFLAGS)" -o bin/nowifi ./cmd/nowifi
+	$(GO_RUN) build -ldflags "$(LDFLAGS)" -o bin/nowifi ./cmd/nowifi
 
 # All cross-compile targets (CGO disabled → no menubar in cross-compiled binaries)
 all: darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
 
 darwin-arm64:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/nowifi-darwin-arm64 ./cmd/nowifi
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO_RUN) build -ldflags "$(LDFLAGS)" -o bin/nowifi-darwin-arm64 ./cmd/nowifi
 
 darwin-amd64:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/nowifi-darwin-amd64 ./cmd/nowifi
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO_RUN) build -ldflags "$(LDFLAGS)" -o bin/nowifi-darwin-amd64 ./cmd/nowifi
 
 linux-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/nowifi-linux-arm64 ./cmd/nowifi
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO_RUN) build -ldflags "$(LDFLAGS)" -o bin/nowifi-linux-arm64 ./cmd/nowifi
 
 linux-amd64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/nowifi-linux-amd64 ./cmd/nowifi
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO_RUN) build -ldflags "$(LDFLAGS)" -o bin/nowifi-linux-amd64 ./cmd/nowifi
 
 # Build all targets, package as tar.gz, generate sha256 checksums
 release-archives: all
@@ -33,14 +35,16 @@ release-archives: all
 	@ls -la bin/*.tar.gz bin/checksums.sha256
 
 test:
-	go test ./...
+	$(GO_RUN) test $(GO_TESTFLAGS) ./...
 
 test-coverage:
-	GOTOOLCHAIN=go$(GO_VERSION) go test -coverprofile=coverage.out ./...
-	GOTOOLCHAIN=go$(GO_VERSION) go tool cover -func=coverage.out
+	$(GO_RUN) test -coverprofile=coverage.out ./...
+	$(GO_RUN) tool cover -func=coverage.out
 
-lint:
-	go vet ./...
+vet:
+	$(GO_RUN) vet ./...
+
+lint: vet
 	@if command -v staticcheck >/dev/null 2>&1; then \
 		staticcheck ./...; \
 	else \
