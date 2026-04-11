@@ -86,6 +86,43 @@ func TestScoreNetwork_WEP(t *testing.T) {
 	assertHasFinding(t, ns.Findings, "critical", "WEP encryption")
 }
 
+func TestScoreNetwork_WPA1(t *testing.T) {
+	net := discover.ScannedNetwork{
+		SSID:     "OldTKIPRouter",
+		Security: "WPA",
+	}
+	ns := ScoreNetwork(net)
+
+	// WPA1 (TKIP) should be flagged critical and score well below WPA2 (95).
+	// Expected: 100 - 40 = 60.
+	if ns.Score != 60 {
+		t.Errorf("WPA1 score = %d, want 60", ns.Score)
+	}
+	if ns.Grade != GradeC {
+		t.Errorf("WPA1 grade = %q, want C (deprecated protocol)", ns.Grade)
+	}
+	assertHasFinding(t, ns.Findings, "critical", "WPA (TKIP)")
+}
+
+func TestScoreNetwork_WPA1WithWPS(t *testing.T) {
+	net := discover.ScannedNetwork{
+		SSID:     "OldTKIPWPS",
+		Security: "WPA",
+		WPS:      true,
+	}
+	ns := ScoreNetwork(net)
+
+	// WPA1 (-40) + WPS (-25) = 35.
+	if ns.Score != 35 {
+		t.Errorf("WPA1+WPS score = %d, want 35", ns.Score)
+	}
+	if ns.Grade != GradeF {
+		t.Errorf("WPA1+WPS grade = %q, want F", ns.Grade)
+	}
+	assertHasFinding(t, ns.Findings, "critical", "WPA (TKIP)")
+	assertHasFinding(t, ns.Findings, "high", "WPS enabled")
+}
+
 func TestScoreNetwork_WPA2Personal(t *testing.T) {
 	net := discover.ScannedNetwork{
 		SSID:     "HomeWiFi",

@@ -39,16 +39,16 @@ func TestSignalBars_Boundaries(t *testing.T) {
 		dBm  int
 		want string
 	}{
-		{0, "||||"},     // very strong
-		{-49, "||||"},   // just above -50
-		{-51, "|||."},   // just below -50
-		{-59, "|||."},   // just above -60
-		{-61, "||.."},   // just below -60
-		{-69, "||.."},   // just above -70
-		{-71, "|..."},   // just below -70
-		{-79, "|..."},   // just above -80
-		{-81, "...."},   // just below -80
-		{-120, "...."},  // very weak
+		{0, "||||"},    // very strong
+		{-49, "||||"},  // just above -50
+		{-51, "|||."},  // just below -50
+		{-59, "|||."},  // just above -60
+		{-61, "||.."},  // just below -60
+		{-69, "||.."},  // just above -70
+		{-71, "|..."},  // just below -70
+		{-79, "|..."},  // just above -80
+		{-81, "...."},  // just below -80
+		{-120, "...."}, // very weak
 	}
 
 	for _, tt := range tests {
@@ -108,14 +108,14 @@ func TestFreqToChannel_EdgeCases(t *testing.T) {
 		want int
 	}{
 		{0, 0},
-		{2411, 0},   // just below 2.4GHz band
-		{2485, 0},   // just above 2.4GHz band
-		{5169, 0},   // just below 5GHz band
-		{5826, 0},   // just above 5GHz band
-		{5954, 0},   // just below 6GHz band
-		{7116, 0},   // just above 6GHz band
-		{-1, 0},     // negative
-		{99999, 0},  // huge
+		{2411, 0},  // just below 2.4GHz band
+		{2485, 0},  // just above 2.4GHz band
+		{5169, 0},  // just below 5GHz band
+		{5826, 0},  // just above 5GHz band
+		{5954, 0},  // just below 6GHz band
+		{7116, 0},  // just above 6GHz band
+		{-1, 0},    // negative
+		{99999, 0}, // huge
 	}
 
 	for _, tt := range tests {
@@ -244,6 +244,45 @@ func TestParseBSSBlock_Enterprise(t *testing.T) {
 
 	if n.Security != "WPA2-Enterprise" {
 		t.Errorf("Security = %q, want WPA2-Enterprise", n.Security)
+	}
+}
+
+func TestParseBSSBlock_WPA1(t *testing.T) {
+	// Pure WPA1/TKIP block — no RSN or WPA2 IE, only legacy WPA IE.
+	block := `BSS aa:bb:cc:dd:ee:05(on wlan0)
+	freq: 2437
+	signal: -70.00 dBm
+	SSID: LegacyNet
+	WPA:	 * Version: 1
+		 * Group cipher: TKIP
+		 * Pairwise ciphers: TKIP
+		 * Authentication suites: PSK`
+
+	n := parseBSSBlock(block)
+
+	if n.Security != "WPA" {
+		t.Errorf("Security = %q, want WPA (not WPA2 — this is a legacy TKIP-only network)", n.Security)
+	}
+	if n.SSID != "LegacyNet" {
+		t.Errorf("SSID = %q, want LegacyNet", n.SSID)
+	}
+}
+
+func TestParseBSSBlock_WPA2NotMistakenForWPA1(t *testing.T) {
+	// WPA2/RSN block must not regress to "WPA" after the regex split.
+	block := `BSS aa:bb:cc:dd:ee:06(on wlan0)
+	freq: 5180
+	signal: -55.00 dBm
+	SSID: ModernNet
+	RSN:	 * Version: 1
+		 * Group cipher: CCMP
+		 * Pairwise ciphers: CCMP
+		 * Authentication suites: PSK`
+
+	n := parseBSSBlock(block)
+
+	if n.Security != "WPA2" {
+		t.Errorf("Security = %q, want WPA2 (RSN block should not be downgraded to WPA)", n.Security)
 	}
 }
 
@@ -401,10 +440,10 @@ func TestScoreDevice(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
-		name     string
-		device   *AuthorizedDevice
-		wantMin  float64
-		wantMax  float64
+		name    string
+		device  *AuthorizedDevice
+		wantMin float64
+		wantMax float64
 	}{
 		{
 			name: "high activity, long presence, recent",

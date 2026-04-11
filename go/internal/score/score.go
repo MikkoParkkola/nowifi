@@ -38,42 +38,42 @@ type Finding struct {
 
 // NetworkScore is the security assessment for a single WiFi network.
 type NetworkScore struct {
-	SSID       string
-	BSSID      string
-	Channel    int
-	Signal     int
-	Security   string
-	WPS        bool
-	Grade      Grade
-	Score      int // 0-100
-	Findings   []Finding
+	SSID        string
+	BSSID       string
+	Channel     int
+	Signal      int
+	Security    string
+	WPS         bool
+	Grade       Grade
+	Score       int // 0-100
+	Findings    []Finding
 	ClientCount int
-	PortalType string
-	Timestamp  time.Time
+	PortalType  string
+	Timestamp   time.Time
 }
 
 // ScanReport is the complete security report for all nearby networks.
 type ScanReport struct {
-	Timestamp  time.Time
-	Interface  string
-	Location   string // user-provided or auto-detected
-	Networks   []NetworkScore
-	Summary    ReportSummary
+	Timestamp time.Time
+	Interface string
+	Location  string // user-provided or auto-detected
+	Networks  []NetworkScore
+	Summary   ReportSummary
 }
 
 // ReportSummary aggregates findings across all networks.
 type ReportSummary struct {
-	TotalNetworks   int
-	GradeA          int
-	GradeB          int
-	GradeC          int
-	GradeD          int
-	GradeF          int
+	TotalNetworks    int
+	GradeA           int
+	GradeB           int
+	GradeC           int
+	GradeD           int
+	GradeF           int
 	CriticalFindings int
-	HighFindings    int
-	MediumFindings  int
-	WorstNetwork    string
-	BestNetwork     string
+	HighFindings     int
+	MediumFindings   int
+	WorstNetwork     string
+	BestNetwork      string
 }
 
 // ScoreNetwork assesses the security posture of a single WiFi network.
@@ -109,6 +109,19 @@ func ScoreNetwork(net discover.ScannedNetwork) NetworkScore {
 			Title:       "WEP encryption (broken)",
 			Description: "WEP can be cracked in minutes. Equivalent to no encryption.",
 			Remediation: "Upgrade to WPA3-Personal or WPA2-Personal immediately.",
+		})
+
+	case net.Security == "WPA":
+		// WPA1/TKIP: deprecated 2012, banned by Wi-Fi Alliance 2020.
+		// Vulnerable to TKIP MIC attacks (Beck-Tews 2008), RC4 keystream
+		// reuse, and PMKID extraction. Firmware rarely supports upgrade
+		// without full replacement — flag as critical.
+		score -= 40
+		findings = append(findings, Finding{
+			Severity:    "critical",
+			Title:       "WPA (TKIP) — deprecated and vulnerable",
+			Description: "WPA1/TKIP was deprecated in 2012 and banned from Wi-Fi Alliance certification in 2020. Vulnerable to TKIP MIC attacks (Beck-Tews), RC4 keystream reuse, and PMKID capture. Treat as nearly equivalent to WEP.",
+			Remediation: "Upgrade firmware to WPA2-AES/CCMP or WPA3. Disable TKIP mode. Replace hardware if firmware upgrade is unavailable.",
 		})
 
 	case strings.Contains(net.Security, "WPA2") && !strings.Contains(net.Security, "Enterprise"):

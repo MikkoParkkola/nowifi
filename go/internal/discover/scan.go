@@ -211,14 +211,15 @@ func parseSPNetwork(name, bssid string, ch interface{}, security string, signal 
 // --- Linux scanner via iw ---
 
 var (
-	bssRE      = regexp.MustCompile(`BSS\s+([0-9a-f:]{17})`)
-	ssidRE     = regexp.MustCompile(`SSID:\s*(.+)`)
-	freqRE     = regexp.MustCompile(`freq:\s*(\d+)`)
-	signalRE   = regexp.MustCompile(`signal:\s*(-?\d+\.?\d*)`)
-	wpsRE      = regexp.MustCompile(`(?i)WPS`)
-	wpaRE      = regexp.MustCompile(`(?i)(WPA2?|RSN)`)
-	wpa3RE     = regexp.MustCompile(`(?i)(SAE|WPA3)`)
-	entRE      = regexp.MustCompile(`(?i)(802\.1X|EAP|Enterprise)`)
+	bssRE    = regexp.MustCompile(`BSS\s+([0-9a-f:]{17})`)
+	ssidRE   = regexp.MustCompile(`SSID:\s*(.+)`)
+	freqRE   = regexp.MustCompile(`freq:\s*(\d+)`)
+	signalRE = regexp.MustCompile(`signal:\s*(-?\d+\.?\d*)`)
+	wpsRE    = regexp.MustCompile(`(?i)WPS`)
+	wpa2RE   = regexp.MustCompile(`(?i)(WPA2|RSN)`) // WPA2 or RSN (WPA2 synonym)
+	wpa1RE   = regexp.MustCompile(`(?i)WPA`)        // plain WPA1/TKIP (checked after wpa2RE)
+	wpa3RE   = regexp.MustCompile(`(?i)(SAE|WPA3)`)
+	entRE    = regexp.MustCompile(`(?i)(802\.1X|EAP|Enterprise)`)
 )
 
 func scanLinux(iface string) ([]ScannedNetwork, error) {
@@ -294,8 +295,10 @@ func parseBSSBlock(block string) ScannedNetwork {
 		n.Security = "WPA3"
 	case entRE.MatchString(block):
 		n.Security = "WPA2-Enterprise"
-	case wpaRE.MatchString(block):
+	case wpa2RE.MatchString(block):
 		n.Security = "WPA2"
+	case wpa1RE.MatchString(block):
+		n.Security = "WPA"
 	default:
 		n.Security = "Open"
 	}
@@ -310,7 +313,7 @@ func freqToChannel(freq int) int {
 		if freq == 2484 {
 			return 14
 		}
-		return (freq - 2412) / 5 + 1
+		return (freq-2412)/5 + 1
 	case freq >= 5170 && freq <= 5825:
 		return (freq - 5000) / 5
 	case freq >= 5955 && freq <= 7115:
