@@ -94,6 +94,57 @@ type Result struct {
 	Tunnel      *tunnel.Handle
 }
 
+type resultOption func(*Result)
+
+func withSeverity(severity string) resultOption {
+	return func(result *Result) {
+		result.Severity = severity
+	}
+}
+
+func withImpact(impact string) resultOption {
+	return func(result *Result) {
+		result.Impact = impact
+	}
+}
+
+func withRemediation(remediation string) resultOption {
+	return func(result *Result) {
+		result.Remediation = remediation
+	}
+}
+
+func withTunnel(handle *tunnel.Handle) resultOption {
+	return func(result *Result) {
+		result.Tunnel = handle
+	}
+}
+
+func buildTechniqueResult(method Method, success bool, details string, metadata techniques.BypassTechniqueResultMetadata, opts ...resultOption) Result {
+	result := Result{
+		Method:      method,
+		Success:     success,
+		Severity:    metadata.Severity,
+		Impact:      metadata.Impact,
+		Details:     details,
+		Remediation: metadata.Remediation,
+	}
+	for _, opt := range opts {
+		opt(&result)
+	}
+	return result
+}
+
+func successResult(method Method, details string, opts ...resultOption) Result {
+	metadata, _ := techniques.SuccessResultMetadataByID(techniques.ID(method))
+	return buildTechniqueResult(method, true, details, metadata, opts...)
+}
+
+func findingResult(method Method, details string, opts ...resultOption) Result {
+	metadata, _ := techniques.FindingResultMetadataByID(techniques.ID(method))
+	return buildTechniqueResult(method, false, details, metadata, opts...)
+}
+
 // ---------------------------------------------------------------------------
 // Probe result interfaces -- minimal types needed from the probe package.
 // The actual probe package implements these; we define them here so bypass

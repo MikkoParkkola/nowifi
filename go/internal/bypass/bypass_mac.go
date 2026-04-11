@@ -158,11 +158,10 @@ func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 			if idleOnly {
 				label = "Targeted idle device to avoid collision."
 			}
-			return Result{
-				Method:   method,
-				Success:  true,
-				Severity: "critical",
-				Impact: fmt.Sprintf("Full internet by cloning %sdevice MAC %s (%s)%s",
+			return successResult(
+				method,
+				fmt.Sprintf("Portal uses MAC-only auth. %s", label),
+				withImpact(fmt.Sprintf("Full internet by cloning %sdevice MAC %s (%s)%s",
 					func() string {
 						if idleOnly {
 							return "idle "
@@ -176,10 +175,8 @@ func tryMACClone(iface string, idleOnly bool, plat PlatformOps) Result {
 							return " [privacy MAC — all devices on this network use randomized addresses]"
 						}
 						return ""
-					}()),
-				Details:     fmt.Sprintf("Portal uses MAC-only auth. %s", label),
-				Remediation: "Use 802.1X. Enable client isolation. Bind sessions to MAC+IP+DHCP lease. Detect duplicate MACs.",
-			}
+					}())),
+			)
 		}
 	}
 
@@ -210,14 +207,11 @@ func tryMACRotate(iface string, plat PlatformOps) Result {
 	time.Sleep(3 * time.Second)
 
 	if HasInternet() {
-		return Result{
-			Method:      MACRotate,
-			Success:     true,
-			Severity:    "high",
-			Impact:      fmt.Sprintf("Internet with fresh MAC %s -- portal auto-approves new devices", newMAC),
-			Details:     "No authentication required for new MAC addresses. Infinite sessions by rotating.",
-			Remediation: "Require explicit authentication for all new devices. Don't auto-approve.",
-		}
+		return successResult(
+			MACRotate,
+			"No authentication required for new MAC addresses. Infinite sessions by rotating.",
+			withImpact(fmt.Sprintf("Internet with fresh MAC %s -- portal auto-approves new devices", newMAC)),
+		)
 	}
 
 	if originalMAC != "" && originalMAC != newMAC {
@@ -226,13 +220,10 @@ func tryMACRotate(iface string, plat PlatformOps) Result {
 		plat.RenewDHCP(iface)
 	}
 
-	return Result{
-		Method:      MACRotate,
-		Success:     false,
-		Severity:    "medium",
-		Details:     fmt.Sprintf("Fresh MAC %s set but portal still requires auth. Use this for quota/time reset AFTER initial auth.", newMAC),
-		Remediation: "Portal correctly requires auth for new devices. Time/quota bypass still possible by re-authenticating with new MAC.",
-	}
+	return findingResult(
+		MACRotate,
+		fmt.Sprintf("Fresh MAC %s set but portal still requires auth. Use this for quota/time reset AFTER initial auth.", newMAC),
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -244,14 +235,7 @@ func tryDHCPRotate(iface string, plat PlatformOps) Result {
 	time.Sleep(3 * time.Second)
 
 	if HasInternet() {
-		return Result{
-			Method:      DHCPRotate,
-			Success:     true,
-			Severity:    "medium",
-			Impact:      "Internet after DHCP renewal -- portal tracked by IP, not MAC",
-			Details:     "DHCP renewal assigned a new IP that bypassed portal state.",
-			Remediation: "Track sessions by MAC+IP. Don't rely on IP alone for portal state.",
-		}
+		return successResult(DHCPRotate, "DHCP renewal assigned a new IP that bypassed portal state.")
 	}
 
 	return Result{Method: DHCPRotate, Success: false, Details: "DHCP renewal didn't bypass portal"}

@@ -58,6 +58,18 @@ type BypassTechniqueInfo struct {
 	Risk           string
 }
 
+// BypassTechniqueResultMetadata is the canonical severity/impact/remediation
+// contract for a technique result.
+type BypassTechniqueResultMetadata struct {
+	Severity    string
+	Impact      string
+	Remediation string
+}
+
+func (m BypassTechniqueResultMetadata) isZero() bool {
+	return m.Severity == "" && m.Impact == "" && m.Remediation == ""
+}
+
 // BypassTechniqueAssessment combines the canonical metadata with a
 // feasibility decision for a specific probe snapshot.
 type BypassTechniqueAssessment struct {
@@ -68,6 +80,8 @@ type BypassTechniqueAssessment struct {
 type bypassTechniqueSpec struct {
 	info     BypassTechniqueInfo
 	feasible func(BypassTechniqueSignals) bool
+	success  BypassTechniqueResultMetadata
+	finding  BypassTechniqueResultMetadata
 }
 
 var bypassTechniqueSpecs = []bypassTechniqueSpec{
@@ -77,6 +91,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "HIGH", Reason: "IPv6 unfiltered by portal", Risk: "None (read-only)",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.IPv6Open },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Full unrestricted IPv6 internet -- bypasses all portal controls",
+			Remediation: "Apply captive portal ACLs to IPv6. Filter RA/DHCPv6 or mirror IPv4 rules.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -84,6 +103,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "HIGH", Reason: "TCP/443 open", Risk: "Needs tunnel server",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.HTTP443Open },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Full internet via system SOCKS proxy (auto-configured)",
+			Remediation: "Block WebSocket upgrades pre-auth. Inspect TLS SNI. Whitelist only portal domains.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -91,6 +115,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "MEDIUM", Reason: "Always possible to attempt", Risk: "Detected by portal logs",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.PortalDetected },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Internet access via captive-network User-Agent spoofing",
+			Remediation: "Do not auto-approve CNA/Wispr User-Agents. Require explicit authentication for all clients.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -98,6 +127,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "LOW", Reason: "Requires portal analysis", Risk: "Portal-dependent",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.PortalDetected },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Internet access -- portal only enforces auth in JavaScript",
+			Remediation: "Enforce captive portal at the firewall/gateway level, not in client-side JavaScript.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -107,6 +141,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 		feasible: func(signals BypassTechniqueSignals) bool {
 			return signals.HTTP443Open || signals.HTTP8080Open
 		},
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "HTTP CONNECT tunnel via gateway proxy",
+			Remediation: "Block HTTP CONNECT method for unauthenticated clients. Restrict proxy to whitelisted destinations only.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -114,6 +153,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "HIGH", Reason: "Always possible", Risk: "MAC change visible",
 		},
 		feasible: func(BypassTechniqueSignals) bool { return true },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Full internet by cloning an authenticated device MAC",
+			Remediation: "Use 802.1X. Enable client isolation. Bind sessions to MAC+IP+DHCP lease. Detect duplicate MACs.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -121,6 +165,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "HIGH", Reason: "Always possible", Risk: "Disconnects victim",
 		},
 		feasible: func(BypassTechniqueSignals) bool { return true },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Full internet by cloning an authenticated device MAC",
+			Remediation: "Use 802.1X. Enable client isolation. Bind sessions to MAC+IP+DHCP lease. Detect duplicate MACs.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -128,6 +177,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "HIGH", Reason: "DNS UDP/53 open", Risk: "Needs DNS tunnel server",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.DNSOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Internet via DNS tunnel (50-500 Kbps)",
+			Remediation: "Restrict DNS to portal resolvers. Block UDP/53 to external IPs. Inspect DNS for tunnel signatures.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -135,6 +189,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "HIGH", Reason: "ICMP open to external", Risk: "Needs ICMP tunnel server",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.ICMPOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Internet via ICMP tunnel (100-300 Kbps)",
+			Remediation: "Block/rate-limit ICMP to external hosts. Allow only to gateway.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -142,6 +201,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "MEDIUM", Reason: "UDP/53 open", Risk: "Needs VPN server on 53",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.DNSOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Full internet via WireGuard VPN on port 53",
+			Remediation: "Inspect UDP/53 traffic. Block non-DNS payloads on port 53. Use DNS response validation.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -149,6 +213,10 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "LOW", Reason: "Whitelisted domains found", Risk: "Needs endpoint on whitelisted domain",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.WhitelistReachable },
+		finding: BypassTechniqueResultMetadata{
+			Severity:    "medium",
+			Remediation: "Minimize whitelisted domains. Block WebSocket/tunneling on whitelisted destinations.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -156,6 +224,10 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "LOW", Reason: "Requires traffic capture", Risk: "Needs monitor mode",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.PortalDetected },
+		finding: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Remediation: "Serve captive portal exclusively over HTTPS. Set Secure flag on all cookies.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -163,6 +235,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "LOW", Reason: "Try common passwords", Risk: "Rate-limited by portal",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.PortalDetected },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Portal admin access with default credentials",
+			Remediation: "Change default admin credentials. Restrict management interface to wired/VLAN access. Require MFA for admin.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -170,6 +247,15 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "MEDIUM", Reason: "Always possible", Risk: "MAC change visible",
 		},
 		feasible: func(BypassTechniqueSignals) bool { return true },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Internet with fresh MAC -- portal auto-approves new devices",
+			Remediation: "Require explicit authentication for all new devices. Don't auto-approve.",
+		},
+		finding: BypassTechniqueResultMetadata{
+			Severity:    "medium",
+			Remediation: "Portal correctly requires auth for new devices. Time/quota bypass still possible by re-authenticating with new MAC.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -177,6 +263,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Confidence: "MEDIUM", Reason: "Always possible", Risk: "New IP lease",
 		},
 		feasible: func(BypassTechniqueSignals) bool { return true },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "medium",
+			Impact:      "Internet after DHCP renewal -- portal tracked by IP, not MAC",
+			Remediation: "Track sessions by MAC+IP. Don't rely on IP alone for portal state.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -184,6 +275,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "HIGH", Reason: "UDP/443 open", Risk: "Needs Hysteria2 server",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.QUICOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Full internet via QUIC tunnel (UDP/443 -- looks like HTTP/3)",
+			Remediation: "Inspect UDP/443 traffic. Block non-HTTP/3 QUIC connections for unauthenticated clients. Deploy QUIC-aware DPI.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -191,6 +287,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "MEDIUM", Reason: "HTTPS open to Cloudflare", Risk: "Free CF account required",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.CloudflareOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "critical",
+			Impact:      "Full internet via Cloudflare Workers proxy (serverless, free, no server needed)",
+			Remediation: "Block access to *.workers.dev domains. Inspect HTTPS traffic to Cloudflare for proxy patterns. Consider blocking unknown Cloudflare subdomains.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -198,6 +299,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "HIGH", Reason: "NTP open", Risk: "Needs NTP tunnel server",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.NTPOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "Internet via NTP tunnel (UDP/123, ~1-10 Kbps -- slow but stealthy)",
+			Remediation: "Restrict NTP to known time servers only. Inspect NTP packets for abnormal extension fields or payload sizes. Rate-limit NTP traffic per client.",
+		},
 	},
 	{
 		info: BypassTechniqueInfo{
@@ -205,6 +311,11 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			RequiresServer: true, Confidence: "MEDIUM", Reason: "DoH reachable", Risk: "DNS-over-HTTPS channel",
 		},
 		feasible: func(signals BypassTechniqueSignals) bool { return signals.DoHOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity:    "high",
+			Impact:      "DNS resolution via encrypted DoH (enables further tunneling)",
+			Remediation: "Block DoH endpoints (cloudflare-dns.com, dns.google) for unauthenticated clients. Deploy DoH-aware filtering.",
+		},
 	},
 }
 
@@ -230,6 +341,28 @@ func BypassTechniqueInfoByID(id ID) (BypassTechniqueInfo, bool) {
 		}
 	}
 	return BypassTechniqueInfo{}, false
+}
+
+// SuccessResultMetadataByID returns the canonical success metadata for one
+// technique when that technique has a user-facing success contract.
+func SuccessResultMetadataByID(id ID) (BypassTechniqueResultMetadata, bool) {
+	for _, spec := range bypassTechniqueSpecs {
+		if spec.info.ID == id {
+			return spec.success, !spec.success.isZero()
+		}
+	}
+	return BypassTechniqueResultMetadata{}, false
+}
+
+// FindingResultMetadataByID returns the canonical severity metadata for
+// techniques that still surface a meaningful non-success finding.
+func FindingResultMetadataByID(id ID) (BypassTechniqueResultMetadata, bool) {
+	for _, spec := range bypassTechniqueSpecs {
+		if spec.info.ID == id {
+			return spec.finding, !spec.finding.isZero()
+		}
+	}
+	return BypassTechniqueResultMetadata{}, false
 }
 
 // ServerlessBypassTechniqueInfos returns the portal-bypass techniques that do

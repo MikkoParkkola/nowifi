@@ -60,14 +60,11 @@ func tryCNASpoof() Result {
 		resp.Body.Close()
 
 		if resp.StatusCode == 204 {
-			return Result{
-				Method:      CNASpoof,
-				Success:     true,
-				Severity:    "high",
-				Impact:      fmt.Sprintf("Internet access via %s User-Agent spoofing", a.name),
-				Details:     fmt.Sprintf("Portal auto-approved UA: %s", a.ua),
-				Remediation: "Do not auto-approve CNA/Wispr User-Agents. Require explicit authentication for all clients.",
-			}
+			return successResult(
+				CNASpoof,
+				fmt.Sprintf("Portal auto-approved UA: %s", a.ua),
+				withImpact(fmt.Sprintf("Internet access via %s User-Agent spoofing", a.name)),
+			)
 		}
 	}
 
@@ -120,14 +117,7 @@ func tryJSBypass() Result {
 				}
 			}
 			if !isPortal {
-				return Result{
-					Method:      JSBypass,
-					Success:     true,
-					Severity:    "high",
-					Impact:      "Internet access -- portal only enforces auth in JavaScript",
-					Details:     fmt.Sprintf("Direct HTTP request to %s returned real content (no redirect)", testURL),
-					Remediation: "Enforce captive portal at the firewall/gateway level, not in client-side JavaScript.",
-				}
+				return successResult(JSBypass, fmt.Sprintf("Direct HTTP request to %s returned real content (no redirect)", testURL))
 			}
 		}
 	}
@@ -173,14 +163,12 @@ func tryJSBypass() Result {
 				}
 			}
 			if !isPortal {
-				return Result{
-					Method:      JSBypass,
-					Success:     true,
-					Severity:    "high",
-					Impact:      "Internet access — SPA portal only enforces auth in frontend JavaScript",
-					Details:     fmt.Sprintf("API request to %s bypassed portal (%s)", api.url, api.desc),
-					Remediation: "Enforce authentication at the API/gateway level (Kong, nginx), not only in the SPA frontend.",
-				}
+				return successResult(
+					JSBypass,
+					fmt.Sprintf("API request to %s bypassed portal (%s)", api.url, api.desc),
+					withImpact("Internet access — SPA portal only enforces auth in frontend JavaScript"),
+					withRemediation("Enforce authentication at the API/gateway level (Kong, nginx), not only in the SPA frontend."),
+				)
 			}
 		}
 	}
@@ -227,13 +215,10 @@ func trySessionReplay(iface string, plat PlatformOps) Result {
 		for _, c := range resp.Cookies() {
 			cookieNames = append(cookieNames, c.Name)
 		}
-		return Result{
-			Method:      SessionReplay,
-			Success:     false,
-			Severity:    "high",
-			Details:     fmt.Sprintf("Portal serves cookies over HTTP (sniffable): %s. Full exploit requires monitor mode packet capture.", strings.Join(cookieNames, ", ")),
-			Remediation: "Serve captive portal exclusively over HTTPS. Set Secure flag on all cookies.",
-		}
+		return findingResult(
+			SessionReplay,
+			fmt.Sprintf("Portal serves cookies over HTTP (sniffable): %s. Full exploit requires monitor mode packet capture.", strings.Join(cookieNames, ", ")),
+		)
 	}
 
 	return Result{Method: SessionReplay, Success: false, Details: "Portal uses HTTPS or no cookies found"}
@@ -323,14 +308,11 @@ func tryDefaultCreds(iface string, plat PlatformOps) Result {
 
 				// Heuristic: if response no longer contains "login", creds worked.
 				if resp2.StatusCode == 200 && !strings.Contains(strings.ToLower(string(body2[:min(500, len(body2))])), "login") {
-					return Result{
-						Method:      PortalCreds,
-						Success:     true,
-						Severity:    "critical",
-						Impact:      fmt.Sprintf("Portal admin access with %s:%s at %s", user, pass, adminURL),
-						Details:     "Default credentials on portal management interface. Can whitelist MAC or disable portal.",
-						Remediation: "Change default admin credentials. Restrict management interface to wired/VLAN access. Require MFA for admin.",
-					}
+					return successResult(
+						PortalCreds,
+						"Default credentials on portal management interface. Can whitelist MAC or disable portal.",
+						withImpact(fmt.Sprintf("Portal admin access with %s:%s at %s", user, pass, adminURL)),
+					)
 				}
 			}
 		}

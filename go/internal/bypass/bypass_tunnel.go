@@ -35,15 +35,11 @@ func tryDNSTunnel(config *Config, probes *ProbeResults) Result {
 	}
 
 	if tunnel.VerifyDirect() {
-		return Result{
-			Method:      DNSTunnel,
-			Success:     true,
-			Severity:    "high",
-			Impact:      "Internet via DNS tunnel (50-500 Kbps)",
-			Details:     fmt.Sprintf("IP-over-DNS through %s", config.DNSDomain),
-			Remediation: "Restrict DNS to portal resolvers. Block UDP/53 to external IPs. Inspect DNS for tunnel signatures.",
-			Tunnel:      handle,
-		}
+		return successResult(
+			DNSTunnel,
+			fmt.Sprintf("IP-over-DNS through %s", config.DNSDomain),
+			withTunnel(handle),
+		)
 	}
 
 	handle.Stop()
@@ -68,15 +64,11 @@ func tryICMPTunnel(config *Config, probes *ProbeResults) Result {
 	}
 
 	if tunnel.VerifyDirect() {
-		return Result{
-			Method:      ICMPTunnel,
-			Success:     true,
-			Severity:    "high",
-			Impact:      "Internet via ICMP tunnel (100-300 Kbps)",
-			Details:     fmt.Sprintf("IP-over-ICMP to %s", config.ICMPServer),
-			Remediation: "Block/rate-limit ICMP to external hosts. Allow only to gateway.",
-			Tunnel:      handle,
-		}
+		return successResult(
+			ICMPTunnel,
+			fmt.Sprintf("IP-over-ICMP to %s", config.ICMPServer),
+			withTunnel(handle),
+		)
 	}
 
 	handle.Stop()
@@ -106,15 +98,11 @@ func tryQUICTunnel(config *Config, probes *ProbeResults) Result {
 	}
 
 	if tunnel.VerifySOCKS(handle.LocalPort) {
-		return Result{
-			Method:      QUICTunnel,
-			Success:     true,
-			Severity:    "critical",
-			Impact:      "Full internet via QUIC tunnel (UDP/443 -- looks like HTTP/3)",
-			Details:     fmt.Sprintf("Hysteria2 QUIC tunnel to %s. Portal only filters TCP, UDP passes through.", server),
-			Remediation: "Inspect UDP/443 traffic. Block non-HTTP/3 QUIC connections for unauthenticated clients. Deploy QUIC-aware DPI.",
-			Tunnel:      handle,
-		}
+		return successResult(
+			QUICTunnel,
+			fmt.Sprintf("Hysteria2 QUIC tunnel to %s. Portal only filters TCP, UDP passes through.", server),
+			withTunnel(handle),
+		)
 	}
 
 	handle.Stop()
@@ -163,14 +151,7 @@ func tryCFWorkers(config *Config, probes *ProbeResults) Result {
 	}
 
 	if tunnel.VerifyCFWorkersProxy(workerURL) {
-		return Result{
-			Method:      CFWorkers,
-			Success:     true,
-			Severity:    "critical",
-			Impact:      "Full internet via Cloudflare Workers proxy (serverless, free, no server needed)",
-			Details:     fmt.Sprintf("CF Worker at %s proxies requests. Traffic goes to trusted Cloudflare IPs.", workerURL),
-			Remediation: "Block access to *.workers.dev domains. Inspect HTTPS traffic to Cloudflare for proxy patterns. Consider blocking unknown Cloudflare subdomains.",
-		}
+		return successResult(CFWorkers, fmt.Sprintf("CF Worker at %s proxies requests. Traffic goes to trusted Cloudflare IPs.", workerURL))
 	}
 
 	return Result{Method: CFWorkers, Success: false, Details: "CF Workers proxy not functional"}
@@ -195,15 +176,11 @@ func tryNTPTunnel(config *Config, probes *ProbeResults) Result {
 	}
 
 	if tunnel.VerifySOCKS(handle.LocalPort) {
-		return Result{
-			Method:      NTPTunnel,
-			Success:     true,
-			Severity:    "high",
-			Impact:      "Internet via NTP tunnel (UDP/123, ~1-10 Kbps -- slow but stealthy)",
-			Details:     fmt.Sprintf("Data encoded in NTP extension fields to %s. NTP is almost never blocked.", config.NTPServer),
-			Remediation: "Restrict NTP to known time servers only. Inspect NTP packets for abnormal extension fields or payload sizes. Rate-limit NTP traffic per client.",
-			Tunnel:      handle,
-		}
+		return successResult(
+			NTPTunnel,
+			fmt.Sprintf("Data encoded in NTP extension fields to %s. NTP is almost never blocked.", config.NTPServer),
+			withTunnel(handle),
+		)
 	}
 
 	handle.Stop()
@@ -226,15 +203,11 @@ func tryDoHTunnel(probes *ProbeResults) Result {
 
 	if doHTunnelVerifyFn() {
 		handle.LocalPort = 0
-		return Result{
-			Method:      DoHTunnel,
-			Success:     true,
-			Severity:    "high",
-			Impact:      "DNS resolution via encrypted DoH (enables further tunneling)",
-			Details:     "DNS-over-HTTPS to Cloudflare/Google. Bypasses DNS interception by portal.",
-			Remediation: "Block DoH endpoints (cloudflare-dns.com, dns.google) for unauthenticated clients. Deploy DoH-aware filtering.",
-			Tunnel:      handle,
-		}
+		return successResult(
+			DoHTunnel,
+			"DNS-over-HTTPS to Cloudflare/Google. Bypasses DNS interception by portal.",
+			withTunnel(handle),
+		)
 	}
 
 	handle.Stop()

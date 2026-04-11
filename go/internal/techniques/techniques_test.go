@@ -81,3 +81,32 @@ func TestCountFeasibleBypassTechniquesMatchesCurrentRules(t *testing.T) {
 		t.Fatalf("CountFeasibleBypassTechniques(allClosed) = %d, want 4", got)
 	}
 }
+
+func TestBypassTechniqueResultMetadataCoverage(t *testing.T) {
+	for _, info := range BypassTechniqueInfos() {
+		success, hasSuccess := SuccessResultMetadataByID(info.ID)
+		finding, hasFinding := FindingResultMetadataByID(info.ID)
+		if !hasSuccess && !hasFinding {
+			t.Fatalf("technique %q is missing canonical result metadata", info.ID)
+		}
+		if hasSuccess {
+			if success.Severity == "" {
+				t.Fatalf("technique %q success metadata missing severity", info.ID)
+			}
+			if success.Impact == "" {
+				t.Fatalf("technique %q success metadata missing impact", info.ID)
+			}
+			if success.Remediation == "" {
+				t.Fatalf("technique %q success metadata missing remediation", info.ID)
+			}
+		}
+		if hasFinding {
+			if finding.Severity == "" {
+				t.Fatalf("technique %q finding metadata missing severity", info.ID)
+			}
+			if finding.Remediation == "" {
+				t.Fatalf("technique %q finding metadata missing remediation", info.ID)
+			}
+		}
+	}
+}

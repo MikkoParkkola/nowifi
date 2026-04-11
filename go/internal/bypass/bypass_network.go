@@ -23,14 +23,7 @@ func tryIPv6(probes *ProbeResults) Result {
 	if !probes.IPv6.IsOpen {
 		return Result{Method: IPv6Bypass, Success: false, Details: "No IPv6 connectivity"}
 	}
-	return Result{
-		Method:      IPv6Bypass,
-		Success:     true,
-		Severity:    "critical",
-		Impact:      "Full unrestricted IPv6 internet -- bypasses all portal controls",
-		Details:     probes.IPv6.Details,
-		Remediation: "Apply captive portal ACLs to IPv6. Filter RA/DHCPv6 or mirror IPv4 rules.",
-	}
+	return successResult(IPv6Bypass, probes.IPv6.Details)
 }
 
 // ---------------------------------------------------------------------------
@@ -51,15 +44,11 @@ func tryChisel(config *Config, probes *ProbeResults) Result {
 		handle, err := tunnel.StartChisel(config.TunnelServer, 1080, 15*time.Second)
 		if err == nil {
 			if tunnel.VerifySOCKS(handle.LocalPort) {
-				return Result{
-					Method:      ChiselTunnel,
-					Success:     true,
-					Severity:    "critical",
-					Impact:      "Full internet via system SOCKS proxy (auto-configured)",
-					Details:     fmt.Sprintf("HTTPS/WebSocket tunnel through %s", config.TunnelServer),
-					Remediation: "Block WebSocket upgrades pre-auth. Inspect TLS SNI. Whitelist only portal domains.",
-					Tunnel:      handle,
-				}
+				return successResult(
+					ChiselTunnel,
+					fmt.Sprintf("HTTPS/WebSocket tunnel through %s", config.TunnelServer),
+					withTunnel(handle),
+				)
 			}
 			handle.Stop()
 		}
@@ -91,15 +80,13 @@ func tryChisel(config *Config, probes *ProbeResults) Result {
 					continue
 				}
 				if tunnel.VerifySOCKS(handle.LocalPort) {
-					return Result{
-						Method:      ChiselTunnel,
-						Success:     true,
-						Severity:    "critical",
-						Impact:      fmt.Sprintf("Full internet via direct tunnel on port %d", pr.Port),
-						Details:     fmt.Sprintf("Chisel direct to %s:%d (bypassed Cloudflare, portal allows port %d)", serverIP, pr.Port, pr.Port),
-						Remediation: fmt.Sprintf("Block outbound port %d for unauthenticated clients. Inspect non-standard port traffic.", pr.Port),
-						Tunnel:      handle,
-					}
+					return successResult(
+						ChiselTunnel,
+						fmt.Sprintf("Chisel direct to %s:%d (bypassed Cloudflare, portal allows port %d)", serverIP, pr.Port, pr.Port),
+						withImpact(fmt.Sprintf("Full internet via direct tunnel on port %d", pr.Port)),
+						withRemediation(fmt.Sprintf("Block outbound port %d for unauthenticated clients. Inspect non-standard port traffic.", pr.Port)),
+						withTunnel(handle),
+					)
 				}
 				handle.Stop()
 			}
@@ -144,14 +131,11 @@ func tryHTTPConnect(probes *ProbeResults, config *Config, plat PlatformOps) Resu
 
 		resp := string(buf[:n])
 		if strings.Contains(resp, "200") {
-			return Result{
-				Method:      HTTPConnect,
-				Success:     true,
-				Severity:    "high",
-				Impact:      fmt.Sprintf("HTTP CONNECT tunnel via gateway %s:%d", gateway, proxyPort),
-				Details:     "Portal's transparent proxy allows CONNECT to arbitrary hosts",
-				Remediation: "Block HTTP CONNECT method for unauthenticated clients. Restrict proxy to whitelisted destinations only.",
-			}
+			return successResult(
+				HTTPConnect,
+				"Portal's transparent proxy allows CONNECT to arbitrary hosts",
+				withImpact(fmt.Sprintf("HTTP CONNECT tunnel via gateway %s:%d", gateway, proxyPort)),
+			)
 		}
 	}
 
@@ -189,14 +173,7 @@ func tryVPNPort53(config *Config, probes *ProbeResults) Result {
 		if err == nil {
 			time.Sleep(3 * time.Second)
 			if HasInternet() {
-				return Result{
-					Method:      VPNPort53,
-					Success:     true,
-					Severity:    "high",
-					Impact:      "Full internet via WireGuard VPN on port 53",
-					Details:     fmt.Sprintf("WireGuard to %s:53 -- portal allows UDP/53", config.VPNServer),
-					Remediation: "Inspect UDP/53 traffic. Block non-DNS payloads on port 53. Use DNS response validation.",
-				}
+				return successResult(VPNPort53, fmt.Sprintf("WireGuard to %s:53 -- portal allows UDP/53", config.VPNServer))
 			}
 		}
 	}
@@ -220,11 +197,8 @@ func tryWhitelist(probes *ProbeResults) Result {
 		return Result{Method: WhitelistDomain, Success: false, Details: "No whitelisted domains reachable"}
 	}
 
-	return Result{
-		Method:      WhitelistDomain,
-		Success:     false,
-		Severity:    "medium",
-		Details:     fmt.Sprintf("Whitelisted domains found (%s) but no dedicated tunnel server on them. Chisel via CF is the primary exploit.", strings.Join(openDomains, ", ")),
-		Remediation: "Minimize whitelisted domains. Block WebSocket/tunneling on whitelisted destinations.",
-	}
+	return findingResult(
+		WhitelistDomain,
+		fmt.Sprintf("Whitelisted domains found (%s) but no dedicated tunnel server on them. Chisel via CF is the primary exploit.", strings.Join(openDomains, ", ")),
+	)
 }
