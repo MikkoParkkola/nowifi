@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
+	"github.com/MikkoParkkola/nowifi/internal/detect"
 	"github.com/MikkoParkkola/nowifi/internal/guard"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/portal"
@@ -21,6 +22,8 @@ import (
 var (
 	watchInterval int
 )
+
+var detectPortal = detect.DetectPortal
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
@@ -38,6 +41,18 @@ Loop:
 
 func init() {
 	watchCmd.Flags().IntVar(&watchInterval, "interval", 60, "Check interval in seconds")
+}
+
+func resolveWatchPortalURL(iface string) string {
+	if flagPortalURL != "" {
+		return flagPortalURL
+	}
+	portalInfo := detectPortal(iface)
+	if portalInfo == nil || portalInfo.PortalURL == "" {
+		return ""
+	}
+	flagPortalURL = portalInfo.PortalURL
+	return flagPortalURL
 }
 
 func runWatch(cmd *cobra.Command, args []string) {
@@ -112,8 +127,18 @@ func runWatch(cmd *cobra.Command, args []string) {
 
 				// Try auto-login.
 				if !bypass.HasInternet() {
+					portalURL := flagPortalURL
+					if portalURL == "" {
+						fmt.Printf("  %s  %s  Detecting portal URL...\n", dim(ts), yellow("DETECT"))
+						portalURL = resolveWatchPortalURL(iface)
+					}
+					if portalURL == "" {
+						fmt.Printf("  %s  %s  No portal URL detected; manual login may be required\n", dim(ts), yellow("INFO"))
+						continue
+					}
+
 					fmt.Printf("  %s  %s  Trying auto-login...\n", dim(ts), yellow("LOGIN"))
-					result, err := portal.AutoLogin(flagPortalURL)
+					result, err := portal.AutoLogin(portalURL)
 					if err != nil {
 						fmt.Printf("  %s  %s  Auto-login error: %v\n", dim(ts), red("ERR"), err)
 					} else if result.Success {
