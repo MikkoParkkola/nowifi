@@ -43,6 +43,8 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
 
+var setSystemProxyFn = platform.SetSystemProxy
+
 // Method identifies a specific bypass technique.
 type Method = techniques.ID
 
@@ -172,13 +174,11 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 			return t.run(probes, config, plat)
 		}()
 
+		r = finalizeSuccessfulTunnelResult(config.Interface, r)
+
 		results = append(results, r)
 		if r.Success {
 			logStatus("SUCCESS: %s", t.runName)
-			// For tunnel-based methods, set system SOCKS proxy so browser works.
-			if r.Tunnel != nil && r.Tunnel.Active && r.Tunnel.LocalPort > 0 {
-				setSystemSOCKSProxy(config.Interface, r.Tunnel.LocalPort)
-			}
 			return results
 		}
 		logStatus("Failed: %s", t.runName)
@@ -294,8 +294,32 @@ func ClearSystemSOCKSProxy(iface string) {
 // System proxy management
 // ---------------------------------------------------------------------------
 
-func setSystemSOCKSProxy(iface string, port int) {
-	_ = platform.SetSystemProxy(iface, port)
+func setSystemSOCKSProxy(iface string, port int) error {
+	return setSystemProxyFn(iface, port)
+}
+
+func finalizeSuccessfulTunnelResult(iface string, result Result) Result {
+	if !result.Success || result.Tunnel == nil || !result.Tunnel.Active || result.Tunnel.LocalPort <= 0 {
+		return result
+	}
+
+	if err := setSystemSOCKSProxy(iface, result.Tunnel.LocalPort); err != nil {
+		port := result.Tunnel.LocalPort
+		result.Tunnel.Stop()
+		result.Tunnel = nil
+		result.Success = false
+		result.Severity = ""
+		result.Impact = ""
+		result.Remediation = "Fix local proxy configuration permissions and retry."
+		proxyErr := fmt.Sprintf("failed to configure system SOCKS proxy on port %d: %v", port, err)
+		if result.Details == "" {
+			result.Details = proxyErr
+		} else {
+			result.Details = result.Details + "; " + proxyErr
+		}
+	}
+
+	return result
 }
 
 // ---------------------------------------------------------------------------

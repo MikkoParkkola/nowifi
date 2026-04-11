@@ -1528,19 +1528,13 @@ func smartCrackWithOptions(hashFile string, timeout time.Duration, opts smartCra
 // smartCrackCommonPasswords writes the embedded password list to a temp file
 // and runs hashcat in dictionary mode against it.
 func smartCrackCommonPasswords(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
-	// Write common passwords to a temp file.
-	tmpFile, err := os.CreateTemp("", "nowifi-common-*.txt")
+	tmpFileName, cleanup, err := writeTempWordlist("nowifi-common-*.txt", commonWifiPasswords)
 	if err != nil {
 		return nil
 	}
-	defer os.Remove(tmpFile.Name())
+	defer cleanup()
 
-	for _, pw := range commonWifiPasswords {
-		fmt.Fprintln(tmpFile, pw)
-	}
-	tmpFile.Close()
-
-	args := buildHashcatArgs(hashFile, "-a", "0", hashFile, tmpFile.Name())
+	args := buildHashcatArgs(hashFile, "-a", "0", hashFile, tmpFileName)
 	password := runHashcatWithTimeout(hashcatPath, args, timeout)
 	if password != "" {
 		return &Result{
@@ -1553,6 +1547,38 @@ func smartCrackCommonPasswords(hashFile, hashcatPath string, timeout time.Durati
 		}
 	}
 	return nil
+}
+
+func writeTempWordlist(pattern string, words []string) (string, func(), error) {
+	tmpFile, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", nil, err
+	}
+
+	fileName := tmpFile.Name()
+	closed := false
+	cleanup := func() {
+		_ = os.Remove(fileName)
+	}
+	defer func() {
+		if !closed {
+			_ = tmpFile.Close()
+			cleanup()
+		}
+	}()
+
+	for _, word := range words {
+		if _, err := fmt.Fprintln(tmpFile, word); err != nil {
+			return "", nil, err
+		}
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return "", nil, err
+	}
+	closed = true
+
+	return fileName, cleanup, nil
 }
 
 // smartCrackNumericMasks runs the numeric subset of hashcatMasks.
@@ -1589,12 +1615,6 @@ func smartCrackNumericMasks(hashFile, hashcatPath string, timeout time.Duration,
 // smartCrackWordNumberRules runs the embedded wordlist with hashcat rules.
 func smartCrackWordNumberRules(hashFile, hashcatPath string, timeout time.Duration, start time.Time) *Result {
 	// Write a small focused wordlist of common base words.
-	tmpFile, err := os.CreateTemp("", "nowifi-bases-*.txt")
-	if err != nil {
-		return nil
-	}
-	defer os.Remove(tmpFile.Name())
-
 	baseWords := []string{
 		"password", "welcome", "letmein", "master", "dragon",
 		"monkey", "shadow", "sunshine", "trustno", "football",
@@ -1609,17 +1629,18 @@ func smartCrackWordNumberRules(hashFile, hashcatPath string, timeout time.Durati
 		"tiger", "eagle", "falcon", "wolf", "bear",
 		"coffee", "pizza", "guitar", "music", "star",
 	}
-	for _, w := range baseWords {
-		fmt.Fprintln(tmpFile, w)
+	tmpFileName, cleanup, err := writeTempWordlist("nowifi-bases-*.txt", baseWords)
+	if err != nil {
+		return nil
 	}
-	tmpFile.Close()
+	defer cleanup()
 
 	// Try with best64.rule first.
 	rules := findHashcatRules(hashcatPath)
 	if rules != "" {
 		stageStart := time.Now()
 		remaining := timeout - time.Since(stageStart)
-		args := buildHashcatArgs(hashFile, "-a", "0", "-r", rules, hashFile, tmpFile.Name())
+		args := buildHashcatArgs(hashFile, "-a", "0", "-r", rules, hashFile, tmpFileName)
 		password := runHashcatWithTimeout(hashcatPath, args, min(remaining, 5*time.Minute))
 		if password != "" {
 			return &Result{
@@ -1638,7 +1659,7 @@ func smartCrackWordNumberRules(hashFile, hashcatPath string, timeout time.Durati
 	if d3ad0neRule != "" {
 		stageStart := time.Now()
 		remaining := timeout - time.Since(stageStart)
-		args := buildHashcatArgs(hashFile, "-a", "0", "-r", d3ad0neRule, hashFile, tmpFile.Name())
+		args := buildHashcatArgs(hashFile, "-a", "0", "-r", d3ad0neRule, hashFile, tmpFileName)
 		password := runHashcatWithTimeout(hashcatPath, args, min(remaining, 5*time.Minute))
 		if password != "" {
 			return &Result{

@@ -27,8 +27,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var flagAutoBypass bool
-
 // tuiBypassMu protects tuiBypassResults from concurrent goroutine access.
 var tuiBypassMu sync.Mutex
 

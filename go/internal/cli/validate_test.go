@@ -211,6 +211,7 @@ func TestValidateFlags_EmptyOptionals(t *testing.T) {
 	flagCFWorkers = ""
 	flagQUICServer = ""
 	flagNTPServer = ""
+	flagVPNServer = ""
 
 	if err := validateFlags(rootCmd, nil); err != nil {
 		t.Errorf("validateFlags with all empty optionals: %v", err)
@@ -306,6 +307,52 @@ func TestValidateFlags_InvalidQUICServer(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// validateFlags — VPN server validation
+// ---------------------------------------------------------------------------
+
+func TestValidateFlags_ValidVPNServer(t *testing.T) {
+	orig := flagInterface
+	origVPN := flagVPNServer
+	defer func() { flagInterface = orig; flagVPNServer = origVPN }()
+
+	flagInterface = "en0"
+	flagTunnelServer = ""
+	flagDNSDomain = ""
+	flagICMPServer = ""
+	flagCFWorkers = ""
+	flagQUICServer = ""
+	flagNTPServer = ""
+
+	flagVPNServer = "vpn.example.com:51820"
+	if err := validateFlags(rootCmd, nil); err != nil {
+		t.Errorf("validateFlags with valid VPN server: %v", err)
+	}
+}
+
+func TestValidateFlags_InvalidVPNServer(t *testing.T) {
+	orig := flagInterface
+	origVPN := flagVPNServer
+	defer func() { flagInterface = orig; flagVPNServer = origVPN }()
+
+	flagInterface = "en0"
+	flagTunnelServer = ""
+	flagDNSDomain = ""
+	flagICMPServer = ""
+	flagCFWorkers = ""
+	flagQUICServer = ""
+	flagNTPServer = ""
+
+	flagVPNServer = "vpn server!"
+	err := validateFlags(rootCmd, nil)
+	if err == nil {
+		t.Fatal("validateFlags should reject invalid VPN server")
+	}
+	if !strings.Contains(err.Error(), "--vpn-server") {
+		t.Errorf("error should mention --vpn-server: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // validateFlags — CF Workers invalid
 // ---------------------------------------------------------------------------
 
@@ -343,6 +390,7 @@ func TestValidateFlags_AllFlagsValid(t *testing.T) {
 	origCF := flagCFWorkers
 	origQUIC := flagQUICServer
 	origNTP := flagNTPServer
+	origVPN := flagVPNServer
 	defer func() {
 		flagInterface = orig
 		flagTunnelServer = origTS
@@ -351,6 +399,7 @@ func TestValidateFlags_AllFlagsValid(t *testing.T) {
 		flagCFWorkers = origCF
 		flagQUICServer = origQUIC
 		flagNTPServer = origNTP
+		flagVPNServer = origVPN
 	}()
 
 	flagInterface = "en0"
@@ -360,6 +409,7 @@ func TestValidateFlags_AllFlagsValid(t *testing.T) {
 	flagCFWorkers = "https://worker.example.workers.dev"
 	flagQUICServer = "quic.example.com:443"
 	flagNTPServer = "192.168.1.100"
+	flagVPNServer = "vpn.example.com:51820"
 
 	if err := validateFlags(rootCmd, nil); err != nil {
 		t.Errorf("validateFlags with all valid flags: %v", err)

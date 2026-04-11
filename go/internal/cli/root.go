@@ -71,6 +71,7 @@ var (
 	flagStealth      bool
 	flagFast         bool
 	flagProbeOnly    bool
+	flagAutoBypass   bool
 )
 
 func init() {
@@ -154,6 +155,13 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	if flagNTPServer != "" {
 		if _, err := platform.ValidateIP(flagNTPServer); err != nil {
 			return fmt.Errorf("--ntp-server: %w", err)
+		}
+	}
+
+	// VPN server: must be a valid server address if provided.
+	if flagVPNServer != "" {
+		if _, err := platform.ValidateServerAddr(flagVPNServer); err != nil {
+			return fmt.Errorf("--vpn-server: %w", err)
 		}
 	}
 

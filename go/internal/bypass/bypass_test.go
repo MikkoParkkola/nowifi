@@ -16,6 +16,7 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
 
 // ---------------------------------------------------------------------------
@@ -217,6 +218,89 @@ func TestRunBypasses_ReturnsResults(t *testing.T) {
 		if len(results) != 19 {
 			t.Errorf("all failed but got %d results instead of 19", len(results))
 		}
+	}
+}
+
+func TestFinalizeSuccessfulTunnelResult_ConfiguresSystemProxy(t *testing.T) {
+	oldSetSystemProxyFn := setSystemProxyFn
+	defer func() {
+		setSystemProxyFn = oldSetSystemProxyFn
+	}()
+
+	var gotIface string
+	var gotPort int
+	setSystemProxyFn = func(iface string, port int) error {
+		gotIface = iface
+		gotPort = port
+		return nil
+	}
+
+	handle := &tunnel.Handle{Active: true, LocalPort: 1080}
+	result := finalizeSuccessfulTunnelResult("en0", Result{
+		Method:  ChiselTunnel,
+		Success: true,
+		Details: "HTTPS/WebSocket tunnel through https://tunnel.example.com",
+		Tunnel:  handle,
+	})
+
+	if !result.Success {
+		t.Fatal("expected proxy setup success to preserve successful result")
+	}
+	if result.Tunnel != handle {
+		t.Fatal("expected active tunnel handle to be preserved on proxy setup success")
+	}
+	if gotIface != "en0" || gotPort != 1080 {
+		t.Fatalf("setSystemProxyFn called with (%q, %d), want (%q, %d)", gotIface, gotPort, "en0", 1080)
+	}
+}
+
+func TestFinalizeSuccessfulTunnelResult_StopsTunnelOnProxySetupFailure(t *testing.T) {
+	oldSetSystemProxyFn := setSystemProxyFn
+	defer func() {
+		setSystemProxyFn = oldSetSystemProxyFn
+	}()
+
+	setSystemProxyFn = func(iface string, port int) error {
+		if iface != "en0" || port != 1080 {
+			t.Fatalf("unexpected proxy setup call (%q, %d)", iface, port)
+		}
+		return fmt.Errorf("permission denied")
+	}
+
+	handle := &tunnel.Handle{Active: true, LocalPort: 1080}
+	result := finalizeSuccessfulTunnelResult("en0", Result{
+		Method:      ChiselTunnel,
+		Success:     true,
+		Severity:    "critical",
+		Impact:      "Full internet via system SOCKS proxy (auto-configured)",
+		Details:     "HTTPS/WebSocket tunnel through https://tunnel.example.com",
+		Remediation: "Block WebSocket upgrades pre-auth.",
+		Tunnel:      handle,
+	})
+
+	if result.Success {
+		t.Fatal("expected proxy setup failure to clear successful result")
+	}
+	if result.Tunnel != nil {
+		t.Fatal("expected failed proxy setup to clear tunnel handle from the result")
+	}
+	if handle.Active {
+		t.Fatal("expected failed proxy setup to stop the active tunnel")
+	}
+	if result.Severity != "" {
+		t.Fatalf("Severity = %q, want empty string after proxy setup failure", result.Severity)
+	}
+	if result.Impact != "" {
+		t.Fatalf("Impact = %q, want empty string after proxy setup failure", result.Impact)
+	}
+	if result.Remediation != "Fix local proxy configuration permissions and retry." {
+		t.Fatalf("Remediation = %q, want proxy setup remediation", result.Remediation)
+	}
+	if !contains(result.Details, "HTTPS/WebSocket tunnel through https://tunnel.example.com") {
+		t.Fatalf("Details = %q, want original success details preserved", result.Details)
+	}
+	if !contains(result.Details, "failed to configure system SOCKS proxy on port 1080: permission denied") {
+		t.Fatalf("Details = %q, want proxy setup failure details", result.Details)
 	}
 }
 

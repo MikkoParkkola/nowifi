@@ -185,6 +185,26 @@ func TestFindWordlists_ReturnsStringSlice(t *testing.T) {
 	}
 }
 
+func TestWriteTempWordlist_WritesAndCleansUp(t *testing.T) {
+	path, cleanup, err := writeTempWordlist("nowifi-test-*.txt", []string{"alpha", "beta"})
+	if err != nil {
+		t.Fatalf("writeTempWordlist: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+	if string(data) != "alpha\nbeta\n" {
+		t.Fatalf("temp wordlist contents = %q, want %q", string(data), "alpha\nbeta\n")
+	}
+
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected cleanup to remove %q, got err=%v", path, err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // RunCrack pipeline order
 // ---------------------------------------------------------------------------
