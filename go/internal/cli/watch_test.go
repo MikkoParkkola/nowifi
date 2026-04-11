@@ -3,10 +3,15 @@ package cli
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/MikkoParkkola/nowifi/internal/detect"
 )
+
+func assertStringEqual(t *testing.T, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
 
 func TestResolveWatchPortalURLUsesConfiguredURL(t *testing.T) {
 	originalPortalURL := flagPortalURL
@@ -23,8 +28,10 @@ func TestResolveWatchPortalURLUsesConfiguredURL(t *testing.T) {
 		return &detect.PortalInfo{PortalURL: "https://detected.example/login"}
 	}
 
-	require.Equal(t, "https://configured.example/login", resolveWatchPortalURL("wlan0"))
-	require.False(t, detectCalled)
+	assertStringEqual(t, resolveWatchPortalURL("wlan0"), "https://configured.example/login")
+	if detectCalled {
+		t.Fatal("detectPortal should not be called when flagPortalURL is already set")
+	}
 }
 
 func TestResolveWatchPortalURLCachesDetectedURL(t *testing.T) {
@@ -42,10 +49,12 @@ func TestResolveWatchPortalURLCachesDetectedURL(t *testing.T) {
 		return &detect.PortalInfo{PortalURL: "https://detected.example/login"}
 	}
 
-	require.Equal(t, "https://detected.example/login", resolveWatchPortalURL("wlan0"))
-	require.Equal(t, "https://detected.example/login", resolveWatchPortalURL("wlan0"))
-	require.Equal(t, 1, detectCalls)
-	require.Equal(t, "https://detected.example/login", flagPortalURL)
+	assertStringEqual(t, resolveWatchPortalURL("wlan0"), "https://detected.example/login")
+	assertStringEqual(t, resolveWatchPortalURL("wlan0"), "https://detected.example/login")
+	if detectCalls != 1 {
+		t.Fatalf("detectPortal calls = %d, want 1", detectCalls)
+	}
+	assertStringEqual(t, flagPortalURL, "https://detected.example/login")
 }
 
 func TestResolveWatchPortalURLIgnoresMissingDetection(t *testing.T) {
@@ -61,8 +70,8 @@ func TestResolveWatchPortalURLIgnoresMissingDetection(t *testing.T) {
 		return &detect.PortalInfo{}
 	}
 
-	require.Empty(t, resolveWatchPortalURL("wlan0"))
-	require.Empty(t, flagPortalURL)
+	assertStringEqual(t, resolveWatchPortalURL("wlan0"), "")
+	assertStringEqual(t, flagPortalURL, "")
 }
 
 func TestResolveWatchPortalURLHandlesNilPortalDetection(t *testing.T) {
@@ -78,6 +87,6 @@ func TestResolveWatchPortalURLHandlesNilPortalDetection(t *testing.T) {
 		return nil
 	}
 
-	require.Empty(t, resolveWatchPortalURL("wlan0"))
-	require.Empty(t, flagPortalURL)
+	assertStringEqual(t, resolveWatchPortalURL("wlan0"), "")
+	assertStringEqual(t, flagPortalURL, "")
 }
