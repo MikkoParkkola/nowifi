@@ -192,6 +192,23 @@ type techniqueRunner struct {
 	run     func(*ProbeResults, *Config, PlatformOps) Result
 }
 
+func missingTechniqueRunner(info techniques.BypassTechniqueInfo) techniqueRunner {
+	method := Method(info.ID)
+	details := fmt.Sprintf("internal error: missing runner for technique %s", info.ID)
+	return techniqueRunner{
+		runName: info.Name,
+		run: func(_ *ProbeResults, _ *Config, _ PlatformOps) Result {
+			return Result{
+				Method:      method,
+				Success:     false,
+				Severity:    "critical",
+				Details:     details,
+				Remediation: "Update internal bypass runner registry to match canonical technique metadata",
+			}
+		},
+	}
+}
+
 var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	IPv6Bypass: {
 		run: func(probes *ProbeResults, _ *Config, _ PlatformOps) Result { return tryIPv6(probes) },
@@ -274,7 +291,8 @@ func orderedTechniqueRunners() []techniqueRunner {
 	for _, info := range infos {
 		runner, ok := techniqueRunnerByMethod[Method(info.ID)]
 		if !ok {
-			panic(fmt.Sprintf("missing runner for technique %s", info.ID))
+			runners = append(runners, missingTechniqueRunner(info))
+			continue
 		}
 		if runner.runName == "" {
 			runner.runName = info.Name

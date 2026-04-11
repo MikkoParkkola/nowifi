@@ -16,6 +16,7 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
 
@@ -218,6 +219,51 @@ func TestRunBypasses_ReturnsResults(t *testing.T) {
 		if len(results) != 19 {
 			t.Errorf("all failed but got %d results instead of 19", len(results))
 		}
+	}
+}
+
+func TestTechniqueRunnerRegistryMatchesTechniqueMetadata(t *testing.T) {
+	for _, info := range techniques.BypassTechniqueInfos() {
+		if _, ok := techniqueRunnerByMethod[Method(info.ID)]; !ok {
+			t.Fatalf("missing runner for technique %s", info.ID)
+		}
+	}
+}
+
+func TestOrderedTechniqueRunners_MissingRunnerReturnsFailure(t *testing.T) {
+	original, ok := techniqueRunnerByMethod[IPv6Bypass]
+	if !ok {
+		t.Fatal("expected IPv6Bypass runner to exist")
+	}
+	delete(techniqueRunnerByMethod, IPv6Bypass)
+	defer func() {
+		techniqueRunnerByMethod[IPv6Bypass] = original
+	}()
+
+	runners := orderedTechniqueRunners()
+	if len(runners) != techniques.BypassTechniqueCount() {
+		t.Fatalf("expected %d runners, got %d", techniques.BypassTechniqueCount(), len(runners))
+	}
+
+	if runners[0].runName != "IPv6 bypass" {
+		t.Fatalf("expected fallback runner name %q, got %q", "IPv6 bypass", runners[0].runName)
+	}
+
+	result := runners[0].run(&ProbeResults{}, &Config{}, &mockPlatform{})
+	if result.Success {
+		t.Fatal("expected missing runner fallback to fail")
+	}
+	if result.Method != IPv6Bypass {
+		t.Fatalf("expected method %q, got %q", IPv6Bypass, result.Method)
+	}
+	if result.Severity != "critical" {
+		t.Fatalf("expected critical severity, got %q", result.Severity)
+	}
+	if !strings.Contains(result.Details, "missing runner for technique ipv6_bypass") {
+		t.Fatalf("unexpected details: %q", result.Details)
+	}
+	if !strings.Contains(result.Remediation, "runner registry") {
+		t.Fatalf("unexpected remediation: %q", result.Remediation)
 	}
 }
 
