@@ -5,6 +5,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -377,6 +379,25 @@ func TestCrackLongDescription(t *testing.T) {
 				t.Errorf("crackCmd.Long should contain %q", tt.substr)
 			}
 		})
+	}
+}
+
+func TestReadmeRootCommandTableMatchesSessionMaintenance(t *testing.T) {
+	readmePath := filepath.Join("..", "..", "..", "README.md")
+	data, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+
+	readme := string(data)
+	want := "| `sudo nowifi` | Full audit: detect, probe, bypass, maintain access, restore on exit |"
+	if !strings.Contains(readme, want) {
+		t.Errorf("README.md should contain %q", want)
+	}
+
+	stale := "| `sudo nowifi` | Full audit: detect, probe, bypass, report |"
+	if strings.Contains(readme, stale) {
+		t.Errorf("README.md still contains stale command table row %q", stale)
 	}
 }
 

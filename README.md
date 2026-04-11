@@ -114,7 +114,7 @@ nowifi doctor
 
 | Command | What it does |
 |---------|-------------|
-| `sudo nowifi` | Full audit: detect, probe, bypass, report |
+| `sudo nowifi` | Full audit: detect, probe, bypass, maintain access, restore on exit |
 | `sudo nowifi -p` | Probe only -- find leaks without exploiting them |
 | `sudo nowifi --fast` | Skip stealth timing (faster but more detectable) |
 | `sudo nowifi -t URL` | Use a specific chisel tunnel server |
