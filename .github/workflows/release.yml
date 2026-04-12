@@ -19,7 +19,7 @@ jobs:
             target: darwin-arm64
             goos: darwin
             goarch: arm64
-          - os: macos-13   # Intel runner
+          - os: macos-15-intel   # Intel runner
             target: darwin-amd64
             goos: darwin
             goarch: amd64
@@ -82,8 +82,8 @@ jobs:
         working-directory: dist
         run: |
           ls -la
-          cat *.sha256 > checksums.sha256.tmp
-          rm -f *.sha256
+          cat ./*.sha256 > checksums.sha256.tmp
+          rm -f -- ./*.sha256
           mv checksums.sha256.tmp checksums.sha256
           ls -la
 
