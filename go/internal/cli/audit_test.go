@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/detect"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
@@ -102,6 +104,56 @@ func TestMapPortalInfo_EmptyAuthMethods(t *testing.T) {
 
 	if len(rp.AuthMethods) != 0 {
 		t.Errorf("AuthMethods should be empty, got %d", len(rp.AuthMethods))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildAuditRecord
+// ---------------------------------------------------------------------------
+
+func TestBuildAuditRecord_IncludesGatewayAndSuccessMetadata(t *testing.T) {
+	startTime := time.Now().Add(-95 * time.Second)
+	portalInfo := &detect.PortalInfo{
+		IsCaptive: true,
+		Vendor:    "Aruba",
+		Gateway:   "192.168.1.1",
+	}
+	probes := &probe.ProbeResults{
+		DNS:  probe.DnsProbeResult{IsOpen: true},
+		ICMP: probe.IcmpProbeResult{IsOpen: false},
+		IPv6: probe.Ipv6ProbeResult{IsOpen: true},
+		QUIC: probe.PortProbeResult{IsOpen: false},
+		NTP:  probe.PortProbeResult{IsOpen: true},
+		DoH:  probe.PortProbeResult{IsOpen: true},
+	}
+	wifi := &platform.WifiInfo{SSID: "CoffeeShop"}
+	bypassResults := []bypass.Result{
+		{Method: bypass.HTTPConnect, Success: false},
+		{Method: bypass.MACClone, Success: true},
+	}
+
+	record := buildAuditRecord(startTime, portalInfo, probes, wifi, bypassResults)
+
+	if record.Gateway != "192.168.1.1" {
+		t.Errorf("Gateway = %q, want 192.168.1.1", record.Gateway)
+	}
+	if record.SSID != "CoffeeShop" {
+		t.Errorf("SSID = %q, want CoffeeShop", record.SSID)
+	}
+	if record.Vendor != "Aruba" {
+		t.Errorf("Vendor = %q, want Aruba", record.Vendor)
+	}
+	if record.BypassUsed != string(bypass.MACClone) {
+		t.Errorf("BypassUsed = %q, want %q", record.BypassUsed, bypass.MACClone)
+	}
+	if !record.Success {
+		t.Error("Success should be true when any bypass succeeds")
+	}
+	if !record.Probes["dns"] || !record.Probes["ipv6"] || !record.Probes["ntp"] || !record.Probes["doh"] {
+		t.Errorf("expected open probes to be recorded, got %#v", record.Probes)
+	}
+	if record.Probes["icmp"] || record.Probes["quic"] {
+		t.Errorf("expected closed probes to remain false, got %#v", record.Probes)
 	}
 }
 

@@ -272,31 +272,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	}
 
 	// --- Phase 5: Save audit record ---
-	record := &capture.AuditRecord{
-		ID:        time.Now().Format("20060102-150405"),
-		Timestamp: startTime,
-		Portal:    portalInfo.IsCaptive,
-		Vendor:    portalInfo.Vendor,
-		Duration:  time.Since(startTime).Round(time.Second).String(),
-		Probes: map[string]bool{
-			"dns":  probes.DNS.IsOpen,
-			"icmp": probes.ICMP.IsOpen,
-			"ipv6": probes.IPv6.IsOpen,
-			"quic": probes.QUIC.IsOpen,
-			"ntp":  probes.NTP.IsOpen,
-			"doh":  probes.DoH.IsOpen,
-		},
-	}
-	if wifi != nil {
-		record.SSID = wifi.SSID
-	}
-	for _, r := range bypassResults {
-		if r.Success {
-			record.BypassUsed = string(r.Method)
-			record.Success = true
-			break
-		}
-	}
+	record := buildAuditRecord(startTime, portalInfo, probes, wifi, bypassResults)
 	if err := capture.SaveAudit(record); err != nil {
 		p.Send(statusMsg{text: fmt.Sprintf("Warning: failed to save audit: %v", err)})
 	}
@@ -591,31 +567,7 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 	report.PrintTerminal(rPortal, rProbes, bypassResults)
 
 	// --- Phase 6: Save audit record ---
-	record := &capture.AuditRecord{
-		ID:        time.Now().Format("20060102-150405"),
-		Timestamp: startTime,
-		Portal:    portalInfo.IsCaptive,
-		Vendor:    portalInfo.Vendor,
-		Duration:  time.Since(startTime).Round(time.Second).String(),
-		Probes: map[string]bool{
-			"dns":  probes.DNS.IsOpen,
-			"icmp": probes.ICMP.IsOpen,
-			"ipv6": probes.IPv6.IsOpen,
-			"quic": probes.QUIC.IsOpen,
-			"ntp":  probes.NTP.IsOpen,
-			"doh":  probes.DoH.IsOpen,
-		},
-	}
-	if wifi != nil {
-		record.SSID = wifi.SSID
-	}
-	for _, r := range bypassResults {
-		if r.Success {
-			record.BypassUsed = string(r.Method)
-			record.Success = true
-			break
-		}
-	}
+	record := buildAuditRecord(startTime, portalInfo, probes, wifi, bypassResults)
 	if err := capture.SaveAudit(record); err != nil {
 		fmt.Printf("  (warning: failed to save audit record: %v)\n", err)
 	}
@@ -872,6 +824,44 @@ func mapPortalInfo(p *detect.PortalInfo, wifi *platform.WifiInfo) report.PortalI
 		rp.SSID = wifi.SSID
 	}
 	return rp
+}
+
+func buildAuditRecord(
+	startTime time.Time,
+	portalInfo *detect.PortalInfo,
+	probes *probe.ProbeResults,
+	wifi *platform.WifiInfo,
+	bypassResults []bypass.Result,
+) *capture.AuditRecord {
+	record := &capture.AuditRecord{
+		ID:        time.Now().Format("20060102-150405"),
+		Timestamp: startTime,
+		Duration:  time.Since(startTime).Round(time.Second).String(),
+		Probes: map[string]bool{
+			"dns":  probes.DNS.IsOpen,
+			"icmp": probes.ICMP.IsOpen,
+			"ipv6": probes.IPv6.IsOpen,
+			"quic": probes.QUIC.IsOpen,
+			"ntp":  probes.NTP.IsOpen,
+			"doh":  probes.DoH.IsOpen,
+		},
+	}
+	if portalInfo != nil {
+		record.Portal = portalInfo.IsCaptive
+		record.Vendor = portalInfo.Vendor
+		record.Gateway = portalInfo.Gateway
+	}
+	if wifi != nil {
+		record.SSID = wifi.SSID
+	}
+	for _, result := range bypassResults {
+		if result.Success {
+			record.BypassUsed = string(result.Method)
+			record.Success = true
+			break
+		}
+	}
+	return record
 }
 
 // mapReportProbes converts probe.ProbeResults to report.ProbeResults.
