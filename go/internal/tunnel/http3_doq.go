@@ -19,6 +19,11 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+// clientInsecureTLSForTest, when set true by an in-package test, disables
+// TLS certificate validation on HTTP/3 tunnel dials so tests can exercise
+// the pipeline against an in-tree self-signed server. Never set in prod.
+var clientInsecureTLSForTest = false
+
 // ----------------------------------------------------------------------------
 // HTTP/3-ALPN tunnel (Wave 20 technique #22)
 //
@@ -64,6 +69,11 @@ func StartHTTP3Tunnel(serverURL string, localPort int, timeout time.Duration) (*
 		NextProtos: []string{"h3"},
 		MinVersion: tls.VersionTLS13,
 		ServerName: sni,
+	}
+	if clientInsecureTLSForTest {
+		// Test-only: accept self-signed certs from the in-tree server. Set by
+		// test files via the same-package variable; never flipped in prod paths.
+		tlsConf.InsecureSkipVerify = true //nolint:gosec // test-only; see http3_server_test.go
 	}
 	qconf := &quic.Config{
 		HandshakeIdleTimeout: timeout,
