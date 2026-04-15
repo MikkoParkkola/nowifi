@@ -18,22 +18,64 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 )
 
-// Handle wraps a running tunnel subprocess.
+// Handle wraps a running tunnel. Two flavors are supported:
+//  1. Subprocess-based (Process != nil) -- chisel, iodine, hans, hysteria,
+//     ntpescape, cloudflared. Stop() terminates the child process.
+//  2. Pure-Go in-process (extraStop != nil) -- HTTP/3 and DoQ tunnels that
+//     run as goroutines inside nowifi. Stop() signals the stop channel and
+//     invokes extraStop to close listeners/transports.
 type Handle struct {
 	Process   *exec.Cmd
 	LocalPort int
 	Method    string
 	Active    bool
+
+	// In-process tunnel bookkeeping (nil for subprocess tunnels).
+	stop      chan struct{}
+	wg        *sync.WaitGroup
+	extraStop func()
 }
 
-// Stop terminates the tunnel process gracefully, then forcefully if needed.
+// Stop terminates the tunnel gracefully, then forcefully if needed.
+// Safe to call multiple times; subsequent calls are no-ops.
 func (h *Handle) Stop() {
+	// In-process tunnel: signal goroutines, close listeners/transports, wait.
+	if h.extraStop != nil {
+		// Signal stop exactly once; guard against double-close on repeat calls.
+		if h.stop != nil {
+			select {
+			case <-h.stop:
+				// Already closed.
+			default:
+				close(h.stop)
+			}
+		}
+		h.extraStop()
+		h.extraStop = nil
+		if h.wg != nil {
+			done := make(chan struct{})
+			go func() {
+				h.wg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				// Goroutines refused to exit; give up rather than block forever.
+			}
+		}
+		h.Active = false
+		return
+	}
+
+	// Subprocess tunnel.
 	if h.Process == nil || h.Process.Process == nil {
 		h.Active = false
 		return

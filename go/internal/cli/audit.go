@@ -244,6 +244,8 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		VPNServer:    flagVPNServer,
 		CFWorkersURL: flagCFWorkers,
 		CAPPORTURL:   capportURL,
+		HTTP3Server:  flagHTTP3Server,
+		DoQServer:    flagDoQServer,
 		Stealth:      stealth,
 	}
 
@@ -561,6 +563,8 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		VPNServer:    flagVPNServer,
 		CFWorkersURL: flagCFWorkers,
 		CAPPORTURL:   capportURL,
+		HTTP3Server:  flagHTTP3Server,
+		DoQServer:    flagDoQServer,
 		Stealth:      stealth,
 	}
 	if !flagProbeOnly {

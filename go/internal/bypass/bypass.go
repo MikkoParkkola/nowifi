@@ -89,6 +89,13 @@ type Config struct {
 	// discovered via DHCP option 114 or router advertisement option 37.
 	// Empty string means CAPPORT API is unavailable for this network.
 	CAPPORTURL string
+	// HTTP3Server is the URL (scheme+host) of a tunnel-server speaking
+	// HTTP/3 CONNECT. If empty, the HTTP3Tunnel technique attempts to derive
+	// one from TunnelServer (by rewriting chisel http/https schemes to https).
+	HTTP3Server string
+	// DoQServer is a DNS-over-QUIC endpoint in host:port form.
+	// Defaults to dns.adguard.com:853 when empty.
+	DoQServer string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -347,7 +354,9 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryDoQTunnel(config, probes) },
 	},
 	HTTP3Tunnel: {
-		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryHTTP3Tunnel(config, probes) },
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryHTTP3Tunnel(config, probes)
+		},
 	},
 }
 

@@ -568,7 +568,7 @@ func TestStartQUICTunnel_EmptyServer(t *testing.T) {
 }
 
 func TestStartNTPTunnel_InvalidIP(t *testing.T) {
-	_, err := StartNTPTunnel("not.an" + ".ip.address.really.long", 0, 0)
+	_, err := StartNTPTunnel("not.an"+".ip.address.really.long", 0, 0)
 	if err == nil {
 		t.Error("StartNTPTunnel with invalid IP should return error")
 	}
@@ -679,5 +679,85 @@ func TestVerifySOCKS_NegativePort(t *testing.T) {
 func TestVerifyCFWorkersProxy_EmptyURL(t *testing.T) {
 	if VerifyCFWorkersProxy("") {
 		t.Error("VerifyCFWorkersProxy('') should return false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: HTTP/3 + DoQ tunnel input validation
+// ---------------------------------------------------------------------------
+
+func TestStartHTTP3Tunnel_EmptyURL(t *testing.T) {
+	_, err := StartHTTP3Tunnel("", 0, 0)
+	if err == nil {
+		t.Error("StartHTTP3Tunnel with empty URL should return error")
+	}
+}
+
+func TestStartHTTP3Tunnel_UnreachableHost(t *testing.T) {
+	// 127.0.0.1:1 (discard) is never going to speak QUIC+h3. The dial should
+	// fail fast with handshake timeout or connection refused.
+	_, err := StartHTTP3Tunnel("https://127.0.0.1:1", 0, 1*time.Second)
+	if err == nil {
+		t.Error("StartHTTP3Tunnel against discard port should return error")
+	}
+}
+
+func TestStartDoQTunnel_UnreachableHost(t *testing.T) {
+	// 127.0.0.1:1 won't speak DoQ.
+	_, err := StartDoQTunnel("127.0.0.1:1", 0, 1*time.Second)
+	if err == nil {
+		t.Error("StartDoQTunnel against discard port should return error")
+	}
+}
+
+func TestParseH3Endpoint_Variants(t *testing.T) {
+	tests := []struct {
+		in       string
+		wantAddr string
+		wantSNI  string
+		wantErr  bool
+	}{
+		{"https://example.com", "example.com:443", "example.com", false},
+		{"https://example.com:9443", "example.com:9443", "example.com", false},
+		{"example.com", "example.com:443", "example.com", false},
+		{"example.com:2053", "example.com:2053", "example.com", false},
+		{"://", "", "", true},
+	}
+	for _, tc := range tests {
+		addr, sni, err := parseH3Endpoint(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseH3Endpoint(%q): expected error, got nil", tc.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseH3Endpoint(%q): unexpected error: %v", tc.in, err)
+			continue
+		}
+		if addr != tc.wantAddr || sni != tc.wantSNI {
+			t.Errorf("parseH3Endpoint(%q) = (%q,%q), want (%q,%q)", tc.in, addr, sni, tc.wantAddr, tc.wantSNI)
+		}
+	}
+}
+
+// TestHandle_InProcess_StopIsIdempotent confirms that the new extraStop-based
+// cleanup path (HTTP3/DoQ tunnels) survives double Stop() without panic.
+func TestHandle_InProcess_StopIsIdempotent(t *testing.T) {
+	called := 0
+	h := &Handle{
+		LocalPort: 0,
+		Method:    "test_inprocess",
+		Active:    true,
+		stop:      make(chan struct{}),
+		extraStop: func() { called++ },
+	}
+	h.Stop()
+	h.Stop() // must not panic, must not call extraStop twice.
+	if called != 1 {
+		t.Errorf("extraStop called %d times, want exactly 1", called)
+	}
+	if h.Active {
+		t.Error("Active should be false after Stop")
 	}
 }

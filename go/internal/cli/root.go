@@ -68,6 +68,8 @@ var (
 	flagQUICServer   string
 	flagNTPServer    string
 	flagVPNServer    string
+	flagHTTP3Server  string
+	flagDoQServer    string
 	flagStealth      bool
 	flagFast         bool
 	flagProbeOnly    bool
@@ -86,6 +88,8 @@ func init() {
 	rootCmd.Flags().StringVar(&flagQUICServer, "quic-server", "", "QUIC/Hysteria2 server address")
 	rootCmd.Flags().StringVar(&flagNTPServer, "ntp-server", "", "NTP tunnel server IP")
 	rootCmd.Flags().StringVar(&flagVPNServer, "vpn-server", "", "VPN server (host:port) for VPN-on-port-53 technique")
+	rootCmd.Flags().StringVar(&flagHTTP3Server, "http3-server", "", "HTTP/3-ALPN tunnel server URL or host:port (Wave 20)")
+	rootCmd.Flags().StringVar(&flagDoQServer, "doq-server", "", "DNS-over-QUIC resolver host:port (default: dns.adguard.com:853)")
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
 	rootCmd.Flags().BoolVar(&flagFast, "fast", false, "Skip stealth delays")
 	rootCmd.Flags().BoolVarP(&flagProbeOnly, "probe-only", "p", false, "Probe only, don't exploit")
@@ -163,6 +167,23 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	if flagVPNServer != "" {
 		if _, err := platform.ValidateServerAddr(flagVPNServer); err != nil {
 			return fmt.Errorf("--vpn-server: %w", err)
+		}
+	}
+
+	// HTTP/3 server: must be a valid URL or server address if provided.
+	if flagHTTP3Server != "" {
+		// Accept either URL form or host:port form.
+		if _, urlErr := platform.ValidateURL(flagHTTP3Server); urlErr != nil {
+			if _, addrErr := platform.ValidateServerAddr(flagHTTP3Server); addrErr != nil {
+				return fmt.Errorf("--http3-server: invalid URL or host:port: %w", urlErr)
+			}
+		}
+	}
+
+	// DoQ server: must be a valid server address if provided.
+	if flagDoQServer != "" {
+		if _, err := platform.ValidateServerAddr(flagDoQServer); err != nil {
+			return fmt.Errorf("--doq-server: %w", err)
 		}
 	}
 
