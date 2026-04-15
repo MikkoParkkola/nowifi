@@ -240,7 +240,7 @@ func handleSocks5Lite(client net.Conn, qconn *quic.Conn) {
 		return
 	}
 	lenBuf := make([]byte, 2)
-	binary.BigEndian.PutUint16(lenBuf, uint16(len(targetBytes)))
+	binary.BigEndian.PutUint16(lenBuf, uint16(len(targetBytes))) //nolint:gosec // bounded to 512 above
 	if _, err := stream.Write(lenBuf); err != nil {
 		_, _ = client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		return
@@ -373,7 +373,7 @@ func doqQuery(conn *quic.Conn, query []byte) ([]byte, error) {
 
 	// Write: length-prefixed DNS message.
 	lenBuf := make([]byte, 2)
-	binary.BigEndian.PutUint16(lenBuf, uint16(len(query)))
+	binary.BigEndian.PutUint16(lenBuf, uint16(len(query))) //nolint:gosec // bounded to 65535 above
 	if _, err := stream.Write(lenBuf); err != nil {
 		return nil, fmt.Errorf("write len: %w", err)
 	}
