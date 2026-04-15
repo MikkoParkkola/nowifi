@@ -737,3 +737,69 @@ func GetCAPPORTURL(iface string) (string, error) {
 	}
 	return string(m[1]), nil
 }
+
+// GetDNSResolvers returns the system's configured DNS resolver IPs for the
+// given interface. Uses `scutil --dns` which exposes per-resolver nameserver
+// lists on macOS. Returns unique resolvers in their discovered order.
+func GetDNSResolvers(iface string) ([]string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("get dns resolvers: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "scutil", "--dns").Output()
+	if err != nil {
+		return nil, fmt.Errorf("scutil --dns: %w", err)
+	}
+
+	// Match any `nameserver[N] : IPv4-or-IPv6`.
+	re := regexp.MustCompile(`nameserver\[\d+\]\s*:\s*([0-9a-fA-F:.]+)`)
+	matches := re.FindAllSubmatch(out, -1)
+	seen := make(map[string]struct{}, len(matches))
+	resolvers := make([]string, 0, len(matches))
+	for _, m := range matches {
+		ip := string(m[1])
+		if _, dup := seen[ip]; dup {
+			continue
+		}
+		seen[ip] = struct{}{}
+		resolvers = append(resolvers, ip)
+	}
+	return resolvers, nil
+}
+
+// GetDNSSearchDomain returns the first non-trivial DNS search domain
+// advertised on the network (via DHCP option 15 or IPv6 RA RDNSS).
+// Empty string means no search domain (or only "local").
+func GetDNSSearchDomain(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get dns search domain: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "scutil", "--dns").Output()
+	if err != nil {
+		return "", fmt.Errorf("scutil --dns: %w", err)
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "search domain") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		domain := strings.TrimSpace(parts[1])
+		if domain == "" || domain == "local" {
+			continue
+		}
+		return domain, nil
+	}
+	return "", nil
+}

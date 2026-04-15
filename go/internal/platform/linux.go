@@ -715,3 +715,91 @@ func GetCAPPORTURL(iface string) (string, error) {
 	}
 	return "", nil // Not advertised or no readable lease file
 }
+
+// GetDNSResolvers returns the system's configured DNS resolver IPs.
+// On Linux, parses /etc/resolv.conf and (when available) systemd-resolved
+// status. Returns unique resolvers in discovered order.
+func GetDNSResolvers(iface string) ([]string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("get dns resolvers: %w", err)
+	}
+
+	seen := make(map[string]struct{})
+	resolvers := []string{}
+
+	// Prefer systemd-resolved if reachable.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "resolvectl", "status", iface).Output(); err == nil {
+		re := regexp.MustCompile(`DNS Servers?:\s*(.+)`)
+		if m := re.FindSubmatch(out); m != nil {
+			for _, tok := range strings.Fields(string(m[1])) {
+				if _, dup := seen[tok]; !dup {
+					seen[tok] = struct{}{}
+					resolvers = append(resolvers, tok)
+				}
+			}
+		}
+	}
+
+	// Fallback: /etc/resolv.conf.
+	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "nameserver") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			ip := fields[1]
+			if _, dup := seen[ip]; dup {
+				continue
+			}
+			seen[ip] = struct{}{}
+			resolvers = append(resolvers, ip)
+		}
+	}
+	return resolvers, nil
+}
+
+// GetDNSSearchDomain returns the first non-trivial search domain advertised
+// on the interface (DHCP option 15). Empty when only "local" or none.
+func GetDNSSearchDomain(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get dns search domain: %w", err)
+	}
+
+	// Check resolvectl first.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "resolvectl", "domain", iface).Output(); err == nil {
+		// Format: "Link N (iface): example.com other.com"
+		for _, line := range strings.Split(string(out), "\n") {
+			if idx := strings.Index(line, ":"); idx > 0 {
+				for _, d := range strings.Fields(line[idx+1:]) {
+					if d != "" && d != "local" {
+						return d, nil
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to /etc/resolv.conf search directive.
+	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "search") {
+				continue
+			}
+			for _, d := range strings.Fields(strings.TrimPrefix(line, "search")) {
+				if d != "" && d != "local" {
+					return d, nil
+				}
+			}
+		}
+	}
+	return "", nil
+}

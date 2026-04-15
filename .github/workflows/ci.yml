@@ -62,11 +62,13 @@ jobs:
 
       - name: Staticcheck
         working-directory: go
-        run: "$(go env GOPATH)/bin/staticcheck" ./...
+        run: |
+          "$(go env GOPATH)/bin/staticcheck" ./...
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Vulnerability check
         working-directory: go
-        run: "$(go env GOPATH)/bin/govulncheck" ./...
+        run: |
+          "$(go env GOPATH)/bin/govulncheck" ./...
