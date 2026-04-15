@@ -231,6 +231,9 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	p.Send(networkMsg{gateway: portalInfo.Gateway, clients: clientCount, rttMs: gwRTT})
 
 	// --- Phase 4: Bypass ---
+	// Discover RFC 8908 CAPPORT URL from DHCP option 114 (non-fatal if absent).
+	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
+
 	bpConfig := &bypass.Config{
 		Interface:    flagInterface,
 		TunnelServer: flagTunnelServer,
@@ -240,6 +243,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		NTPServer:    flagNTPServer,
 		VPNServer:    flagVPNServer,
 		CFWorkersURL: flagCFWorkers,
+		CAPPORTURL:   capportURL,
 		Stealth:      stealth,
 	}
 
@@ -544,6 +548,9 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 	// --- Phase 4: Bypass ---
 	var bypassResults []bypass.Result
 	var g *guard.Guard
+	// Discover RFC 8908 CAPPORT URL from DHCP option 114 (non-fatal if absent).
+	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
+
 	bpConfig := &bypass.Config{
 		Interface:    flagInterface,
 		TunnelServer: flagTunnelServer,
@@ -553,6 +560,7 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		NTPServer:    flagNTPServer,
 		VPNServer:    flagVPNServer,
 		CFWorkersURL: flagCFWorkers,
+		CAPPORTURL:   capportURL,
 		Stealth:      stealth,
 	}
 	if !flagProbeOnly {
