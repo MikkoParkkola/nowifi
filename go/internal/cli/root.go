@@ -99,6 +99,7 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(ecosystemCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(reconCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(uiCmd)
 	rootCmd.AddCommand(menubarCmd)
