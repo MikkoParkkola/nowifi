@@ -252,18 +252,26 @@ var Profiles = map[Provider]PortalProfile{
 		Name:        "Thales InFlyt Experience (FlytLIVE / TopConnect)",
 		Description: "Major European IFE provider. Used by Air France-KLM group and SAS.",
 		GatewayOUI:  []string{},
-		DNSPatterns: []string{"inflyt", "flytlive", "topconnect", "thales"},
+		DNSPatterns: []string{"inflyt", "flytlive", "topconnect", "thales", "aircon", "afklm"},
 		PortalDomains: []string{
 			"wifi.airfrance.com",
 			"wifi.klm.com",
+			"connect.klm.com", // KLM onboard portal (observed in-flight 2026-04, KLM)
 			"portal.inflyt.com",
 		},
-		HTMLMarkers:   []string{"inflyt", "thales", "flytlive", "topconnect"},
-		HeaderMarkers: []string{"Thales"},
+		// Search domain often exposed via DHCP: "connect.klm.com" seen on KLM 172.19.0.0/23
+		HTMLMarkers:   []string{"inflyt", "thales", "flytlive", "topconnect", "onboard portal", "afklm"},
+		// AFKLM AIRCON HUB: unique KLM onboard portal Server header (observed 2026-04).
+		// Note: Kong gateway is NOT used as a marker here — it overlaps with Panasonic.
+		HeaderMarkers: []string{"Thales", "AFKLM AIRCON HUB"},
 		LinkTypes:     []LinkType{KaBand, KuBand},
-		TypicalRTTMs:  650,
-		PortalType:    "spa",
-		GatewayStack:  "nginx",
+		// Measured RTT on KLM flight 2026-04: min 604ms, avg 842ms, max 1283ms.
+		// Upstream 650ms was low — true average is ~850ms with satellite jitter.
+		TypicalRTTMs: 850,
+		PortalType:   "spa",
+		// Observed on KLM: Kong 3.3.1 fronting nginx backend. Panasonic also uses Kong,
+		// so detection relies on AFKLM AIRCON HUB marker, not gateway stack alone.
+		GatewayStack: "kong+nginx",
 		WhitelistDomains: []string{
 			"airfrance.com", "klm.com",
 			"flysas.com",
