@@ -225,3 +225,40 @@ func TestReadmeInflightClaimsMatchRegistry(t *testing.T) {
 		t.Fatal("README should not advertise the stale 50+ airline claim")
 	}
 }
+
+func TestDetectLinkType(t *testing.T) {
+	tests := []struct {
+		rtt      int
+		expected LinkType
+		name     string
+	}{
+		{0, "", "zero RTT returns empty"},
+		{35, LEO, "Starlink typical 35ms"},
+		{60, LEO, "LEO upper boundary"},
+		{70, AirToGround, "ATG lower boundary"},
+		{150, AirToGround, "Gogo ATG typical"},
+		{250, KaBand, "satellite lower boundary"},
+		{700, KaBand, "Ku/Ka typical"},
+		{850, KaBand, "KLM observed avg"},
+		{1283, KaBand, "KLM observed max"},
+		{1500, "", "degraded path returns empty"},
+	}
+	for _, tc := range tests {
+		if got := DetectLinkType(tc.rtt); got != tc.expected {
+			t.Errorf("%s: DetectLinkType(%d) = %q, want %q", tc.name, tc.rtt, got, tc.expected)
+		}
+	}
+}
+
+func TestIsStarlink(t *testing.T) {
+	if !IsStarlink(40) {
+		t.Error("40ms RTT should identify as Starlink/LEO")
+	}
+	if IsStarlink(850) {
+		t.Error("850ms RTT should not identify as Starlink/LEO")
+	}
+	if IsStarlink(0) {
+		t.Error("0ms RTT should not identify as Starlink/LEO")
+	}
+}
+

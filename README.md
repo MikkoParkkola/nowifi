@@ -13,7 +13,7 @@
 
 **Author: Mikko Parkkola**
 
-One command. 27 techniques. Browser works immediately.
+One command. 30 techniques. Browser works immediately.
 
 ```bash
 sudo nowifi
@@ -23,7 +23,7 @@ sudo nowifi
   <img src="screenshot.png" alt="nowifi dashboard" width="800">
 </p>
 
-Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 19 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
+Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 22 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-technique WPA/WPA2 cracking pipeline. It escalates from PMKID and WPS Pixie-Dust through handshake capture, dictionary/smart cracking, and only then to WPS PIN or online brute force, stopping as soon as a password is recovered.
 
@@ -142,9 +142,9 @@ nowifi doctor
 
 ---
 
-## 27 Techniques
+## 30 Techniques
 
-### Portal Bypass (19 techniques)
+### Portal Bypass (22 techniques)
 
 These work when you're connected to WiFi but stuck behind a captive portal login page.
 
@@ -259,7 +259,7 @@ internal/
   cli/                     Cobra commands (audit, diagnose, crack, tools, ...)
   detect/                  Portal detection: canary URLs, DNS hijack, vendor fingerprinting
   probe/                   Leak enumeration: DNS, ICMP, IPv6, HTTPS, QUIC, NTP, DoH, ports
-  bypass/                  19 bypass techniques, ordered most-powerful-first
+  bypass/                  22 bypass techniques, ordered most-powerful-first
   crack/                   WPA cracking: PMKID, handshake, hashcat, WPS, smart crack
   tunnel/                  Tunnel management: chisel, iodine, hans, hysteria
   platform/                OS abstraction: macOS (darwin.go) / Linux (linux.go)

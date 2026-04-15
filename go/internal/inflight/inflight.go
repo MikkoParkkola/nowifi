@@ -279,10 +279,16 @@ var Profiles = map[Provider]PortalProfile{
 		HasFreeTier:     true,
 		FreeTierDomains: []string{"whatsapp.com"},
 		RecommendedOrder: []string{
+			// Wave 20: CAPPORT extend first -- legitimate, no bypass needed
+			// when already authenticated (KLM observed with can-extend-session:true).
+			"capport_session_extend",
 			"mac_clone_idle",
 			"mac_clone",
 			"dns_tunnel",
 			"doh_tunnel",
+			// Wave 20: Modern transport techniques favored over legacy DPI-detectable ones.
+			"http3_tunnel",
+			"doq_tunnel",
 			"ntp_tunnel",
 			"js_only_bypass",
 			"cna_useragent_spoof",
@@ -404,6 +410,41 @@ func GetProfile(provider Provider) *PortalProfile {
 		return &p
 	}
 	return nil
+}
+
+// DetectLinkType infers the satellite/radio link technology from measured RTT.
+// This is useful when the provider is known but the specific link is not, as
+// many carriers (notably Air France-KLM) are migrating fleet to Starlink/LEO.
+//
+// Thresholds based on observed ranges:
+//   - LEO (Starlink/OneWeb): 25-60ms
+//   - AirToGround (Gogo ATG): 100-200ms
+//   - Satellite (Ku/Ka/GX): 500-1300ms
+//
+// Returns empty LinkType if RTT is 0 or ambiguous.
+func DetectLinkType(medianRTTMs int) LinkType {
+	switch {
+	case medianRTTMs <= 0:
+		return ""
+	case medianRTTMs < 70:
+		return LEO // Starlink, OneWeb, Kuiper
+	case medianRTTMs < 250:
+		return AirToGround
+	case medianRTTMs < 1400:
+		// Satellite — Ku/Ka/GX overlap heavily by RTT alone.
+		// Default to KaBand as most common modern deployment.
+		return KaBand
+	default:
+		return "" // Degraded or unusual path
+	}
+}
+
+// IsStarlink returns true if the measured RTT profile matches LEO satellite.
+// KLM, Air France, Qatar, Hawaiian, and Latam are actively migrating to Starlink.
+// LEO links dramatically change technique priorities: bypass is less valuable
+// when direct connection is cheap and fast enough that paying is acceptable.
+func IsStarlink(medianRTTMs int) bool {
+	return DetectLinkType(medianRTTMs) == LEO
 }
 
 // AllAirlines returns a flat list of all known airlines and their providers.
