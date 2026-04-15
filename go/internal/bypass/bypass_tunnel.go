@@ -218,15 +218,12 @@ func tryDoHTunnel(probes *ProbeResults) Result {
 
 // Wave 20 (2026-04): Modern portal/transport techniques.
 //
-// CAPPORTExtend is fully implemented — queries the RFC 8908 API endpoint
-// (discovered via DHCP option 114 or passed via Config.CAPPORTURL) and surfaces
-// session status plus the user-portal-url for extension UI.
-//
-// DoQTunnel and HTTP3Tunnel are detection-only stubs pending runner implementation:
-//   - tryDoQTunnel:    QUIC client to dns.adguard.com:853 or quic.cloudflare-dns.com:443,
-//     with a DNS resolver configured to use it for tunneled queries.
-//   - tryHTTP3Tunnel:  HTTP/3 client (quic-go) to a tunnel endpoint advertising Alt-Svc,
-//     wrapped as SOCKS5 proxy.
+// CAPPORTExtend  — queries the RFC 8908 API endpoint (discovered via DHCP
+//                  option 114 or Config.CAPPORTURL) and reports session status.
+// DoQTunnel      — pure-Go DNS-over-QUIC client (RFC 9250) speaking to a DoQ
+//                  resolver over UDP/853. Runs a local UDP/53 proxy.
+// HTTP3Tunnel    — pure-Go HTTP/3 CONNECT tunnel (quic-go) wrapped as a local
+//                  SOCKS5-lite listener on TCP.
 
 // tryCAPPORTExtend queries the RFC 8908 CAPPORT API and reports session status.
 // Success means the API is reachable and returns a usable response; the Details
@@ -280,18 +277,113 @@ func tryCAPPORTExtend(config *Config, _ *ProbeResults) Result {
 	}
 }
 
-func tryDoQTunnel(_ *Config, _ *ProbeResults) Result {
-	return Result{
-		Method:  DoQTunnel,
-		Success: false,
-		Details: "Detection wired (DoQOpen). Execution stub: QUIC DNS client not yet implemented.",
+// tryDoQTunnel opens a DNS-over-QUIC channel to a public DoQ resolver
+// (default dns.adguard.com:853) and starts a local UDP/53 proxy. Success
+// means the QUIC handshake completed AND a test DNS query resolved through
+// the tunnel. Bypass-relevant: DoQ is rarely filtered distinctly from
+// generic QUIC/HTTP/3 and portals can no longer intercept DNS responses.
+func tryDoQTunnel(config *Config, probes *ProbeResults) Result {
+	if probes != nil && !probes.QUIC.IsOpen {
+		return Result{
+			Method:  DoQTunnel,
+			Success: false,
+			Details: "QUIC/UDP transport blocked; DoQ unreachable.",
+		}
 	}
+
+	server := ""
+	if config != nil {
+		server = config.DoQServer
+	}
+	if server == "" {
+		server = "dns.adguard.com:853"
+	}
+
+	handle, err := tunnel.StartDoQTunnel(server, 0, 15*time.Second)
+	if err != nil {
+		return Result{
+			Method:  DoQTunnel,
+			Success: false,
+			Details: fmt.Sprintf("DoQ dial failed (%s): %v", server, err),
+		}
+	}
+
+	return successResult(
+		DoQTunnel,
+		fmt.Sprintf("DNS-over-QUIC (RFC 9250) to %s active on UDP/127.0.0.1:%d. Bypasses DNS interception.", server, handle.LocalPort),
+		withTunnel(handle),
+	)
 }
 
-func tryHTTP3Tunnel(_ *Config, _ *ProbeResults) Result {
+// tryHTTP3Tunnel opens an HTTP/3 CONNECT channel to the configured tunnel
+// server and exposes it locally as a SOCKS5-lite proxy (TCP). The transport
+// is UDP/443 QUIC, which passes through TCP-only middleboxes.
+func tryHTTP3Tunnel(config *Config, probes *ProbeResults) Result {
+	if probes != nil && !probes.QUIC.IsOpen {
+		return Result{
+			Method:  HTTP3Tunnel,
+			Success: false,
+			Details: "UDP/443 (QUIC) blocked; HTTP/3 cannot reach server.",
+		}
+	}
+
+	serverURL := ""
+	if config != nil {
+		serverURL = config.HTTP3Server
+		if serverURL == "" {
+			// Fall back to TunnelServer, rewriting ws/wss/http to https.
+			serverURL = deriveHTTP3URL(config.TunnelServer)
+		}
+	}
+	if serverURL == "" {
+		return Result{
+			Method:  HTTP3Tunnel,
+			Success: false,
+			Details: "No HTTP/3 server configured (--http3-server or --tunnel-server).",
+		}
+	}
+
+	handle, err := tunnel.StartHTTP3Tunnel(serverURL, 0, 15*time.Second)
+	if err != nil {
+		return Result{
+			Method:  HTTP3Tunnel,
+			Success: false,
+			Details: fmt.Sprintf("HTTP/3 tunnel failed (%s): %v", serverURL, err),
+		}
+	}
+
+	if tunnel.VerifySOCKS(handle.LocalPort) {
+		return successResult(
+			HTTP3Tunnel,
+			fmt.Sprintf("HTTP/3 CONNECT tunnel to %s over UDP/443 QUIC; SOCKS5 at 127.0.0.1:%d.", serverURL, handle.LocalPort),
+			withTunnel(handle),
+		)
+	}
+
+	handle.Stop()
 	return Result{
 		Method:  HTTP3Tunnel,
 		Success: false,
-		Details: "Detection wired (HTTP3Open+QUICOpen). Execution stub: quic-go SOCKS5 wrapper not yet implemented.",
+		Details: "HTTP/3 tunnel connected but SOCKS verification failed (server may not support CONNECT).",
+	}
+}
+
+// deriveHTTP3URL rewrites chisel-style ws/wss/http/https URLs to an https://
+// URL suitable for HTTP/3. Returns "" when the input is unusable.
+func deriveHTTP3URL(in string) string {
+	if in == "" {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(in, "https://"):
+		return in
+	case strings.HasPrefix(in, "http://"):
+		return "https://" + strings.TrimPrefix(in, "http://")
+	case strings.HasPrefix(in, "wss://"):
+		return "https://" + strings.TrimPrefix(in, "wss://")
+	case strings.HasPrefix(in, "ws://"):
+		return "https://" + strings.TrimPrefix(in, "ws://")
+	default:
+		return "https://" + in
 	}
 }
