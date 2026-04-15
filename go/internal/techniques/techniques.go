@@ -27,6 +27,10 @@ const (
 	CFWorkers       ID = "cf_workers_proxy"
 	NTPTunnel       ID = "ntp_tunnel"
 	DoHTunnel       ID = "doh_tunnel"
+	// Wave 20: Modern portal/transport techniques (2026-04).
+	CAPPORTExtend ID = "capport_session_extend" // RFC 8908 session extension
+	DoQTunnel     ID = "doq_tunnel"             // DNS-over-QUIC tunnel
+	HTTP3Tunnel   ID = "http3_tunnel"           // HTTP/3-specific tunnel (QUIC Alt-Svc)
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -43,6 +47,19 @@ type BypassTechniqueSignals struct {
 	WhitelistReachable bool
 	HTTP443Open        bool
 	HTTP8080Open       bool
+	// Wave 20: Modern portal/transport signals.
+	// CAPPORTAvailable is true when RFC 8908 captive-portal API is advertised
+	// via DHCP option 114 and the API endpoint responds.
+	CAPPORTAvailable bool
+	// CAPPORTExtendable is true when the CAPPORT API exposes
+	// "can-extend-session": true (RFC 8908 §5).
+	CAPPORTExtendable bool
+	// DoQOpen is true when DNS-over-QUIC endpoints (UDP/853 or UDP/443
+	// to known DoQ providers) are reachable.
+	DoQOpen bool
+	// HTTP3Open is true when a test UDP/443 QUIC handshake succeeds
+	// (distinct from QUICOpen which may only check protocol presence).
+	HTTP3Open bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -315,6 +332,52 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Severity:    "high",
 			Impact:      "DNS resolution via encrypted DoH (enables further tunneling)",
 			Remediation: "Block DoH endpoints (cloudflare-dns.com, dns.google) for unauthenticated clients. Deploy DoH-aware filtering.",
+		},
+	},
+	// Wave 20: Modern portal/transport techniques discovered 2026-04 on KLM Thales portal.
+	{
+		info: BypassTechniqueInfo{
+			Number: 20, ID: CAPPORTExtend, Name: "CAPPORT session extend", HelpName: "CAPPORT extend",
+			Confidence: "HIGH", Reason: "RFC 8908 API advertises can-extend-session", Risk: "None -- uses legitimate API",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.CAPPORTAvailable && signals.CAPPORTExtendable
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "low",
+			// Not a bypass -- it's the LEGITIMATE API contract. Prevents re-auth loops
+			// and lost connectivity on providers like KLM/Thales with 54-minute leases.
+			Impact:      "Extend paid session without re-login. Legitimate use of RFC 8908 API.",
+			Remediation: "Not a vulnerability -- RFC 8908 intended behavior. Ensure session limits enforced server-side.",
+		},
+	},
+	{
+		info: BypassTechniqueInfo{
+			Number: 21, ID: DoQTunnel, Name: "DoQ tunnel", HelpName: "DoQ tunnel",
+			RequiresServer: true, Confidence: "MEDIUM", Reason: "DNS-over-QUIC reachable", Risk: "Needs DoQ endpoint",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool { return signals.DoQOpen },
+		success: BypassTechniqueResultMetadata{
+			Severity: "high",
+			Impact:   "DNS tunneling via DoQ (UDP/853 or UDP/443). Less commonly filtered than DoH.",
+			Remediation: "Block DoQ endpoints (dns.adguard.com:853, dns.google QUIC). Deploy QUIC-aware DPI. " +
+				"Note: DoQ traffic is indistinguishable from HTTP/3 without deep inspection.",
+		},
+	},
+	{
+		info: BypassTechniqueInfo{
+			Number: 22, ID: HTTP3Tunnel, Name: "HTTP/3 tunnel (QUIC Alt-Svc)", HelpName: "HTTP/3 tunnel",
+			RequiresServer: true, Confidence: "HIGH", Reason: "HTTP/3 UDP/443 reachable", Risk: "Needs HTTP/3-capable endpoint",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.HTTP3Open && signals.QUICOpen
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via HTTP/3 to Alt-Svc-advertised endpoints. " +
+				"Bypasses TCP-only middleboxes and portal filters focused on TCP/443.",
+			Remediation: "Deploy QUIC-aware inspection. Block UDP/443 to untrusted destinations for " +
+				"unauthenticated clients. Inspect Alt-Svc headers for rogue endpoints.",
 		},
 	},
 }

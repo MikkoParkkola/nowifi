@@ -213,3 +213,42 @@ func tryDoHTunnel(probes *ProbeResults) Result {
 	handle.Stop()
 	return Result{Method: DoHTunnel, Success: false, Details: "DoH tunnel connected but no internet access"}
 }
+
+// Wave 20 (2026-04): Modern portal/transport technique stubs.
+//
+// These three functions are placeholders pending full execution implementations.
+// Detection logic is fully wired via techniques.BypassTechniqueSignals (CAPPORTAvailable,
+// CAPPORTExtendable, DoQOpen, HTTP3Open) and the assessment layer correctly identifies
+// when each technique is feasible. Execution requires:
+//   - tryCAPPORTExtend: HTTP POST to RFC 8908 captive-portal API endpoint with
+//     "user-portal-url" and PRA token (per RFC 8908 §4.4).
+//   - tryDoQTunnel:    QUIC client to dns.adguard.com:853 or quic.cloudflare-dns.com:443,
+//     with a DNS resolver configured to use it for tunneled queries.
+//   - tryHTTP3Tunnel:  HTTP/3 client (quic-go) to a tunnel endpoint advertising Alt-Svc,
+//     wrapped as SOCKS5 proxy.
+//
+// Tracked in: github.com/MikkoParkkola/nowifi issue [Wave 20 follow-up].
+
+func tryCAPPORTExtend(_ *ProbeResults) Result {
+	return Result{
+		Method:  CAPPORTExtend,
+		Success: false,
+		Details: "Detection wired (CAPPORTAvailable+CAPPORTExtendable). Execution stub: RFC 8908 POST not yet implemented.",
+	}
+}
+
+func tryDoQTunnel(_ *Config, _ *ProbeResults) Result {
+	return Result{
+		Method:  DoQTunnel,
+		Success: false,
+		Details: "Detection wired (DoQOpen). Execution stub: QUIC DNS client not yet implemented.",
+	}
+}
+
+func tryHTTP3Tunnel(_ *Config, _ *ProbeResults) Result {
+	return Result{
+		Method:  HTTP3Tunnel,
+		Success: false,
+		Details: "Detection wired (HTTP3Open+QUICOpen). Execution stub: quic-go SOCKS5 wrapper not yet implemented.",
+	}
+}

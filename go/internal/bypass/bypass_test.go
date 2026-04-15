@@ -131,6 +131,10 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		CFWorkers,
 		NTPTunnel,
 		DoHTunnel,
+		// Wave 20: Modern portal/transport techniques.
+		CAPPORTExtend,
+		DoQTunnel,
+		HTTP3Tunnel,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,
