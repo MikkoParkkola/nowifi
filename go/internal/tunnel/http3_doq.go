@@ -231,8 +231,14 @@ func handleSocks5Lite(client net.Conn, qconn *quic.Conn) {
 	defer func() { _ = stream.Close() }()
 
 	// Protocol header: uint16 length + "host:port". Minimal, matches the
-	// companion nowifi tunnel-server implementation.
+	// companion nowifi tunnel-server implementation. Bound-check the length
+	// so the uint16 cast can never silently truncate a maliciously-crafted
+	// target (the server also caps at 512 bytes).
 	targetBytes := []byte(target)
+	if len(targetBytes) > 512 {
+		_, _ = client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		return
+	}
 	lenBuf := make([]byte, 2)
 	binary.BigEndian.PutUint16(lenBuf, uint16(len(targetBytes)))
 	if _, err := stream.Write(lenBuf); err != nil {
@@ -352,6 +358,11 @@ func serveDoQProxy(udp *net.UDPConn, conn *quic.Conn, stop chan struct{}, wg *sy
 // doqQuery sends a single DNS query over a new QUIC stream per RFC 9250.
 // Wire format: 2-byte length prefix followed by the DNS message.
 func doqQuery(conn *quic.Conn, query []byte) ([]byte, error) {
+	// RFC 1035 caps DNS messages at 65535 bytes; reject anything longer so
+	// the uint16 length-prefix cast cannot silently truncate.
+	if len(query) == 0 || len(query) > 65535 {
+		return nil, fmt.Errorf("invalid DNS query length: %d", len(query))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	stream, err := conn.OpenStreamSync(ctx)
