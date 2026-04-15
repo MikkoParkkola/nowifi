@@ -673,3 +673,45 @@ func DisableStealth(state *StealthState) {
 		}
 	}
 }
+
+// GetCAPPORTURL returns the RFC 8908 captive-portal API URL advertised
+// by DHCP option 114 (RFC 7710). Empty string if the network does not
+// advertise CAPPORT.
+//
+// On Linux, we parse the active DHCP lease file. Different DHCP clients
+// write to different paths; we check the common ones.
+func GetCAPPORTURL(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get capport url: %w", err)
+	}
+
+	// Common lease file paths across dhclient, dhcpcd, systemd-networkd.
+	candidates := []string{
+		fmt.Sprintf("/var/lib/dhcp/dhclient.%s.leases", iface),
+		fmt.Sprintf("/var/lib/dhcpcd/%s.lease", iface),
+		fmt.Sprintf("/run/systemd/netif/leases/%s", iface),
+		"/var/lib/dhcp/dhclient.leases",
+	}
+
+	// Pattern matches DHCP option 114 in various client formats.
+	// dhclient: option captive-portal "https://...";
+	// systemd-networkd: CAPTIVE_PORTAL=https://...
+	// dhcpcd: captive_portal=https://...
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)captive[-_]portal\s*=?\s*"?([^"\s;]+)"?`),
+		regexp.MustCompile(`(?i)option\s+captive-portal\s+"([^"]+)"`),
+	}
+
+	for _, path := range candidates {
+		data, err := os.ReadFile(path) //nolint:gosec // known lease paths
+		if err != nil {
+			continue
+		}
+		for _, re := range patterns {
+			if m := re.FindSubmatch(data); m != nil {
+				return string(m[1]), nil
+			}
+		}
+	}
+	return "", nil // Not advertised or no readable lease file
+}

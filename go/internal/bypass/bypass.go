@@ -68,6 +68,10 @@ const (
 	CFWorkers       Method = techniques.CFWorkers
 	NTPTunnel       Method = techniques.NTPTunnel
 	DoHTunnel       Method = techniques.DoHTunnel
+	// Wave 20: Modern portal/transport techniques.
+	CAPPORTExtend Method = techniques.CAPPORTExtend
+	DoQTunnel     Method = techniques.DoQTunnel
+	HTTP3Tunnel   Method = techniques.HTTP3Tunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -81,6 +85,10 @@ type Config struct {
 	CFWorkersURL string
 	VPNServer    string
 	Stealth      bool
+	// CAPPORTURL is the RFC 8908 captive-portal API endpoint, typically
+	// discovered via DHCP option 114 or router advertisement option 37.
+	// Empty string means CAPPORT API is unavailable for this network.
+	CAPPORTURL string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -327,6 +335,19 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	},
 	DoHTunnel: {
 		run: func(probes *ProbeResults, _ *Config, _ PlatformOps) Result { return tryDoHTunnel(probes) },
+	},
+	// Wave 20: Modern portal/transport techniques (detection-only stubs for now;
+	// execution runners pending implementation in follow-up PRs).
+	CAPPORTExtend: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryCAPPORTExtend(config, probes)
+		},
+	},
+	DoQTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryDoQTunnel(config, probes) },
+	},
+	HTTP3Tunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryHTTP3Tunnel(config, probes) },
 	},
 }
 

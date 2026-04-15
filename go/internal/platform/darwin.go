@@ -708,3 +708,32 @@ func DisableStealth(state *StealthState) {
 		}
 	}
 }
+
+// GetCAPPORTURL returns the RFC 8908 captive-portal API URL advertised
+// by DHCP option 114 (RFC 7710). Empty string if the network does not
+// advertise CAPPORT.
+//
+// On macOS, we parse `ipconfig getpacket <iface>` output which exposes
+// DHCP option fields including captive_portal_url.
+func GetCAPPORTURL(iface string) (string, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return "", fmt.Errorf("get capport url: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ipconfig", "getpacket", iface).Output()
+	if err != nil {
+		return "", fmt.Errorf("ipconfig getpacket: %w", err)
+	}
+
+	// Format in DHCP packet output:
+	//   captive_portal_url (string): https://connect.klm.com/ach/api/captive-portal
+	re := regexp.MustCompile(`captive_portal_url\s*\(string\):\s*(\S+)`)
+	m := re.FindSubmatch(out)
+	if m == nil {
+		return "", nil // Not advertised -- not an error
+	}
+	return string(m[1]), nil
+}

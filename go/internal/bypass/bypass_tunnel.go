@@ -4,10 +4,12 @@
 package bypass
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/inflight"
 	"github.com/MikkoParkkola/nowifi/internal/server"
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
@@ -212,4 +214,84 @@ func tryDoHTunnel(probes *ProbeResults) Result {
 
 	handle.Stop()
 	return Result{Method: DoHTunnel, Success: false, Details: "DoH tunnel connected but no internet access"}
+}
+
+// Wave 20 (2026-04): Modern portal/transport techniques.
+//
+// CAPPORTExtend is fully implemented — queries the RFC 8908 API endpoint
+// (discovered via DHCP option 114 or passed via Config.CAPPORTURL) and surfaces
+// session status plus the user-portal-url for extension UI.
+//
+// DoQTunnel and HTTP3Tunnel are detection-only stubs pending runner implementation:
+//   - tryDoQTunnel:    QUIC client to dns.adguard.com:853 or quic.cloudflare-dns.com:443,
+//     with a DNS resolver configured to use it for tunneled queries.
+//   - tryHTTP3Tunnel:  HTTP/3 client (quic-go) to a tunnel endpoint advertising Alt-Svc,
+//     wrapped as SOCKS5 proxy.
+
+// tryCAPPORTExtend queries the RFC 8908 CAPPORT API and reports session status.
+// Success means the API is reachable and returns a usable response; the Details
+// field contains the user-portal-url for session extension if supported.
+func tryCAPPORTExtend(config *Config, _ *ProbeResults) Result {
+	if config == nil || config.CAPPORTURL == "" {
+		return Result{
+			Method:  CAPPORTExtend,
+			Success: false,
+			Details: "No CAPPORT URL available (not advertised via DHCP option 114 on this network).",
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	resp, err := inflight.QueryCAPPORT(ctx, config.CAPPORTURL, 5*time.Second)
+	if err != nil {
+		return Result{
+			Method:  CAPPORTExtend,
+			Success: false,
+			Details: fmt.Sprintf("CAPPORT API unreachable: %v", err),
+		}
+	}
+
+	// Build human-readable status.
+	var status string
+	if resp.IsCaptive() {
+		status = "CAPTIVE (not authenticated)"
+	} else {
+		status = "AUTHENTICATED"
+	}
+
+	details := fmt.Sprintf("RFC 8908 CAPPORT API reachable. Status: %s.", status)
+	if remaining := resp.SessionRemaining(); remaining > 0 {
+		details += fmt.Sprintf(" Session expires in %ds.", remaining)
+	}
+	if resp.CanExtend() && resp.UserPortalURL != "" {
+		details += fmt.Sprintf(" Extend session at: %s", resp.UserPortalURL)
+	} else if resp.UserPortalURL != "" {
+		details += fmt.Sprintf(" User portal: %s", resp.UserPortalURL)
+	}
+
+	// Success when API is reachable and parseable. If we're captive, the user
+	// still needs to authenticate -- but knowing the portal URL is a valuable
+	// signal that saves guesswork.
+	return Result{
+		Method:  CAPPORTExtend,
+		Success: !resp.IsCaptive(),
+		Details: details,
+	}
+}
+
+func tryDoQTunnel(_ *Config, _ *ProbeResults) Result {
+	return Result{
+		Method:  DoQTunnel,
+		Success: false,
+		Details: "Detection wired (DoQOpen). Execution stub: QUIC DNS client not yet implemented.",
+	}
+}
+
+func tryHTTP3Tunnel(_ *Config, _ *ProbeResults) Result {
+	return Result{
+		Method:  HTTP3Tunnel,
+		Success: false,
+		Details: "Detection wired (HTTP3Open+QUICOpen). Execution stub: quic-go SOCKS5 wrapper not yet implemented.",
+	}
 }

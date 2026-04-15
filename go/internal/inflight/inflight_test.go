@@ -4,11 +4,15 @@
 package inflight
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDetectProvider_Panasonic(t *testing.T) {
@@ -223,5 +227,136 @@ func TestReadmeInflightClaimsMatchRegistry(t *testing.T) {
 	}
 	if strings.Contains(text, "50+ airlines") {
 		t.Fatal("README should not advertise the stale 50+ airline claim")
+	}
+}
+
+func TestDetectLinkType(t *testing.T) {
+	tests := []struct {
+		rtt      int
+		expected LinkType
+		name     string
+	}{
+		{0, "", "zero RTT returns empty"},
+		{35, LEO, "Starlink typical 35ms"},
+		{60, LEO, "LEO upper boundary"},
+		{70, AirToGround, "ATG lower boundary"},
+		{150, AirToGround, "Gogo ATG typical"},
+		{250, KaBand, "satellite lower boundary"},
+		{700, KaBand, "Ku/Ka typical"},
+		{850, KaBand, "KLM observed avg"},
+		{1283, KaBand, "KLM observed max"},
+		{1500, "", "degraded path returns empty"},
+	}
+	for _, tc := range tests {
+		if got := DetectLinkType(tc.rtt); got != tc.expected {
+			t.Errorf("%s: DetectLinkType(%d) = %q, want %q", tc.name, tc.rtt, got, tc.expected)
+		}
+	}
+}
+
+func TestIsStarlink(t *testing.T) {
+	if !IsStarlink(40) {
+		t.Error("40ms RTT should identify as Starlink/LEO")
+	}
+	if IsStarlink(850) {
+		t.Error("850ms RTT should not identify as Starlink/LEO")
+	}
+	if IsStarlink(0) {
+		t.Error("0ms RTT should not identify as Starlink/LEO")
+	}
+}
+
+
+func TestCAPPORTResponse_IsCaptive(t *testing.T) {
+	captive := true
+	notCaptive := false
+	tests := []struct {
+		name string
+		resp *CAPPORTResponse
+		want bool
+	}{
+		{"nil response", nil, false},
+		{"absent field", &CAPPORTResponse{}, false},
+		{"captive true", &CAPPORTResponse{Captive: &captive}, true},
+		{"captive false", &CAPPORTResponse{Captive: &notCaptive}, false},
+	}
+	for _, tc := range tests {
+		if got := tc.resp.IsCaptive(); got != tc.want {
+			t.Errorf("%s: IsCaptive() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCAPPORTResponse_CanExtend(t *testing.T) {
+	yes := true
+	no := false
+	if (&CAPPORTResponse{CanExtendSession: &yes}).CanExtend() != true {
+		t.Error("CanExtendSession:true should return true")
+	}
+	if (&CAPPORTResponse{CanExtendSession: &no}).CanExtend() != false {
+		t.Error("CanExtendSession:false should return false")
+	}
+	if (&CAPPORTResponse{}).CanExtend() != false {
+		t.Error("absent field should return false")
+	}
+	var nilResp *CAPPORTResponse
+	if nilResp.CanExtend() {
+		t.Error("nil receiver should return false, not panic")
+	}
+}
+
+func TestCAPPORTResponse_SessionRemaining(t *testing.T) {
+	var secondsRemaining int64 = 1800
+	if (&CAPPORTResponse{SessionSecondsRemaining: &secondsRemaining}).SessionRemaining() != 1800 {
+		t.Error("seconds-remaining should be returned verbatim")
+	}
+	if (&CAPPORTResponse{}).SessionRemaining() != -1 {
+		t.Error("absent fields should return -1")
+	}
+}
+
+func TestQueryCAPPORT_ParsesKLMStyleResponse(t *testing.T) {
+	// KLM observed response (sanitized):
+	// {"captive":false,"can-extend-session":true,"venue-info-url":"...","user-portal-url":"..."}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/captive+json")
+		_, _ = w.Write([]byte(`{"captive":false,"can-extend-session":true,"venue-info-url":"https://example.com/venue","user-portal-url":"https://example.com/portal"}`))
+	}))
+	defer server.Close()
+
+	resp, err := QueryCAPPORT(context.Background(), server.URL, 2*time.Second)
+	if err != nil {
+		t.Fatalf("QueryCAPPORT failed: %v", err)
+	}
+	if resp.IsCaptive() {
+		t.Error("expected not captive")
+	}
+	if !resp.CanExtend() {
+		t.Error("expected can-extend-session: true")
+	}
+	if resp.UserPortalURL != "https://example.com/portal" {
+		t.Errorf("unexpected user-portal-url: %q", resp.UserPortalURL)
+	}
+}
+
+func TestQueryCAPPORT_HandlesErrors(t *testing.T) {
+	// Invalid JSON
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer server.Close()
+
+	if _, err := QueryCAPPORT(context.Background(), server.URL, 2*time.Second); err == nil {
+		t.Error("expected error on invalid JSON")
+	}
+
+	// 500 error
+	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer errServer.Close()
+
+	if _, err := QueryCAPPORT(context.Background(), errServer.URL, 2*time.Second); err == nil {
+		t.Error("expected error on 500")
 	}
 }
