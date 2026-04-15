@@ -85,6 +85,10 @@ type Config struct {
 	CFWorkersURL string
 	VPNServer    string
 	Stealth      bool
+	// CAPPORTURL is the RFC 8908 captive-portal API endpoint, typically
+	// discovered via DHCP option 114 or router advertisement option 37.
+	// Empty string means CAPPORT API is unavailable for this network.
+	CAPPORTURL string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -335,7 +339,9 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	// Wave 20: Modern portal/transport techniques (detection-only stubs for now;
 	// execution runners pending implementation in follow-up PRs).
 	CAPPORTExtend: {
-		run: func(probes *ProbeResults, _ *Config, _ PlatformOps) Result { return tryCAPPORTExtend(probes) },
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryCAPPORTExtend(config, probes)
+		},
 	},
 	DoQTunnel: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result { return tryDoQTunnel(config, probes) },
