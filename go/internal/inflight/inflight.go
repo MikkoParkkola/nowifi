@@ -19,7 +19,15 @@
 // Note: Boingo is omitted as it primarily operates ground hotspots, not inflight.
 package inflight
 
-import "strings"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
 
 // Provider identifies an inflight connectivity provider.
 type Provider string
@@ -456,4 +464,105 @@ func AllAirlines() map[string]Provider {
 		}
 	}
 	return result
+}
+
+// CAPPORTResponse mirrors the JSON response defined in RFC 8908 §5.
+// Fields use pointer types to distinguish between "false" and "absent".
+type CAPPORTResponse struct {
+	// Captive indicates whether the client is currently behind a captive portal.
+	// False means the client has internet access.
+	Captive *bool `json:"captive,omitempty"`
+	// CanExtendSession indicates whether the operator supports session extension
+	// via the user-portal-url.
+	CanExtendSession *bool `json:"can-extend-session,omitempty"`
+	// SessionExpires is a Unix timestamp when the session will end.
+	SessionExpires *int64 `json:"session-expires,omitempty"`
+	// SessionSecondsRemaining is an alternative to SessionExpires (some operators use this).
+	SessionSecondsRemaining *int64 `json:"seconds-remaining,omitempty"`
+	// UserPortalURL is where a human should be directed for account actions
+	// (login, pay, extend). Operator-specific UI lives here.
+	UserPortalURL string `json:"user-portal-url,omitempty"`
+	// VenueInfoURL points to venue information (unrelated to auth).
+	VenueInfoURL string `json:"venue-info-url,omitempty"`
+	// BytesRemaining is a data quota indicator.
+	BytesRemaining *int64 `json:"bytes-remaining,omitempty"`
+}
+
+// QueryCAPPORT fetches the RFC 8908 captive-portal API response from the given
+// URL. It returns the parsed response or an error if the endpoint is unreachable
+// or returns invalid JSON.
+//
+// The URL should come from DHCP option 114 (RFC 7710) or router advertisement
+// option 37 (RFC 8910). Pass the url directly — this function does not discover it.
+//
+// Timeout is clamped to a sensible default if zero or negative.
+func QueryCAPPORT(ctx context.Context, url string, timeout time.Duration) (*CAPPORTResponse, error) {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	// Per RFC 8908, API MUST return application/captive+json.
+	req.Header.Set("Accept", "application/captive+json, application/json;q=0.9")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http get: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("non-2xx status: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	var capportResp CAPPORTResponse
+	if err := json.Unmarshal(body, &capportResp); err != nil {
+		return nil, fmt.Errorf("parse json: %w", err)
+	}
+	return &capportResp, nil
+}
+
+// SessionRemaining returns the number of seconds until the session expires,
+// preferring seconds-remaining and falling back to session-expires. Returns
+// -1 if neither field is set.
+func (r *CAPPORTResponse) SessionRemaining() int64 {
+	if r == nil {
+		return -1
+	}
+	if r.SessionSecondsRemaining != nil {
+		return *r.SessionSecondsRemaining
+	}
+	if r.SessionExpires != nil {
+		// Convert absolute timestamp to relative seconds.
+		return *r.SessionExpires - time.Now().Unix()
+	}
+	return -1
+}
+
+// IsCaptive reports whether the client is currently captive behind a portal.
+// Returns false if the field is absent (assume authenticated).
+func (r *CAPPORTResponse) IsCaptive() bool {
+	if r == nil || r.Captive == nil {
+		return false
+	}
+	return *r.Captive
+}
+
+// CanExtend reports whether the operator advertises session extension support.
+func (r *CAPPORTResponse) CanExtend() bool {
+	if r == nil || r.CanExtendSession == nil {
+		return false
+	}
+	return *r.CanExtendSession
 }
