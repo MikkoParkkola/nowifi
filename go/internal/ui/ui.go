@@ -32,7 +32,7 @@ var staticFiles embed.FS
 type State struct {
 	mu sync.RWMutex
 
-	Status  string `json:"status"` // idle, probing, bypassing, diagnosing, active, error
+	Status  string `json:"status"` // idle, probing, captive, diagnosing, active, error
 	Message string `json:"message"`
 
 	// WiFi info.
@@ -578,14 +578,16 @@ func runAuditBackground() {
 	state.Methods = methods
 	state.mu.Unlock()
 
-	// In a full audit, bypass attempts would run here.
-	// For now, we report what would happen.
+	// The dashboard is read-only by design: it shows portal/probe state and
+	// directs the user to the CLI for privileged actions. Bypass techniques
+	// require root (MAC clone, DHCP rotate, system proxy set, TUN device
+	// creation) and interactive confirmation, which don't belong in a
+	// long-running HTTP dashboard.
 	if portal != nil && portal.IsCaptive {
 		state.mu.Lock()
-		state.Status = "bypassing"
+		state.Status = "captive"
 		state.mu.Unlock()
-		AppendLog("Portal is captive. Bypass execution not yet wired to dashboard.")
-		AppendLog("Run `sudo nowifi` from the terminal for full bypass pipeline.")
+		AppendLog("Portal is captive. Run `sudo nowifi` to execute the bypass pipeline.")
 	} else {
 		AppendLog("No captive portal detected. Network appears open.")
 	}

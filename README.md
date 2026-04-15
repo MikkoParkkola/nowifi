@@ -118,7 +118,10 @@ nowifi doctor
 | `sudo nowifi -p` | Probe only -- find leaks without exploiting them |
 | `sudo nowifi --fast` | Skip stealth timing (faster but more detectable) |
 | `sudo nowifi -t URL` | Use a specific chisel tunnel server |
+| `sudo nowifi --http3-server https://vps:443` | HTTP/3-ALPN tunnel to nowifi server (#22) |
+| `sudo nowifi --doq-server 1.1.1.1:853` | Override default DoQ resolver (#21) |
 | `sudo nowifi -i en1` | Use a different WiFi interface (default: `en0`) |
+| `nowifi recon -o klm.json` | Passive network fingerprint for contributing provider profiles |
 | `nowifi diagnose` | Read-only security assessment (no changes to network) |
 | `nowifi diagnose -r json -o report.json` | Save diagnosis as JSON file |
 | `nowifi crack` | 8-technique WPA/WPA2 cracking pipeline (ordered fastest-to-slowest, stops on first recovered password) |
@@ -132,6 +135,7 @@ nowifi doctor
 | `nowifi server list` | List active tunnel servers |
 | `nowifi server destroy` | Destroy a tunnel server |
 | `nowifi server info` | Show which techniques need a server |
+| `sudo nowifi server listen` | Run the HTTP/3-ALPN tunnel server (peer for `--http3-server`) |
 | `nowifi ecosystem` | Show complementary tools (bettercap, wifiphisher, etc.) |
 | `nowifi setup` | Interactive first-time setup wizard |
 | `nowifi doctor` | System health check |
@@ -169,6 +173,9 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 17 | **CF Workers proxy** | Serverless proxy via Cloudflare Workers (no server needed) | Critical |
 | 18 | **NTP tunnel** | Data encoded in NTP extension fields on UDP/123 | High |
 | 19 | **DoH tunnel** | DNS-over-HTTPS to Cloudflare/Google (whitelisted endpoints) | High |
+| 20 | **CAPPORT extend** | RFC 8908 captive-portal API — surfaces session state and user-portal URL | Medium |
+| 21 | **DoQ tunnel** | DNS-over-QUIC (RFC 9250) to public resolver, bypasses DNS interception | High |
+| 22 | **HTTP/3 tunnel** | Pure-Go QUIC tunnel with ALPN `h3` on UDP/443, SOCKS5 wrapper | Critical |
 
 ### WPA Cracking (4 techniques)
 
@@ -176,19 +183,19 @@ These crack the actual WiFi password when you don't have it. The stages run in o
 
 | # | Technique | How it works |
 |---|-----------|-------------|
-| 20 | **PMKID capture** | Extract PMKID from AP's first message -- no clients needed (~60% of APs) |
-| 21 | **WPS Pixie-Dust** | Exploit weak RNG in WPS (~30% of WPS-enabled APs, 5-30s) |
-| 22 | **Handshake capture + hashcat** | Deauth a client, capture 4-way handshake, GPU crack |
-| 23 | **WPS PIN brute force** | Brute force 11,000 PIN combinations (2-10 hours, last resort) |
+| 23 | **PMKID capture** | Extract PMKID from AP's first message -- no clients needed (~60% of APs) |
+| 24 | **WPS Pixie-Dust** | Exploit weak RNG in WPS (~30% of WPS-enabled APs, 5-30s) |
+| 25 | **Handshake capture + hashcat** | Deauth a client, capture 4-way handshake, GPU crack |
+| 26 | **WPS PIN brute force** | Brute force 11,000 PIN combinations (2-10 hours, last resort) |
 
 ### Smart Cracking (4 additional strategies)
 
 | # | Technique | How it works |
 |---|-----------|-------------|
-| 24 | **Smart common passwords** | Top 1000 WiFi passwords (embedded, no wordlist needed) |
-| 25 | **Numeric mask attack** | 8-digit patterns common in ISP-issued routers |
-| 26 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
-| 27 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
+| 27 | **Smart common passwords** | Top 1000 WiFi passwords (embedded, no wordlist needed) |
+| 28 | **Numeric mask attack** | 8-digit patterns common in ISP-issued routers |
+| 29 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
+| 30 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
 
 The smart-crack pipeline also runs dictionary, smart-brute, and (opt-in) full-brute stages between rules and online brute force, in increasing cost order.
 
@@ -248,6 +255,23 @@ chisel server --reverse --port 443
 # On your laptop (behind portal):
 sudo nowifi -t https://your-server.example.com
 ```
+
+### HTTP/3-ALPN Tunnel Server (#22, pure-Go, no external binary)
+
+```bash
+# On your server (once):
+sudo nowifi server listen --addr 0.0.0.0:443 --hostname tunnel.example.com
+# Auto-generates a self-signed cert (or pass --cert/--key for Let's Encrypt).
+
+# On your laptop (behind portal):
+sudo nowifi --http3-server https://tunnel.example.com:443
+```
+
+The server speaks QUIC with ALPN `h3` on UDP/443. From a middlebox's point of view the traffic is indistinguishable from a browser HTTP/3 session, so it passes TCP-only DPI and most captive-portal filters.
+
+### DoH/DoQ (no server needed)
+
+Technique #21 (DoQ) connects to a public resolver (default `dns.adguard.com:853`), so no infrastructure is required. Same for #19 (DoH — Cloudflare/Google).
 
 ---
 

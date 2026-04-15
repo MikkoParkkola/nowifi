@@ -175,9 +175,13 @@ func buildReconReport(iface string) *ReconReport {
 		}
 	}
 
-	// DNS.
-	if resolvers, err := net.LookupHost("localhost"); err == nil && len(resolvers) > 0 {
-		_ = resolvers // placeholder; real DNS resolver enum is platform-specific
+	// DNS resolvers + search domain (platform-specific: scutil on darwin,
+	// resolvectl + /etc/resolv.conf on linux).
+	if resolvers, err := platform.GetDNSResolvers(iface); err == nil {
+		report.DNS.Resolvers = resolvers
+	}
+	if domain, err := platform.GetDNSSearchDomain(iface); err == nil && domain != "" {
+		report.DNS.SearchDomain = domain
 	}
 
 	// CAPPORT.
