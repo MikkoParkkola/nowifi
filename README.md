@@ -13,7 +13,7 @@
 
 **Author: Mikko Parkkola**
 
-One command. 33 techniques. Browser works immediately.
+One command. 34 techniques. Browser works immediately.
 
 ```bash
 sudo nowifi
@@ -23,7 +23,7 @@ sudo nowifi
   <img src="screenshot.png" alt="nowifi dashboard" width="800">
 </p>
 
-Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 25 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
+Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 26 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-technique WPA/WPA2 cracking pipeline. It escalates from PMKID and WPS Pixie-Dust through handshake capture, dictionary/smart cracking, and only then to WPS PIN or online brute force, stopping as soon as a password is recovered.
 
@@ -147,9 +147,9 @@ nowifi doctor
 
 ---
 
-## 33 Techniques
+## 34 Techniques
 
-### Portal Bypass (25 techniques)
+### Portal Bypass (26 techniques)
 
 These work when you're connected to WiFi but stuck behind a captive portal login page.
 
@@ -179,7 +179,8 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 22 | **HTTP/3 tunnel** | Pure-Go QUIC tunnel with ALPN `h3` on UDP/443, SOCKS5 wrapper | Critical |
 | 23 | **DHCP Option 121 route** | CVE-2024-3661 "TunnelVision" — honor DHCP-advertised static routes that bypass the portal's filter chain (serverless) | High |
 | 24 | **ECH domain fronting** | TLS 1.3 Encrypted Client Hello (RFC 9147) cloaks the real SNI behind a CDN cover name | Critical |
-| 25 | **Secondary interface** | Use cellular/USB-Ethernet/Bluetooth-PAN to exit the carrier, bypassing portal entirely (serverless) | Critical |
+| 25 | **WG-over-WebSocket** | WireGuard/tunnel payloads in WS binary frames on TCP/443 (looks like Teams/Zoom) | Critical |
+| 26 | **Secondary interface** | Use cellular/USB-Ethernet/Bluetooth-PAN to exit the carrier, bypassing portal entirely (serverless) | Critical |
 
 ### WPA Cracking (4 techniques)
 
@@ -187,19 +188,19 @@ These crack the actual WiFi password when you don't have it. The stages run in o
 
 | # | Technique | How it works |
 |---|-----------|-------------|
-| 26 | **PMKID capture** | Extract PMKID from AP's first message -- no clients needed (~60% of APs) |
-| 27 | **WPS Pixie-Dust** | Exploit weak RNG in WPS (~30% of WPS-enabled APs, 5-30s) |
-| 28 | **Handshake capture + hashcat** | Deauth a client, capture 4-way handshake, GPU crack |
-| 29 | **WPS PIN brute force** | Brute force 11,000 PIN combinations (2-10 hours, last resort) |
+| 27 | **PMKID capture** | Extract PMKID from AP's first message -- no clients needed (~60% of APs) |
+| 28 | **WPS Pixie-Dust** | Exploit weak RNG in WPS (~30% of WPS-enabled APs, 5-30s) |
+| 29 | **Handshake capture + hashcat** | Deauth a client, capture 4-way handshake, GPU crack |
+| 30 | **WPS PIN brute force** | Brute force 11,000 PIN combinations (2-10 hours, last resort) |
 
 ### Smart Cracking (4 additional strategies)
 
 | # | Technique | How it works |
 |---|-----------|-------------|
-| 30 | **Smart common passwords** | Top 1000 WiFi passwords (embedded, no wordlist needed) |
-| 31 | **Numeric mask attack** | 8-digit patterns common in ISP-issued routers |
-| 32 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
-| 33 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
+| 31 | **Smart common passwords** | Top 1000 WiFi passwords (embedded, no wordlist needed) |
+| 32 | **Numeric mask attack** | 8-digit patterns common in ISP-issued routers |
+| 33 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
+| 34 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
 
 The smart-crack pipeline also runs dictionary, smart-brute, and (opt-in) full-brute stages between rules and online brute force, in increasing cost order.
 

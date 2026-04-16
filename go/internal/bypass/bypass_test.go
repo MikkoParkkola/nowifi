@@ -139,6 +139,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		DHCPRouteBypass,
 		// Wave 21: ECH domain fronting.
 		ECHFronting,
+		// Wave 21: WireGuard-over-WebSocket.
+		WGOverWebSocket,
 		// Wave 21: Secondary interface bypass.
 		SecondaryIfaceBypass,
 	}
