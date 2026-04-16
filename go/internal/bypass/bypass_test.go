@@ -139,6 +139,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		DHCPRouteBypass,
 		// Wave 21: ECH domain fronting.
 		ECHFronting,
+		// Wave 21: Secondary interface bypass.
+		SecondaryIfaceBypass,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,

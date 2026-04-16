@@ -76,6 +76,8 @@ const (
 	DHCPRouteBypass Method = techniques.DHCPRouteBypass
 	// Wave 21: TLS 1.3 ECH (RFC 9147) domain fronting.
 	ECHFronting Method = techniques.ECHFronting
+	// Wave 21: Secondary interface (cellular/ethernet/tethered) bypass.
+	SecondaryIfaceBypass Method = techniques.SecondaryIfaceBypass
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -385,6 +387,12 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	ECHFronting: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryECHFronting(config, probes)
+		},
+	},
+	// Wave 21: Secondary interface bypass.
+	SecondaryIfaceBypass: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return trySecondaryIfaceBypass(config, probes)
 		},
 	},
 }
