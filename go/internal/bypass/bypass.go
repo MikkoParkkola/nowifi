@@ -72,6 +72,8 @@ const (
 	CAPPORTExtend Method = techniques.CAPPORTExtend
 	DoQTunnel     Method = techniques.DoQTunnel
 	HTTP3Tunnel   Method = techniques.HTTP3Tunnel
+	// Wave 21: serverless DHCP-advertised route injection.
+	DHCPRouteBypass Method = techniques.DHCPRouteBypass
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -96,6 +98,11 @@ type Config struct {
 	// DoQServer is a DNS-over-QUIC endpoint in host:port form.
 	// Defaults to dns.adguard.com:853 when empty.
 	DoQServer string
+	// DHCPClasslessRoutes holds RFC 3442 option 121 routes advertised by
+	// the DHCP server on Interface. Populated by the audit pipeline from
+	// platform.GetDHCPClasslessRoutes at probe time. Non-default routes
+	// here enable the Wave 21 #23 DHCPRouteBypass technique.
+	DHCPClasslessRoutes []platform.DHCPRoute
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -208,8 +215,8 @@ type PlatformOps interface {
 	GenerateRandomMAC() string
 }
 
-// RunBypasses tries all 19 bypass techniques in order, stopping on the
-// first success. Returns the list of all attempted results.
+// RunBypasses tries every registered bypass technique in order, stopping on
+// the first success. Returns the list of all attempted results.
 func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Result {
 	if plat == nil {
 		plat = &defaultPlatformOps{}
@@ -356,6 +363,12 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	HTTP3Tunnel: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryHTTP3Tunnel(config, probes)
+		},
+	},
+	// Wave 21: DHCP-advertised static route injection.
+	DHCPRouteBypass: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryDHCPRouteBypass(config, probes)
 		},
 	},
 }

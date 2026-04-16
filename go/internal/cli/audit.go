@@ -233,20 +233,23 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	// --- Phase 4: Bypass ---
 	// Discover RFC 8908 CAPPORT URL from DHCP option 114 (non-fatal if absent).
 	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
+	// Discover RFC 3442 option 121 routes (non-fatal if absent) for Wave 21 #23.
+	dhcpRoutes, _ := platform.GetDHCPClasslessRoutes(flagInterface)
 
 	bpConfig := &bypass.Config{
-		Interface:    flagInterface,
-		TunnelServer: flagTunnelServer,
-		DNSDomain:    flagDNSDomain,
-		ICMPServer:   flagICMPServer,
-		QUICServer:   flagQUICServer,
-		NTPServer:    flagNTPServer,
-		VPNServer:    flagVPNServer,
-		CFWorkersURL: flagCFWorkers,
-		CAPPORTURL:   capportURL,
-		HTTP3Server:  flagHTTP3Server,
-		DoQServer:    flagDoQServer,
-		Stealth:      stealth,
+		Interface:           flagInterface,
+		TunnelServer:        flagTunnelServer,
+		DNSDomain:           flagDNSDomain,
+		ICMPServer:          flagICMPServer,
+		QUICServer:          flagQUICServer,
+		NTPServer:           flagNTPServer,
+		VPNServer:           flagVPNServer,
+		CFWorkersURL:        flagCFWorkers,
+		CAPPORTURL:          capportURL,
+		HTTP3Server:         flagHTTP3Server,
+		DoQServer:           flagDoQServer,
+		DHCPClasslessRoutes: dhcpRoutes,
+		Stealth:             stealth,
 	}
 
 	p.Send(statusMsg{text: "Running bypass techniques..."})

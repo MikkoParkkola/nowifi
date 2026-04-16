@@ -31,6 +31,8 @@ const (
 	CAPPORTExtend ID = "capport_session_extend" // RFC 8908 session extension
 	DoQTunnel     ID = "doq_tunnel"             // DNS-over-QUIC tunnel
 	HTTP3Tunnel   ID = "http3_tunnel"           // HTTP/3-specific tunnel (QUIC Alt-Svc)
+	// Wave 21: Serverless, infrastructure-native techniques (2026-04).
+	DHCPRouteBypass ID = "dhcp_route_bypass" // CVE-2024-3661 TunnelVision / DHCP option 121
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -60,6 +62,10 @@ type BypassTechniqueSignals struct {
 	// HTTP3Open is true when a test UDP/443 QUIC handshake succeeds
 	// (distinct from QUICOpen which may only check protocol presence).
 	HTTP3Open bool
+	// DHCPClasslessRoutesAvailable is true when the DHCP server advertises
+	// RFC 3442 option 121 routes AND at least one is non-default. Powers
+	// Wave 21 technique #23 (CVE-2024-3661 TunnelVision).
+	DHCPClasslessRoutesAvailable bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -378,6 +384,26 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 				"Bypasses TCP-only middleboxes and portal filters focused on TCP/443.",
 			Remediation: "Deploy QUIC-aware inspection. Block UDP/443 to untrusted destinations for " +
 				"unauthenticated clients. Inspect Alt-Svc headers for rogue endpoints.",
+		},
+	},
+	// Wave 21 (2026-04): serverless DHCP option 121 route injection.
+	// Based on CVE-2024-3661 ("TunnelVision", Leviathan Security 2024-05).
+	{
+		info: BypassTechniqueInfo{
+			Number: 23, ID: DHCPRouteBypass, Name: "DHCP Option 121 route bypass", HelpName: "DHCP route",
+			Confidence: "MEDIUM", Reason: "DHCP advertises non-default classless static routes",
+			Risk: "Adds kernel routes -- rolls back on failure",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.DHCPClasslessRoutesAvailable
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "high",
+			Impact: "Full internet via DHCP-advertised routes that bypass portal filtering chains. " +
+				"Same primitive as CVE-2024-3661 applied to captive portals.",
+			Remediation: "Strip DHCP option 121 on untrusted networks. Enforce captive policy in the " +
+				"forwarding plane (netfilter/PF FORWARD chain) rather than only in the default-route " +
+				"chain. Alert on DHCP leases advertising non-default static routes.",
 		},
 	},
 }

@@ -33,6 +33,23 @@ type ArpEntry struct {
 	Interface string
 }
 
+// DHCPRoute is one entry from DHCP option 121 (RFC 3442 classless static
+// routes). Gateway is the next-hop IP; CIDR is always canonical
+// "network/prefix" (e.g. "10.0.0.0/8" or "0.0.0.0/0" for default route).
+//
+// Option 121 is the delivery channel behind CVE-2024-3661 ("TunnelVision"):
+// a DHCP-advertised route can bypass policy chains that inspect only
+// packets in the default-route path. Wave 21 technique #23 uses this.
+type DHCPRoute struct {
+	CIDR    string
+	Gateway string
+}
+
+// IsDefault reports whether this route represents the IPv4 default route.
+func (r DHCPRoute) IsDefault() bool {
+	return r.CIDR == "0.0.0.0/0" || r.CIDR == "::/0"
+}
+
 // StealthState holds the original system settings for stealth restoration.
 type StealthState struct {
 	OriginalTTL  int

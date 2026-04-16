@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -802,4 +803,86 @@ func GetDNSSearchDomain(iface string) (string, error) {
 		return domain, nil
 	}
 	return "", nil
+}
+
+// GetDHCPClasslessRoutes returns DHCP option 121 (RFC 3442) classless static
+// routes advertised on the given interface. Empty slice when not advertised.
+//
+// macOS `ipconfig getpacket <iface>` emits option 121 as either:
+//
+//	classless_static_route (ip_mult): {10.0.0.0/8, 192.168.1.1}, {0.0.0.0/0, 192.168.1.1}
+//	option_121 (dhcp_option): ...
+//
+// We accept both field names.
+func GetDHCPClasslessRoutes(iface string) ([]DHCPRoute, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("get dhcp routes: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ipconfig", "getpacket", iface).Output()
+	if err != nil {
+		return nil, fmt.Errorf("ipconfig getpacket: %w", err)
+	}
+
+	return parseClasslessStaticRoutes(string(out)), nil
+}
+
+// parseClasslessStaticRoutes extracts {cidr, gateway} pairs from a single
+// `classless_static_route (...)` or `option_121 (...)` line. Exposed for tests.
+func parseClasslessStaticRoutes(out string) []DHCPRoute {
+	// Match the whole option line so we can then pull pairs out of it.
+	lineRE := regexp.MustCompile(`(?i)(classless_static_route|option_121)\s*\([^)]+\):\s*(.+)`)
+	pairRE := regexp.MustCompile(`\{\s*([\d\.]+/\d+)\s*,\s*([\d\.]+)\s*\}`)
+	var routes []DHCPRoute
+	for _, m := range lineRE.FindAllStringSubmatch(out, -1) {
+		payload := m[2]
+		for _, pm := range pairRE.FindAllStringSubmatch(payload, -1) {
+			routes = append(routes, DHCPRoute{CIDR: pm[1], Gateway: pm[2]})
+		}
+	}
+	return routes
+}
+
+// AddRoute installs an IPv4 route on macOS via `route add -net CIDR GW`.
+// Idempotent: "route already in table" is not treated as error.
+func AddRoute(cidr, gateway string) error {
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return fmt.Errorf("add route: invalid cidr %q: %w", cidr, err)
+	}
+	if net.ParseIP(gateway) == nil {
+		return fmt.Errorf("add route: invalid gateway %q", gateway)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "route", "-n", "add", "-net", cidr, gateway).CombinedOutput()
+	if err != nil {
+		msg := string(out)
+		if strings.Contains(msg, "File exists") || strings.Contains(msg, "already in table") {
+			return nil
+		}
+		return fmt.Errorf("route add: %w: %s", err, msg)
+	}
+	return nil
+}
+
+// DeleteRoute removes an IPv4 route previously added via AddRoute.
+// Missing route is not treated as error.
+func DeleteRoute(cidr string) error {
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return fmt.Errorf("delete route: invalid cidr %q: %w", cidr, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "route", "-n", "delete", "-net", cidr).CombinedOutput()
+	if err != nil {
+		msg := string(out)
+		if strings.Contains(msg, "not in table") {
+			return nil
+		}
+		return fmt.Errorf("route delete: %w: %s", err, msg)
+	}
+	return nil
 }
