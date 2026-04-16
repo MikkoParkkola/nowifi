@@ -7,8 +7,8 @@ import "testing"
 
 func TestBypassTechniqueInfosAreOrderedAndUnique(t *testing.T) {
 	infos := BypassTechniqueInfos()
-	if len(infos) != 24 {
-		t.Fatalf("BypassTechniqueInfos() length = %d, want 24", len(infos))
+	if len(infos) != 25 {
+		t.Fatalf("BypassTechniqueInfos() length = %d, want 25", len(infos))
 	}
 
 	seen := make(map[ID]bool, len(infos))
@@ -34,8 +34,8 @@ func TestServerRequirementSplitMatchesCurrentTechniqueContract(t *testing.T) {
 	serverless := ServerlessBypassTechniqueInfos()
 	serverRequired := ServerRequiredBypassTechniqueInfos()
 
-	if len(serverless) != 12 {
-		t.Fatalf("len(ServerlessBypassTechniqueInfos()) = %d, want 12", len(serverless))
+	if len(serverless) != 13 {
+		t.Fatalf("len(ServerlessBypassTechniqueInfos()) = %d, want 13", len(serverless))
 	}
 	if len(serverRequired) != 12 {
 		t.Fatalf("len(ServerRequiredBypassTechniqueInfos()) = %d, want 12", len(serverRequired))

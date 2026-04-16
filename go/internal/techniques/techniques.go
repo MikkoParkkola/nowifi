@@ -33,7 +33,8 @@ const (
 	HTTP3Tunnel   ID = "http3_tunnel"           // HTTP/3-specific tunnel (QUIC Alt-Svc)
 	// Wave 21: Serverless, infrastructure-native techniques (2026-04).
 	DHCPRouteBypass ID = "dhcp_route_bypass" //nolint:gosec // G101 false positive on "bypass"; not a credential. CVE-2024-3661 TunnelVision.
-	ECHFronting     ID = "ech_fronting"      // TLS 1.3 Encrypted Client Hello SNI concealment
+	ECHFronting          ID = "ech_fronting"           // TLS 1.3 Encrypted Client Hello SNI concealment
+	SecondaryIfaceBypass ID = "secondary_iface_bypass" //nolint:gosec // G101 false positive; not a credential.
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -70,6 +71,10 @@ type BypassTechniqueSignals struct {
 	// ECHServerConfigured is true when the user has provided both an ECH
 	// server URL and an ECHConfigList (raw or base64). Powers Wave 21 #24.
 	ECHServerConfigured bool
+	// SecondaryIfaceDetected is true when the device has a non-WiFi network
+	// interface (cellular, USB ethernet, Bluetooth tethering) that is up
+	// and has an IPv4 address. Powers Wave 21 #25.
+	SecondaryIfaceDetected bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -428,6 +433,25 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Remediation: "Deploy ECH-aware TLS inspection or terminate TLS at the network edge. " +
 				"Block HTTPS RR DNS queries for known ECH CDNs on untrusted clients. ECH is an IETF " +
 				"standard since 2024 and production Cloudflare deployments mean DPI signatures lag.",
+		},
+	},
+	// Wave 21 #25: Secondary interface bypass (cellular/ethernet/tethered).
+	{
+		info: BypassTechniqueInfo{
+			Number: 25, ID: SecondaryIfaceBypass, Name: "Secondary interface bypass", HelpName: "Alt iface",
+			Confidence: "HIGH",
+			Reason:     "Device has a non-WiFi interface (cellular, USB Ethernet, Bluetooth PAN)",
+			Risk:       "None — uses an existing interface that already has internet",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.SecondaryIfaceDetected
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via secondary interface — traffic exits the carrier/ISP network, " +
+				"completely bypassing the captive portal gateway. No tunnel, no server, no protocol tricks.",
+			Remediation: "Deploy portal enforcement at the device level (MDM), not only at the WiFi gateway. " +
+				"Secondary-interface bypass is unfilterable by the captive portal infrastructure.",
 		},
 	},
 }
