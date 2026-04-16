@@ -135,6 +135,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		CAPPORTExtend,
 		DoQTunnel,
 		HTTP3Tunnel,
+		// Wave 21: serverless DHCP-advertised route injection.
+		DHCPRouteBypass,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,

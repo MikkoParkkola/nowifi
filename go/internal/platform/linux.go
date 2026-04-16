@@ -8,6 +8,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -802,4 +803,163 @@ func GetDNSSearchDomain(iface string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// GetDHCPClasslessRoutes returns DHCP option 121 (RFC 3442) classless static
+// routes advertised on the given interface, read from the active DHCP lease
+// file. Empty slice when not advertised or no lease found.
+//
+// dhclient emits:
+//
+//	option rfc3442-classless-static-routes 8:a:1:1:1, 0:c0:a8:1:1;
+//
+// dhcpcd emits:
+//
+//	new_classless_static_routes='10.0.0.0/8 192.168.1.1 0.0.0.0/0 192.168.1.1'
+//
+// systemd-networkd writes a key=value file:
+//
+//	CLASSLESS_STATIC_ROUTES=10.0.0.0/8 192.168.1.1 0.0.0.0/0 192.168.1.1
+//
+// We support all three formats.
+func GetDHCPClasslessRoutes(iface string) ([]DHCPRoute, error) {
+	if _, err := ValidateInterface(iface); err != nil {
+		return nil, fmt.Errorf("get dhcp routes: %w", err)
+	}
+
+	candidates := []string{
+		fmt.Sprintf("/var/lib/dhcp/dhclient.%s.leases", iface),
+		fmt.Sprintf("/var/lib/dhcpcd/%s.lease", iface),
+		fmt.Sprintf("/run/systemd/netif/leases/%s", iface),
+		"/var/lib/dhcp/dhclient.leases",
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path) //nolint:gosec // known lease paths
+		if err != nil {
+			continue
+		}
+		if routes := parseLinuxClasslessRoutes(string(data)); len(routes) > 0 {
+			return routes, nil
+		}
+	}
+	return nil, nil
+}
+
+// parseLinuxClasslessRoutes extracts routes from any of the supported lease
+// formats on Linux. Exposed for tests.
+func parseLinuxClasslessRoutes(lease string) []DHCPRoute {
+	// 1. dhclient hex-encoded form: "8:a:1:1:1, 0:c0:a8:1:1"
+	if routes := parseDhclientHexRoutes(lease); len(routes) > 0 {
+		return routes
+	}
+	// 2. key=value form (dhcpcd/systemd-networkd). Match either the bare
+	//    key name or quoted value.
+	kvRE := regexp.MustCompile(`(?i)(?:new_)?classless_static_routes=['"]?([^'"\n]+)['"]?`)
+	for _, m := range kvRE.FindAllStringSubmatch(lease, -1) {
+		payload := strings.TrimSpace(m[1])
+		fields := strings.Fields(payload)
+		// Expect even count: [cidr1 gw1 cidr2 gw2 ...]
+		if len(fields) < 2 || len(fields)%2 != 0 {
+			continue
+		}
+		var routes []DHCPRoute
+		for i := 0; i+1 < len(fields); i += 2 {
+			routes = append(routes, DHCPRoute{CIDR: fields[i], Gateway: fields[i+1]})
+		}
+		if len(routes) > 0 {
+			return routes
+		}
+	}
+	return nil
+}
+
+// parseDhclientHexRoutes decodes the ISC dhclient line:
+//
+//	option rfc3442-classless-static-routes 8:a:1:1:1, 0:c0:a8:1:1;
+//
+// Each entry is {prefix-length, destination-octets..., gateway-octets-4}.
+// Destination octets are omitted trailing zeros — e.g. "8:a" is "10.0.0.0/8".
+func parseDhclientHexRoutes(lease string) []DHCPRoute {
+	re := regexp.MustCompile(`(?i)option\s+rfc3442-classless-static-routes\s+([^;]+);`)
+	m := re.FindStringSubmatch(lease)
+	if m == nil {
+		return nil
+	}
+	entries := strings.Split(m[1], ",")
+	var routes []DHCPRoute
+	for _, entry := range entries {
+		bytes := strings.Split(strings.TrimSpace(entry), ":")
+		if len(bytes) < 5 {
+			continue
+		}
+		prefix, err := strconv.Atoi(bytes[0])
+		if err != nil || prefix < 0 || prefix > 32 {
+			continue
+		}
+		// destOctets = ceil(prefix/8)
+		destOctets := (prefix + 7) / 8
+		if len(bytes) != 1+destOctets+4 {
+			continue
+		}
+		dest := make([]int, 4)
+		for i := 0; i < destOctets; i++ {
+			v, err := strconv.ParseUint(bytes[1+i], 16, 8)
+			if err != nil {
+				continue
+			}
+			dest[i] = int(v)
+		}
+		gw := make([]int, 4)
+		for i := 0; i < 4; i++ {
+			v, err := strconv.ParseUint(bytes[1+destOctets+i], 16, 8)
+			if err != nil {
+				continue
+			}
+			gw[i] = int(v)
+		}
+		cidr := fmt.Sprintf("%d.%d.%d.%d/%d", dest[0], dest[1], dest[2], dest[3], prefix)
+		gateway := fmt.Sprintf("%d.%d.%d.%d", gw[0], gw[1], gw[2], gw[3])
+		routes = append(routes, DHCPRoute{CIDR: cidr, Gateway: gateway})
+	}
+	return routes
+}
+
+// AddRoute installs an IPv4 route on Linux via `ip route add`. Idempotent.
+func AddRoute(cidr, gateway string) error {
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return fmt.Errorf("add route: invalid cidr %q: %w", cidr, err)
+	}
+	if net.ParseIP(gateway) == nil {
+		return fmt.Errorf("add route: invalid gateway %q", gateway)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ip", "route", "add", cidr, "via", gateway).CombinedOutput()
+	if err != nil {
+		msg := string(out)
+		if strings.Contains(msg, "File exists") || strings.Contains(msg, "already exists") {
+			return nil
+		}
+		return fmt.Errorf("ip route add: %w: %s", err, msg)
+	}
+	return nil
+}
+
+// DeleteRoute removes an IPv4 route previously added via AddRoute. Missing
+// route is not treated as error.
+func DeleteRoute(cidr string) error {
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return fmt.Errorf("delete route: invalid cidr %q: %w", cidr, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ip", "route", "del", cidr).CombinedOutput()
+	if err != nil {
+		msg := string(out)
+		if strings.Contains(msg, "No such process") || strings.Contains(msg, "not found") {
+			return nil
+		}
+		return fmt.Errorf("ip route del: %w: %s", err, msg)
+	}
+	return nil
 }
