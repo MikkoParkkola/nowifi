@@ -32,7 +32,7 @@ const (
 	DoQTunnel     ID = "doq_tunnel"             // DNS-over-QUIC tunnel
 	HTTP3Tunnel   ID = "http3_tunnel"           // HTTP/3-specific tunnel (QUIC Alt-Svc)
 	// Wave 21: Serverless, infrastructure-native techniques (2026-04).
-	DHCPRouteBypass ID = "dhcp_route_bypass" // CVE-2024-3661 TunnelVision / DHCP option 121
+	DHCPRouteBypass ID = "dhcp_route_bypass" //nolint:gosec // G101 false positive on "bypass"; not a credential. CVE-2024-3661 TunnelVision.
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
