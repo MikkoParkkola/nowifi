@@ -35,6 +35,7 @@ const (
 	DHCPRouteBypass ID = "dhcp_route_bypass" //nolint:gosec // G101 false positive on "bypass"; not a credential. CVE-2024-3661 TunnelVision.
 	ECHFronting          ID = "ech_fronting"           // TLS 1.3 Encrypted Client Hello SNI concealment
 	SecondaryIfaceBypass ID = "secondary_iface_bypass" //nolint:gosec // G101 false positive; not a credential.
+	WGOverWebSocket      ID = "wg_over_websocket"
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -75,6 +76,8 @@ type BypassTechniqueSignals struct {
 	// interface (cellular, USB ethernet, Bluetooth tethering) that is up
 	// and has an IPv4 address. Powers Wave 21 #25.
 	SecondaryIfaceDetected bool
+	// WSServerConfigured is true when a WebSocket tunnel server URL is set.
+	WSServerConfigured bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -435,10 +438,29 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 				"standard since 2024 and production Cloudflare deployments mean DPI signatures lag.",
 		},
 	},
-	// Wave 21 #25: Secondary interface bypass (cellular/ethernet/tethered).
+	// Wave 21 #25: WireGuard-over-WebSocket.
 	{
 		info: BypassTechniqueInfo{
-			Number: 25, ID: SecondaryIfaceBypass, Name: "Secondary interface bypass", HelpName: "Alt iface",
+			Number: 25, ID: WGOverWebSocket, Name: "WireGuard-over-WebSocket", HelpName: "WG/WS tunnel",
+			RequiresServer: true, Confidence: "HIGH",
+			Reason: "TCP/443 open + WebSocket upgrade allowed",
+			Risk:   "Requires a wstunnel-compatible endpoint",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.WSServerConfigured && signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via WebSocket tunnel on TCP/443. WS upgrade is " +
+				"indistinguishable from Teams/Zoom/Discord — portals that allow WS pass this.",
+			Remediation: "Inspect WebSocket frame payloads for non-standard content. Block WS " +
+				"upgrades to unknown destinations for unauthenticated clients. Deploy WS-aware DPI.",
+		},
+	},
+	// Wave 21 #26: Secondary interface bypass (cellular/ethernet/tethered).
+	{
+		info: BypassTechniqueInfo{
+			Number: 26, ID: SecondaryIfaceBypass, Name: "Secondary interface bypass", HelpName: "Alt iface",
 			Confidence: "HIGH",
 			Reason:     "Device has a non-WiFi interface (cellular, USB Ethernet, Bluetooth PAN)",
 			Risk:       "None — uses an existing interface that already has internet",

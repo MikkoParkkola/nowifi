@@ -70,6 +70,7 @@ var (
 	flagVPNServer    string
 	flagHTTP3Server  string
 	flagDoQServer    string
+	flagWSServer     string
 	flagECHServer    string
 	flagECHConfigB64 string
 	flagStealth      bool
@@ -92,6 +93,7 @@ func init() {
 	rootCmd.Flags().StringVar(&flagVPNServer, "vpn-server", "", "VPN server (host:port) for VPN-on-port-53 technique")
 	rootCmd.Flags().StringVar(&flagHTTP3Server, "http3-server", "", "HTTP/3-ALPN tunnel server URL or host:port (Wave 20)")
 	rootCmd.Flags().StringVar(&flagDoQServer, "doq-server", "", "DNS-over-QUIC resolver host:port (default: dns.adguard.com:853)")
+	rootCmd.Flags().StringVar(&flagWSServer, "ws-server", "", "WebSocket tunnel server URL (wss://...) (Wave 21 #25)")
 	rootCmd.Flags().StringVar(&flagECHServer, "ech-server", "", "HTTPS URL of ECH-capable bypass proxy (Wave 21 #24)")
 	rootCmd.Flags().StringVar(&flagECHConfigB64, "ech-config-list", "", "Base64 ECHConfigList from the server's HTTPS DNS RR")
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")

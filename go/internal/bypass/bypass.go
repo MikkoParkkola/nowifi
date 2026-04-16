@@ -76,6 +76,8 @@ const (
 	DHCPRouteBypass Method = techniques.DHCPRouteBypass
 	// Wave 21: TLS 1.3 ECH (RFC 9147) domain fronting.
 	ECHFronting Method = techniques.ECHFronting
+	// Wave 21: WireGuard-over-WebSocket tunnel.
+	WGOverWebSocket Method = techniques.WGOverWebSocket
 	// Wave 21: Secondary interface (cellular/ethernet/tethered) bypass.
 	SecondaryIfaceBypass Method = techniques.SecondaryIfaceBypass
 )
@@ -107,6 +109,8 @@ type Config struct {
 	// platform.GetDHCPClasslessRoutes at probe time. Non-default routes
 	// here enable the Wave 21 #23 DHCPRouteBypass technique.
 	DHCPClasslessRoutes []platform.DHCPRoute
+	// WSServerURL is a WebSocket tunnel endpoint (wss://...). Powers #25.
+	WSServerURL string
 	// ECHServerURL is the HTTPS endpoint of an ECH-capable bypass proxy
 	// (typically a Cloudflare Worker or custom reverse proxy whose domain
 	// has ECH enabled in its HTTPS DNS RR).
@@ -387,6 +391,12 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	ECHFronting: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryECHFronting(config, probes)
+		},
+	},
+	// Wave 21: WireGuard-over-WebSocket tunnel.
+	WGOverWebSocket: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryWGOverWebSocket(config, probes)
 		},
 	},
 	// Wave 21: Secondary interface bypass.

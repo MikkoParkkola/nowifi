@@ -249,6 +249,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		HTTP3Server:         flagHTTP3Server,
 		DoQServer:           flagDoQServer,
 		DHCPClasslessRoutes: dhcpRoutes,
+		WSServerURL:         flagWSServer,
 		ECHServerURL:        flagECHServer,
 		ECHConfigListBase64: flagECHConfigB64,
 		Stealth:             stealth,
