@@ -252,7 +252,9 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		WSServerURL:         flagWSServer,
 		ECHServerURL:        flagECHServer,
 		ECHConfigListBase64: flagECHConfigB64,
-		Stealth:             stealth,
+		MASQUEServerURL:    flagMASQUEServer,
+		WTServerURL:        flagWTServer,
+		Stealth:            stealth,
 	}
 
 	p.Send(statusMsg{text: "Running bypass techniques..."})
@@ -558,20 +560,27 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 	var g *guard.Guard
 	// Discover RFC 8908 CAPPORT URL from DHCP option 114 (non-fatal if absent).
 	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
+	// Discover RFC 3442 option 121 routes (non-fatal if absent) for Wave 21 #23.
+	dhcpRoutes, _ := platform.GetDHCPClasslessRoutes(flagInterface)
 
 	bpConfig := &bypass.Config{
-		Interface:    flagInterface,
-		TunnelServer: flagTunnelServer,
-		DNSDomain:    flagDNSDomain,
-		ICMPServer:   flagICMPServer,
-		QUICServer:   flagQUICServer,
-		NTPServer:    flagNTPServer,
-		VPNServer:    flagVPNServer,
-		CFWorkersURL: flagCFWorkers,
-		CAPPORTURL:   capportURL,
-		HTTP3Server:  flagHTTP3Server,
-		DoQServer:    flagDoQServer,
-		Stealth:      stealth,
+		Interface:           flagInterface,
+		TunnelServer:        flagTunnelServer,
+		DNSDomain:           flagDNSDomain,
+		ICMPServer:          flagICMPServer,
+		QUICServer:          flagQUICServer,
+		NTPServer:           flagNTPServer,
+		VPNServer:           flagVPNServer,
+		CFWorkersURL:        flagCFWorkers,
+		CAPPORTURL:          capportURL,
+		HTTP3Server:         flagHTTP3Server,
+		DoQServer:           flagDoQServer,
+		DHCPClasslessRoutes: dhcpRoutes,
+		WSServerURL:         flagWSServer,
+		ECHServerURL:        flagECHServer,
+		ECHConfigListBase64: flagECHConfigB64,
+		MASQUEServerURL:     flagMASQUEServer,
+		Stealth:             stealth,
 	}
 	if !flagProbeOnly {
 		var guardErr error

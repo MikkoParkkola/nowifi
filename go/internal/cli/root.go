@@ -71,6 +71,8 @@ var (
 	flagHTTP3Server  string
 	flagDoQServer    string
 	flagWSServer     string
+	flagMASQUEServer string
+	flagWTServer     string
 	flagECHServer    string
 	flagECHConfigB64 string
 	flagStealth      bool
@@ -94,6 +96,8 @@ func init() {
 	rootCmd.Flags().StringVar(&flagHTTP3Server, "http3-server", "", "HTTP/3-ALPN tunnel server URL or host:port (Wave 20)")
 	rootCmd.Flags().StringVar(&flagDoQServer, "doq-server", "", "DNS-over-QUIC resolver host:port (default: dns.adguard.com:853)")
 	rootCmd.Flags().StringVar(&flagWSServer, "ws-server", "", "WebSocket tunnel server URL (wss://...) (Wave 21 #25)")
+	rootCmd.Flags().StringVar(&flagMASQUEServer, "masque-server", "", "MASQUE proxy URL (https://...) for HTTP/3 Extended CONNECT (Wave 21 #27)")
+	rootCmd.Flags().StringVar(&flagWTServer, "wt-server", "", "WebTransport tunnel server URL (https://...) (Wave 21 #28)")
 	rootCmd.Flags().StringVar(&flagECHServer, "ech-server", "", "HTTPS URL of ECH-capable bypass proxy (Wave 21 #24)")
 	rootCmd.Flags().StringVar(&flagECHConfigB64, "ech-config-list", "", "Base64 ECHConfigList from the server's HTTPS DNS RR")
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
@@ -190,6 +194,20 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	if flagDoQServer != "" {
 		if _, err := platform.ValidateServerAddr(flagDoQServer); err != nil {
 			return fmt.Errorf("--doq-server: %w", err)
+		}
+	}
+
+	// MASQUE server: must be a valid URL if provided.
+	if flagMASQUEServer != "" {
+		if _, err := platform.ValidateURL(flagMASQUEServer); err != nil {
+			return fmt.Errorf("--masque-server: %w", err)
+		}
+	}
+
+	// WebTransport server: must be a valid URL if provided.
+	if flagWTServer != "" {
+		if _, err := platform.ValidateURL(flagWTServer); err != nil {
+			return fmt.Errorf("--wt-server: %w", err)
 		}
 	}
 

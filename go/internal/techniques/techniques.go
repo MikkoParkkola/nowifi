@@ -36,6 +36,8 @@ const (
 	ECHFronting          ID = "ech_fronting"           // TLS 1.3 Encrypted Client Hello SNI concealment
 	SecondaryIfaceBypass ID = "secondary_iface_bypass" //nolint:gosec // G101 false positive; not a credential.
 	WGOverWebSocket      ID = "wg_over_websocket"
+	MASQUETunnel         ID = "masque_tunnel"         // RFC 9298 CONNECT via HTTP/3 Extended CONNECT
+	WebTransportTunnel   ID = "webtransport_tunnel"   // RFC 9220 WebTransport over HTTP/3
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -78,6 +80,10 @@ type BypassTechniqueSignals struct {
 	SecondaryIfaceDetected bool
 	// WSServerConfigured is true when a WebSocket tunnel server URL is set.
 	WSServerConfigured bool
+	// MASQUEServerConfigured is true when a MASQUE proxy URL is set.
+	MASQUEServerConfigured bool
+	// WTServerConfigured is true when a WebTransport tunnel server URL is set.
+	WTServerConfigured bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -474,6 +480,47 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 				"completely bypassing the captive portal gateway. No tunnel, no server, no protocol tricks.",
 			Remediation: "Deploy portal enforcement at the device level (MDM), not only at the WiFi gateway. " +
 				"Secondary-interface bypass is unfilterable by the captive portal infrastructure.",
+		},
+	},
+	// Wave 21 #27: MASQUE CONNECT via HTTP/3 Extended CONNECT (RFC 9298).
+	{
+		info: BypassTechniqueInfo{
+			Number: 27, ID: MASQUETunnel, Name: "MASQUE tunnel (HTTP/3 Extended CONNECT)", HelpName: "MASQUE tunnel",
+			RequiresServer: true, Confidence: "HIGH",
+			Reason: "UDP/443 open + MASQUE proxy configured",
+			Risk:   "Requires a MASQUE-capable proxy endpoint",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.MASQUEServerConfigured && signals.QUICOpen
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via HTTP/3 Extended CONNECT (RFC 9220/9298). Traffic fingerprint " +
+				"matches Apple Private Relay, Cloudflare WARP, and browser WebTransport — no " +
+				"commercial captive portal DPI inspects HTTP/3 frame types at this depth.",
+			Remediation: "Deploy QUIC-aware DPI that validates HTTP/3 Extended CONNECT targets. " +
+				"Block UDP/443 to untrusted destinations for unauthenticated clients. " +
+				"Rate-limit QUIC sessions per MAC.",
+		},
+	},
+	// Wave 21 #28: WebTransport tunnel (RFC 9220) over HTTP/3.
+	{
+		info: BypassTechniqueInfo{
+			Number: 28, ID: WebTransportTunnel, Name: "WebTransport tunnel", HelpName: "WebTransport",
+			RequiresServer: true, Confidence: "HIGH",
+			Reason: "UDP/443 open + WebTransport server configured",
+			Risk:   "Requires a WebTransport-capable tunnel endpoint",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.WTServerConfigured && signals.QUICOpen
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via RFC 9220 WebTransport over HTTP/3. Session establishment " +
+				"uses CONNECT with :protocol webtransport — identical to Google Meet, Zoom, and " +
+				"browser-initiated WebTransport. No commercial DPI distinguishes this from video calls.",
+			Remediation: "Inspect WebTransport session targets. Block CONNECT :protocol webtransport " +
+				"to untrusted destinations for unauthenticated clients. Deploy HTTP/3-aware DPI.",
 		},
 	},
 }
