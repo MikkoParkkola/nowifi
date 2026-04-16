@@ -70,6 +70,8 @@ var (
 	flagVPNServer    string
 	flagHTTP3Server  string
 	flagDoQServer    string
+	flagECHServer    string
+	flagECHConfigB64 string
 	flagStealth      bool
 	flagFast         bool
 	flagProbeOnly    bool
@@ -90,6 +92,8 @@ func init() {
 	rootCmd.Flags().StringVar(&flagVPNServer, "vpn-server", "", "VPN server (host:port) for VPN-on-port-53 technique")
 	rootCmd.Flags().StringVar(&flagHTTP3Server, "http3-server", "", "HTTP/3-ALPN tunnel server URL or host:port (Wave 20)")
 	rootCmd.Flags().StringVar(&flagDoQServer, "doq-server", "", "DNS-over-QUIC resolver host:port (default: dns.adguard.com:853)")
+	rootCmd.Flags().StringVar(&flagECHServer, "ech-server", "", "HTTPS URL of ECH-capable bypass proxy (Wave 21 #24)")
+	rootCmd.Flags().StringVar(&flagECHConfigB64, "ech-config-list", "", "Base64 ECHConfigList from the server's HTTPS DNS RR")
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
 	rootCmd.Flags().BoolVar(&flagFast, "fast", false, "Skip stealth delays")
 	rootCmd.Flags().BoolVarP(&flagProbeOnly, "probe-only", "p", false, "Probe only, don't exploit")
@@ -186,6 +190,15 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--doq-server: %w", err)
 		}
 	}
+
+	// ECH server: must be a valid URL if provided.
+	if flagECHServer != "" {
+		if _, err := platform.ValidateURL(flagECHServer); err != nil {
+			return fmt.Errorf("--ech-server: %w", err)
+		}
+	}
+	// ECH config list: non-empty strings should be plausibly base64. Deep
+	// decoding happens at dial time.
 
 	return nil
 }

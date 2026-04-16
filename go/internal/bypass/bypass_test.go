@@ -137,6 +137,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		HTTP3Tunnel,
 		// Wave 21: serverless DHCP-advertised route injection.
 		DHCPRouteBypass,
+		// Wave 21: ECH domain fronting.
+		ECHFronting,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,

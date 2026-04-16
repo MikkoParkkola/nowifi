@@ -33,6 +33,7 @@ const (
 	HTTP3Tunnel   ID = "http3_tunnel"           // HTTP/3-specific tunnel (QUIC Alt-Svc)
 	// Wave 21: Serverless, infrastructure-native techniques (2026-04).
 	DHCPRouteBypass ID = "dhcp_route_bypass" //nolint:gosec // G101 false positive on "bypass"; not a credential. CVE-2024-3661 TunnelVision.
+	ECHFronting     ID = "ech_fronting"      // TLS 1.3 Encrypted Client Hello SNI concealment
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -66,6 +67,9 @@ type BypassTechniqueSignals struct {
 	// RFC 3442 option 121 routes AND at least one is non-default. Powers
 	// Wave 21 technique #23 (CVE-2024-3661 TunnelVision).
 	DHCPClasslessRoutesAvailable bool
+	// ECHServerConfigured is true when the user has provided both an ECH
+	// server URL and an ECHConfigList (raw or base64). Powers Wave 21 #24.
+	ECHServerConfigured bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -404,6 +408,26 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Remediation: "Strip DHCP option 121 on untrusted networks. Enforce captive policy in the " +
 				"forwarding plane (netfilter/PF FORWARD chain) rather than only in the default-route " +
 				"chain. Alert on DHCP leases advertising non-default static routes.",
+		},
+	},
+	// Wave 21 #24: TLS 1.3 ECH (RFC 9147) Encrypted Client Hello domain fronting.
+	{
+		info: BypassTechniqueInfo{
+			Number: 24, ID: ECHFronting, Name: "ECH domain fronting", HelpName: "ECH fronting",
+			RequiresServer: true, Confidence: "HIGH",
+			Reason: "ECH config + bypass server URL configured",
+			Risk:   "Requires an ECH-capable HTTPS proxy",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.ECHServerConfigured && signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via TLS 1.3 ECH-cloaked HTTPS tunnel. Outer SNI is " +
+				"the CDN cover name; the real target is encrypted and invisible to SNI-based DPI.",
+			Remediation: "Deploy ECH-aware TLS inspection or terminate TLS at the network edge. " +
+				"Block HTTPS RR DNS queries for known ECH CDNs on untrusted clients. ECH is an IETF " +
+				"standard since 2024 and production Cloudflare deployments mean DPI signatures lag.",
 		},
 	},
 }

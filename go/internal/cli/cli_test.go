@@ -115,8 +115,8 @@ func TestHelpContainsBypassTechniqueCount(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "23 portal bypass techniques") {
-		t.Errorf("--help output should contain '23 portal bypass techniques', got:\n%s", output)
+	if !strings.Contains(output, "24 portal bypass techniques") {
+		t.Errorf("--help output should contain '24 portal bypass techniques', got:\n%s", output)
 	}
 }
 
@@ -345,10 +345,10 @@ func TestRootLongDescription(t *testing.T) {
 		substr string
 	}{
 		{"mentions sudo", "sudo nowifi"},
-		{"mentions overall technique count", "31 techniques overall"},
+		{"mentions overall technique count", "32 techniques overall"},
 		{"mentions IPv6", "IPv6"},
 		{"mentions DNS tunnel", "DNS tunnel"},
-		{"mentions portal bypass split", "Portal bypass (23): nowifi"},
+		{"mentions portal bypass split", "Portal bypass (24): nowifi"},
 		{"mentions crack split", "WPA cracking (4):   nowifi crack"},
 	}
 
