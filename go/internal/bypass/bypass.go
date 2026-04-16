@@ -74,6 +74,8 @@ const (
 	HTTP3Tunnel   Method = techniques.HTTP3Tunnel
 	// Wave 21: serverless DHCP-advertised route injection.
 	DHCPRouteBypass Method = techniques.DHCPRouteBypass
+	// Wave 21: TLS 1.3 ECH (RFC 9147) domain fronting.
+	ECHFronting Method = techniques.ECHFronting
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -103,6 +105,14 @@ type Config struct {
 	// platform.GetDHCPClasslessRoutes at probe time. Non-default routes
 	// here enable the Wave 21 #23 DHCPRouteBypass technique.
 	DHCPClasslessRoutes []platform.DHCPRoute
+	// ECHServerURL is the HTTPS endpoint of an ECH-capable bypass proxy
+	// (typically a Cloudflare Worker or custom reverse proxy whose domain
+	// has ECH enabled in its HTTPS DNS RR).
+	ECHServerURL string
+	// ECHConfigListBase64 is the base64-encoded ECHConfigList value from
+	// the server's HTTPS DNS RR ech= field. Operator-provided for now;
+	// future work may fetch it via DoH.
+	ECHConfigListBase64 string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -369,6 +379,12 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	DHCPRouteBypass: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryDHCPRouteBypass(config, probes)
+		},
+	},
+	// Wave 21: TLS 1.3 ECH domain fronting.
+	ECHFronting: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryECHFronting(config, probes)
 		},
 	},
 }

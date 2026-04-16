@@ -27,7 +27,7 @@ func measureNetworkLatency(gateway string) time.Duration {
 		return 2 * time.Second // Conservative default for invalid gateway.
 	}
 
-	var totalMs int64
+	var totalNs int64
 	var count int64
 
 	for i := 0; i < 3; i++ {
@@ -36,8 +36,7 @@ func measureNetworkLatency(gateway string) time.Duration {
 		err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "5", gateway).Run()
 		cancel()
 		if err == nil {
-			elapsed := time.Since(start)
-			totalMs += elapsed.Milliseconds()
+			totalNs += time.Since(start).Nanoseconds()
 			count++
 		}
 	}
@@ -46,9 +45,10 @@ func measureNetworkLatency(gateway string) time.Duration {
 		return 2 * time.Second // Conservative default for unknown networks.
 	}
 
-	avgMs := totalMs / count
-	// Add 50% margin for jitter.
-	return time.Duration(avgMs*3/2) * time.Millisecond
+	// Add 50% margin for jitter. Nanosecond resolution prevents loopback
+	// (sub-ms) from collapsing to zero, which the rest of the codebase
+	// treats as "unknown" rather than "very fast".
+	return time.Duration(totalNs/count*3/2) * time.Nanosecond
 }
 
 // isInflightNetwork returns true if network latency suggests satellite link.
