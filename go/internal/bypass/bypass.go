@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Mikko Parkkola. All rights reserved.
 // Licensed under AGPL-3.0. See LICENSE file.
 
-// Package bypass implements 19 ordered captive portal bypass techniques.
+// Package bypass implements ordered captive portal bypass techniques.
 //
 // After a successful bypass, internet works system-wide (including browser)
 // with zero manual steps. All changes are temporary and restored when nowifi
@@ -80,6 +80,10 @@ const (
 	WGOverWebSocket Method = techniques.WGOverWebSocket
 	// Wave 21: Secondary interface (cellular/ethernet/tethered) bypass.
 	SecondaryIfaceBypass Method = techniques.SecondaryIfaceBypass
+	// Wave 21: MASQUE tunnel (HTTP/3 Extended CONNECT).
+	MASQUETunnel Method = techniques.MASQUETunnel
+	// Wave 21: WebTransport tunnel (RFC 9220).
+	WebTransportTunnel Method = techniques.WebTransportTunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -119,6 +123,10 @@ type Config struct {
 	// the server's HTTPS DNS RR ech= field. Operator-provided for now;
 	// future work may fetch it via DoH.
 	ECHConfigListBase64 string
+	// MASQUEServerURL is the MASQUE proxy endpoint (https://...). Powers #27.
+	MASQUEServerURL string
+	// WTServerURL is the WebTransport tunnel endpoint (https://...). Powers #28.
+	WTServerURL string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -403,6 +411,18 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	SecondaryIfaceBypass: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return trySecondaryIfaceBypass(config, probes)
+		},
+	},
+	// Wave 21: MASQUE tunnel (HTTP/3 Extended CONNECT).
+	MASQUETunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryMASQUETunnel(config, probes)
+		},
+	},
+	// Wave 21: WebTransport tunnel (RFC 9220).
+	WebTransportTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryWebTransportTunnel(config, probes)
 		},
 	},
 }

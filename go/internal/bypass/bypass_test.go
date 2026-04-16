@@ -143,6 +143,10 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		WGOverWebSocket,
 		// Wave 21: Secondary interface bypass.
 		SecondaryIfaceBypass,
+		// Wave 21: MASQUE tunnel (HTTP/3 Extended CONNECT).
+		MASQUETunnel,
+		// Wave 21: WebTransport tunnel (RFC 9220).
+		WebTransportTunnel,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,

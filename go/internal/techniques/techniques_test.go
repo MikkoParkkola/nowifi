@@ -7,8 +7,8 @@ import "testing"
 
 func TestBypassTechniqueInfosAreOrderedAndUnique(t *testing.T) {
 	infos := BypassTechniqueInfos()
-	if len(infos) != 26 {
-		t.Fatalf("BypassTechniqueInfos() length = %d, want 26", len(infos))
+	if len(infos) != 28 {
+		t.Fatalf("BypassTechniqueInfos() length = %d, want 28", len(infos))
 	}
 
 	seen := make(map[ID]bool, len(infos))
@@ -37,8 +37,8 @@ func TestServerRequirementSplitMatchesCurrentTechniqueContract(t *testing.T) {
 	if len(serverless) != 13 {
 		t.Fatalf("len(ServerlessBypassTechniqueInfos()) = %d, want 13", len(serverless))
 	}
-	if len(serverRequired) != 13 {
-		t.Fatalf("len(ServerRequiredBypassTechniqueInfos()) = %d, want 13", len(serverRequired))
+	if len(serverRequired) != 15 {
+		t.Fatalf("len(ServerRequiredBypassTechniqueInfos()) = %d, want 15", len(serverRequired))
 	}
 
 	foundWhitelist := false
@@ -55,20 +55,22 @@ func TestServerRequirementSplitMatchesCurrentTechniqueContract(t *testing.T) {
 
 func TestCountFeasibleBypassTechniquesMatchesCurrentRules(t *testing.T) {
 	allOpen := BypassTechniqueSignals{
-		PortalDetected:     true,
-		IPv6Open:           true,
-		DNSOpen:            true,
-		ICMPOpen:           true,
-		CloudflareOpen:     true,
-		QUICOpen:           true,
-		NTPOpen:            true,
-		DoHOpen:            true,
-		WhitelistReachable: true,
-		HTTP443Open:        true,
-		HTTP8080Open:       true,
+		PortalDetected:         true,
+		IPv6Open:               true,
+		DNSOpen:                true,
+		ICMPOpen:               true,
+		CloudflareOpen:         true,
+		QUICOpen:               true,
+		NTPOpen:                true,
+		DoHOpen:                true,
+		WhitelistReachable:     true,
+		HTTP443Open:            true,
+		HTTP8080Open:           true,
+		MASQUEServerConfigured: true,
+		WTServerConfigured:     true,
 	}
-	if got := CountFeasibleBypassTechniques(allOpen); got != 19 {
-		t.Fatalf("CountFeasibleBypassTechniques(allOpen) = %d, want 19", got)
+	if got := CountFeasibleBypassTechniques(allOpen); got != 21 {
+		t.Fatalf("CountFeasibleBypassTechniques(allOpen) = %d, want 21", got)
 	}
 
 	captiveOnly := BypassTechniqueSignals{PortalDetected: true}

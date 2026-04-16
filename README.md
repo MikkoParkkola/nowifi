@@ -13,7 +13,7 @@
 
 **Author: Mikko Parkkola**
 
-One command. 34 techniques. Browser works immediately.
+One command. 36 techniques. Browser works immediately.
 
 ```bash
 sudo nowifi
@@ -23,7 +23,7 @@ sudo nowifi
   <img src="screenshot.png" alt="nowifi dashboard" width="800">
 </p>
 
-Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 26 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
+Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 28 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-technique WPA/WPA2 cracking pipeline. It escalates from PMKID and WPS Pixie-Dust through handshake capture, dictionary/smart cracking, and only then to WPS PIN or online brute force, stopping as soon as a password is recovered.
 
@@ -121,6 +121,8 @@ nowifi doctor
 | `sudo nowifi --http3-server https://vps:443` | HTTP/3-ALPN tunnel to nowifi server (#22) |
 | `sudo nowifi --doq-server 1.1.1.1:853` | Override default DoQ resolver (#21) |
 | `sudo nowifi --ech-server https://... --ech-config-list <b64>` | TLS 1.3 ECH domain fronting (#24) |
+| `sudo nowifi --masque-server https://proxy:443` | MASQUE tunnel via HTTP/3 Extended CONNECT (#27) |
+| `sudo nowifi --wt-server https://proxy:443/wt` | WebTransport tunnel over HTTP/3 (#28) |
 | `sudo nowifi -i en1` | Use a different WiFi interface (default: `en0`) |
 | `nowifi recon -o klm.json` | Passive network fingerprint for contributing provider profiles |
 | `nowifi diagnose` | Read-only security assessment (no changes to network) |
@@ -147,9 +149,9 @@ nowifi doctor
 
 ---
 
-## 34 Techniques
+## 36 Techniques
 
-### Portal Bypass (26 techniques)
+### Portal Bypass (28 techniques)
 
 These work when you're connected to WiFi but stuck behind a captive portal login page.
 
@@ -181,6 +183,8 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 24 | **ECH domain fronting** | TLS 1.3 Encrypted Client Hello (RFC 9147) cloaks the real SNI behind a CDN cover name | Critical |
 | 25 | **WG-over-WebSocket** | WireGuard/tunnel payloads in WS binary frames on TCP/443 (looks like Teams/Zoom) | Critical |
 | 26 | **Secondary interface** | Use cellular/USB-Ethernet/Bluetooth-PAN to exit the carrier, bypassing portal entirely (serverless) | Critical |
+| 27 | **MASQUE tunnel** | HTTP/3 Extended CONNECT (RFC 9220/9298) — identical to Apple Private Relay/Cloudflare WARP | Critical |
+| 28 | **WebTransport tunnel** | RFC 9220 WebTransport over HTTP/3 — looks like Google Meet/Zoom to DPI | Critical |
 
 ### WPA Cracking (4 techniques)
 
@@ -188,19 +192,19 @@ These crack the actual WiFi password when you don't have it. The stages run in o
 
 | # | Technique | How it works |
 |---|-----------|-------------|
-| 27 | **PMKID capture** | Extract PMKID from AP's first message -- no clients needed (~60% of APs) |
-| 28 | **WPS Pixie-Dust** | Exploit weak RNG in WPS (~30% of WPS-enabled APs, 5-30s) |
-| 29 | **Handshake capture + hashcat** | Deauth a client, capture 4-way handshake, GPU crack |
-| 30 | **WPS PIN brute force** | Brute force 11,000 PIN combinations (2-10 hours, last resort) |
+| 29 | **PMKID capture** | Extract PMKID from AP's first message -- no clients needed (~60% of APs) |
+| 30 | **WPS Pixie-Dust** | Exploit weak RNG in WPS (~30% of WPS-enabled APs, 5-30s) |
+| 31 | **Handshake capture + hashcat** | Deauth a client, capture 4-way handshake, GPU crack |
+| 32 | **WPS PIN brute force** | Brute force 11,000 PIN combinations (2-10 hours, last resort) |
 
 ### Smart Cracking (4 additional strategies)
 
 | # | Technique | How it works |
 |---|-----------|-------------|
-| 31 | **Smart common passwords** | Top 1000 WiFi passwords (embedded, no wordlist needed) |
-| 32 | **Numeric mask attack** | 8-digit patterns common in ISP-issued routers |
-| 33 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
-| 34 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
+| 33 | **Smart common passwords** | Top 1000 WiFi passwords (embedded, no wordlist needed) |
+| 34 | **Numeric mask attack** | 8-digit patterns common in ISP-issued routers |
+| 35 | **Word+number rules** | Hashcat rules combining dictionary words with numbers |
+| 36 | **Online brute force** | wpa_supplicant PSK attempts (no monitor mode needed) |
 
 The smart-crack pipeline also runs dictionary, smart-brute, and (opt-in) full-brute stages between rules and online brute force, in increasing cost order.
 
