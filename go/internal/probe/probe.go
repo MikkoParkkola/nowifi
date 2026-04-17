@@ -55,9 +55,10 @@ type Ipv6ProbeResult struct {
 
 // HttpsProbeResult holds the result of an HTTPS reachability test.
 type HttpsProbeResult struct {
-	IsOpen  bool   `json:"is_open"`
-	URL     string `json:"url"`
-	Details string `json:"details"`
+	IsOpen         bool   `json:"is_open"`
+	URL            string `json:"url"`
+	Details        string `json:"details"`
+	HTTP2Negotiated bool  `json:"http2_negotiated,omitempty"` // true when ALPN negotiated "h2"
 }
 
 // WhitelistResult holds the result of a single whitelisted domain test.
@@ -485,9 +486,18 @@ func ProbeHTTPS(targetURL, label string) HttpsProbeResult {
 	}
 	resp.Body.Close()
 
+	// Check ALPN negotiation — zero-cost extraction from TLS state.
+	if resp.TLS != nil && resp.TLS.NegotiatedProtocol == "h2" {
+		result.HTTP2Negotiated = true
+	}
+
 	if resp.StatusCode < 400 {
 		result.IsOpen = true
-		result.Details = fmt.Sprintf("%s: HTTP %d", labelOrURL(label, targetURL), resp.StatusCode)
+		proto := ""
+		if result.HTTP2Negotiated {
+			proto = " [h2]"
+		}
+		result.Details = fmt.Sprintf("%s: HTTP %d%s", labelOrURL(label, targetURL), resp.StatusCode, proto)
 	} else {
 		result.Details = fmt.Sprintf("%s: HTTP %d (blocked)", labelOrURL(label, targetURL), resp.StatusCode)
 	}
