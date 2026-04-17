@@ -13,7 +13,7 @@
 
 **Author: Mikko Parkkola**
 
-One command. 39 techniques. Browser works immediately.
+One command. 40 techniques. Browser works immediately.
 
 ```bash
 sudo nowifi
@@ -23,7 +23,7 @@ sudo nowifi
   <img src="screenshot.png" alt="nowifi dashboard" width="800">
 </p>
 
-Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 31 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
+Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 32 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-technique WPA/WPA2 cracking pipeline. It escalates from PMKID and WPS Pixie-Dust through handshake capture, dictionary/smart cracking, and only then to WPS PIN or online brute force, stopping as soon as a password is recovered.
 
@@ -126,6 +126,7 @@ nowifi doctor
 | `sudo nowifi --h2-proxy https://proxy:443` | HTTP/2 CONNECT tunnel (gRPC-style) (#29) |
 | `sudo nowifi --sse-server https://relay.example.com` | SSE streaming tunnel (#30) |
 | `sudo nowifi --grpc-server https://proxy:443` | gRPC bidi streaming tunnel (#31) |
+| `sudo nowifi --connectip-server https://proxy:443` | CONNECT-IP full IP tunnel (#32) |
 | `sudo nowifi -i en1` | Use a different WiFi interface (default: `en0`) |
 | `nowifi recon -o klm.json` | Passive network fingerprint for contributing provider profiles |
 | `nowifi diagnose` | Read-only security assessment (no changes to network) |
@@ -152,9 +153,9 @@ nowifi doctor
 
 ---
 
-## 39 Techniques
+## 40 Techniques
 
-### Portal Bypass (31 techniques)
+### Portal Bypass (32 techniques)
 
 These work when you're connected to WiFi but stuck behind a captive portal login page.
 
@@ -191,6 +192,7 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 29 | **HTTP/2 CONNECT tunnel** | HTTP/2 binary-framed CONNECT — looks like gRPC/Cloud API to DPI | Critical |
 | 30 | **SSE streaming tunnel** | Server-Sent Events downlink + HTTP POST uplink — looks like a news feed | High |
 | 31 | **gRPC bidi streaming tunnel** | HTTP/2 + application/grpc framing — looks like Kubernetes/microservice API traffic | High |
+| 32 | **CONNECT-IP tunnel** | RFC 9484 full IP tunnel via QUIC datagrams — identical to Apple Private Relay | Critical |
 
 ### WPA Cracking (4 techniques)
 

@@ -42,6 +42,7 @@ const (
 	H2ConnectTunnel ID = "h2_connect_tunnel" // HTTP/2 CONNECT via gRPC-style framing
 	SSETunnel       ID = "sse_tunnel"        // Server-Sent Events streaming channel
 	GRPCTunnel      ID = "grpc_tunnel"       // gRPC bidi streaming via HTTP/2
+	ConnectIPTunnel ID = "connect_ip_tunnel" // RFC 9484 IP-layer MASQUE proxy
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -94,6 +95,8 @@ type BypassTechniqueSignals struct {
 	SSEServerConfigured bool
 	// GRPCServerConfigured is true when a gRPC tunnel server URL is set.
 	GRPCServerConfigured bool
+	// ConnectIPServerConfigured is true when a CONNECT-IP proxy URL is set.
+	ConnectIPServerConfigured bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -595,6 +598,27 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Remediation: "Deep-inspect gRPC streams for non-protobuf payloads (raw binary data " +
 				"without protobuf wire format). Rate-limit long-lived gRPC streams from " +
 				"unauthenticated clients. Note: blocking gRPC breaks legitimate cloud apps.",
+		},
+	},
+	// Wave 22 #32: CONNECT-IP tunnel (RFC 9484).
+	{
+		info: BypassTechniqueInfo{
+			Number: 32, ID: ConnectIPTunnel, Name: "CONNECT-IP tunnel (RFC 9484)", HelpName: "CONNECT-IP",
+			RequiresServer: true, Confidence: "HIGH",
+			Reason: "QUIC open + CONNECT-IP server configured",
+			Risk:   "Requires root for TUN device creation",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.ConnectIPServerConfigured && signals.QUICOpen
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full IP tunnel via TUN device — ALL traffic (TCP, UDP, ICMP, DNS) " +
+				"routed through QUIC datagrams. Indistinguishable from Apple Private Relay " +
+				"and iCloud+. Most powerful tunnel: not limited to TCP like SOCKS-based techniques.",
+			Remediation: "Block QUIC datagrams (UDP/443 with DATAGRAM frames). Inspect HTTP/3 " +
+				"Extended CONNECT for :protocol=connect-ip. Note: blocking this also blocks " +
+				"Apple Private Relay, iCloud+, and Cloudflare WARP — high collateral damage.",
 		},
 	},
 }

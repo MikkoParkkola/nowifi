@@ -256,8 +256,9 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		WTServerURL:        flagWTServer,
 		H2ProxyURL:         flagH2Proxy,
 		SSEServerURL:       flagSSEServer,
-		GRPCServerURL:     flagGRPCServer,
-		Stealth:            stealth,
+		GRPCServerURL:        flagGRPCServer,
+		ConnectIPServerURL:  flagConnectIPServer,
+		Stealth:             stealth,
 	}
 
 	p.Send(statusMsg{text: "Running bypass techniques..."})

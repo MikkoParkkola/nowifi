@@ -153,6 +153,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		SSETunnel,
 		// Wave 22: gRPC bidi streaming tunnel.
 		GRPCTunnel,
+		// Wave 22: CONNECT-IP tunnel (RFC 9484).
+		ConnectIPTunnel,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,
