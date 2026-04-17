@@ -197,6 +197,21 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 34 | **Portal self-relay** | Zero-config — tunnels through portal-whitelisted domains (Stripe, Google, Apple) via HTTP/2 CONNECT | Critical |
 | 35 | **TURN relay** | Zero-config — relays through public WebRTC TURN servers on TCP/443, indistinguishable from video calls | High |
 
+### Anonymous Telemetry (opt-in, zero-cost)
+
+nowifi can send anonymous data about which bypass techniques succeed on which captive portals. Purpose: security research + improved technique ordering in future releases.
+
+```bash
+nowifi telemetry enable    # opt in
+nowifi telemetry status    # show state
+nowifi telemetry disable   # opt out
+```
+
+**Collected**: technique ID, success, provider, duration, version, country
+**NEVER collected**: IP, MAC, SSID, portal URL, DNS names, or any personal identifier
+
+Data goes to a single Cloudflare Worker running on the free tier (100K events/day). Source: [worker/telemetry/](worker/telemetry/).
+
 ### WPA Cracking (4 techniques)
 
 These crack the actual WiFi password when you don't have it. The stages run in order, and slower fallback steps only run if the earlier capture and smart-crack stages fail.

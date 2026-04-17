@@ -267,10 +267,15 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	p.Send(statusMsg{text: "Running bypass techniques..."})
 	bpProbes := mapProbeResults(probes)
 	platOps := &realPlatformOps{}
+	bypassStart := time.Now()
 	bypassResults := bypass.RunBypasses(bpProbes, bpConfig, platOps)
+	bypassElapsed := int(time.Since(bypassStart).Milliseconds())
 	tuiBypassMu.Lock()
 	tuiBypassResults = bypassResults
 	tuiBypassMu.Unlock()
+
+	// Emit opt-in telemetry for each attempted technique (non-blocking).
+	submitBypassTelemetry(bypassResults, inflightProvider, bypassElapsed)
 
 	for _, r := range bypassResults {
 		detail := r.Details
@@ -608,7 +613,9 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		}
 
 		bpProbes := mapProbeResults(probes)
+		plainStart := time.Now()
 		bypassResults = bypass.RunBypasses(bpProbes, bpConfig, &realPlatformOps{})
+		submitBypassTelemetry(bypassResults, bpConfig.InflightProvider, int(time.Since(plainStart).Milliseconds()))
 
 		successCount := 0
 		for _, r := range bypassResults {

@@ -1,0 +1,15 @@
+name = "nowifi-telemetry"
+main = "worker.js"
+compatibility_date = "2026-04-17"
+
+# Analytics Engine binding — free tier, 100K writes/day.
+# Create once in Cloudflare dashboard: Workers & Pages → Analytics Engine.
+[[analytics_engine_datasets]]
+binding = "TELEMETRY"
+dataset = "nowifi_events"
+
+# Optional: KV namespace for serving aggregated rankings back to clients.
+# Create via: wrangler kv:namespace create RANKINGS
+# [[kv_namespaces]]
+# binding = "RANKINGS"
+# id = "<generated-kv-id>"

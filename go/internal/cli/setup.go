@@ -11,6 +11,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/detect"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/server"
+	"github.com/MikkoParkkola/nowifi/internal/telemetry"
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 	"github.com/spf13/cobra"
 )
@@ -24,6 +25,10 @@ Checks your system, installs missing tools, and configures nowifi.
 Run this once after installing nowifi.`,
 	Run: runSetup,
 }
+
+// telemetryIsEnabled is a thin wrapper so setup.go doesn't import the
+// telemetry package at the top level (avoids circular import risk).
+func telemetryIsEnabled() bool { return telemetry.IsEnabled() }
 
 func runSetup(cmd *cobra.Command, args []string) {
 	fmt.Println("\nnowifi — Setup Wizard")
@@ -152,8 +157,24 @@ func runSetup(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 7. Summary.
-	fmt.Println("\n7. Ready!")
+	// 7. Anonymous telemetry (opt-in).
+	fmt.Println("\n7. Anonymous telemetry")
+	fmt.Println("   nowifi can send anonymous data about which bypass techniques")
+	fmt.Println("   succeed on which captive portals. Purpose: security research")
+	fmt.Println("   and better technique ordering in future releases.")
+	fmt.Println()
+	fmt.Println("   Collected: technique, success, provider, duration, version, country")
+	fmt.Println("   Never collected: IP, MAC, SSID, portal URL, DNS names")
+	fmt.Println()
+	if telemetryIsEnabled() {
+		fmt.Println("   OK     Telemetry already enabled")
+	} else {
+		fmt.Println("   Enable later: nowifi telemetry enable")
+		fmt.Println("   Details:      nowifi telemetry enable --help")
+	}
+
+	// 8. Summary.
+	fmt.Println("\n8. Ready!")
 	fmt.Println("   Available commands:")
 	fmt.Println()
 	fmt.Println("   sudo nowifi          Auto-detect and bypass (works offline)")
