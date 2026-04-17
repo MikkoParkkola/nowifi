@@ -75,6 +75,7 @@ var (
 	flagWTServer     string
 	flagH2Proxy      string
 	flagSSEServer    string
+	flagGRPCServer   string
 	flagECHServer    string
 	flagECHConfigB64 string
 	flagStealth      bool
@@ -102,6 +103,7 @@ func init() {
 	rootCmd.Flags().StringVar(&flagWTServer, "wt-server", "", "WebTransport tunnel server URL (https://...) (Wave 21 #28)")
 	rootCmd.Flags().StringVar(&flagH2Proxy, "h2-proxy", "", "HTTP/2 CONNECT proxy URL (https://...) (Wave 22 #29)")
 	rootCmd.Flags().StringVar(&flagSSEServer, "sse-server", "", "SSE relay server URL (https://...) (Wave 22 #30)")
+	rootCmd.Flags().StringVar(&flagGRPCServer, "grpc-server", "", "gRPC tunnel server URL (https://...) (Wave 22 #31)")
 	rootCmd.Flags().StringVar(&flagECHServer, "ech-server", "", "HTTPS URL of ECH-capable bypass proxy (Wave 21 #24)")
 	rootCmd.Flags().StringVar(&flagECHConfigB64, "ech-config-list", "", "Base64 ECHConfigList from the server's HTTPS DNS RR")
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
@@ -219,6 +221,13 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	if flagSSEServer != "" {
 		if _, err := platform.ValidateURL(flagSSEServer); err != nil {
 			return fmt.Errorf("--sse-server: %w", err)
+		}
+	}
+
+	// gRPC server: must be a valid URL if provided.
+	if flagGRPCServer != "" {
+		if _, err := platform.ValidateURL(flagGRPCServer); err != nil {
+			return fmt.Errorf("--grpc-server: %w", err)
 		}
 	}
 

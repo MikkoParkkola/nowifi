@@ -7,8 +7,8 @@ import "testing"
 
 func TestBypassTechniqueInfosAreOrderedAndUnique(t *testing.T) {
 	infos := BypassTechniqueInfos()
-	if len(infos) != 30 {
-		t.Fatalf("BypassTechniqueInfos() length = %d, want 30", len(infos))
+	if len(infos) != 31 {
+		t.Fatalf("BypassTechniqueInfos() length = %d, want 31", len(infos))
 	}
 
 	seen := make(map[ID]bool, len(infos))
@@ -37,8 +37,8 @@ func TestServerRequirementSplitMatchesCurrentTechniqueContract(t *testing.T) {
 	if len(serverless) != 13 {
 		t.Fatalf("len(ServerlessBypassTechniqueInfos()) = %d, want 13", len(serverless))
 	}
-	if len(serverRequired) != 17 {
-		t.Fatalf("len(ServerRequiredBypassTechniqueInfos()) = %d, want 17", len(serverRequired))
+	if len(serverRequired) != 18 {
+		t.Fatalf("len(ServerRequiredBypassTechniqueInfos()) = %d, want 18", len(serverRequired))
 	}
 
 	foundWhitelist := false
@@ -66,13 +66,14 @@ func TestCountFeasibleBypassTechniquesMatchesCurrentRules(t *testing.T) {
 		WhitelistReachable:     true,
 		HTTP443Open:            true,
 		HTTP8080Open:           true,
-		MASQUEServerConfigured: true,
-		WTServerConfigured:     true,
-		H2ProxyConfigured:     true,
-		SSEServerConfigured:   true,
+		MASQUEServerConfigured:  true,
+		WTServerConfigured:      true,
+		H2ProxyConfigured:      true,
+		SSEServerConfigured:    true,
+		GRPCServerConfigured:   true,
 	}
-	if got := CountFeasibleBypassTechniques(allOpen); got != 23 {
-		t.Fatalf("CountFeasibleBypassTechniques(allOpen) = %d, want 23", got)
+	if got := CountFeasibleBypassTechniques(allOpen); got != 24 {
+		t.Fatalf("CountFeasibleBypassTechniques(allOpen) = %d, want 24", got)
 	}
 
 	captiveOnly := BypassTechniqueSignals{PortalDetected: true}

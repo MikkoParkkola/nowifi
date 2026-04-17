@@ -41,6 +41,7 @@ const (
 	// Wave 22: Application-layer smuggling techniques (2026-04).
 	H2ConnectTunnel ID = "h2_connect_tunnel" // HTTP/2 CONNECT via gRPC-style framing
 	SSETunnel       ID = "sse_tunnel"        // Server-Sent Events streaming channel
+	GRPCTunnel      ID = "grpc_tunnel"       // gRPC bidi streaming via HTTP/2
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -91,6 +92,8 @@ type BypassTechniqueSignals struct {
 	H2ProxyConfigured bool
 	// SSEServerConfigured is true when an SSE tunnel relay URL is set.
 	SSEServerConfigured bool
+	// GRPCServerConfigured is true when a gRPC tunnel server URL is set.
+	GRPCServerConfigured bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -570,6 +573,28 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Remediation: "Inspect SSE event payloads for non-text content (base64 data patterns). " +
 				"Rate-limit chunked transfer encoding sessions. Enforce response size limits " +
 				"for unauthenticated clients — note this may break legitimate streaming apps.",
+		},
+	},
+	// Wave 22 #31: gRPC bidirectional streaming tunnel.
+	{
+		info: BypassTechniqueInfo{
+			Number: 31, ID: GRPCTunnel, Name: "gRPC bidi streaming tunnel", HelpName: "gRPC tunnel",
+			RequiresServer: true, Confidence: "MEDIUM",
+			Reason: "HTTPS open + gRPC server configured",
+			Risk:   "Requires operator-controlled gRPC server",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.GRPCServerConfigured && signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "high",
+			Impact: "Internet via gRPC bidi streaming over HTTP/2. Traffic uses " +
+				"content-type: application/grpc — indistinguishable from Kubernetes API calls, " +
+				"microservice communication, or any cloud gRPC application. " +
+				"Proto-less framing: zero dependency weight, identical wire format.",
+			Remediation: "Deep-inspect gRPC streams for non-protobuf payloads (raw binary data " +
+				"without protobuf wire format). Rate-limit long-lived gRPC streams from " +
+				"unauthenticated clients. Note: blocking gRPC breaks legitimate cloud apps.",
 		},
 	},
 }
