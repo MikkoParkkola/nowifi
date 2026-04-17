@@ -88,6 +88,8 @@ const (
 	H2ConnectTunnel Method = techniques.H2ConnectTunnel
 	// Wave 22: SSE streaming tunnel.
 	SSETunnel Method = techniques.SSETunnel
+	// Wave 22: gRPC bidi streaming tunnel.
+	GRPCTunnel Method = techniques.GRPCTunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -135,6 +137,8 @@ type Config struct {
 	H2ProxyURL string
 	// SSEServerURL is the SSE relay endpoint (https://...). Powers #30.
 	SSEServerURL string
+	// GRPCServerURL is the gRPC tunnel endpoint (https://...). Powers #31.
+	GRPCServerURL string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -443,6 +447,11 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	SSETunnel: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return trySSETunnel(config, probes)
+		},
+	},
+	GRPCTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryGRPCTunnel(config, probes)
 		},
 	},
 }

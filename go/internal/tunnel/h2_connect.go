@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -88,7 +87,7 @@ func StartH2ConnectTunnel(serverURL string, localPort int, timeout time.Duration
 
 	// Create HTTP/2 transport to the proxy.
 	h2Transport := &http.Transport{
-		TLSClientConfig: tlsConf,
+		TLSClientConfig:  tlsConf,
 		ForceAttemptHTTP2: true,
 	}
 
@@ -170,61 +169,11 @@ func handleH2Socks(client net.Conn, transport *http.Transport, proxyBase string)
 	defer func() { _ = client.Close() }()
 	_ = client.SetDeadline(time.Now().Add(30 * time.Second))
 
-	// SOCKS5 greeting.
-	greet := make([]byte, 257)
-	if _, err := io.ReadAtLeast(client, greet[:2], 2); err != nil {
+	// SOCKS5 handshake — shared helper parses greeting + CONNECT request.
+	target, err := socks5Handshake(client)
+	if err != nil {
 		return
 	}
-	if greet[0] != 0x05 {
-		return
-	}
-	nmethods := int(greet[1])
-	if nmethods > 0 {
-		if _, err := io.ReadFull(client, greet[:nmethods]); err != nil {
-			return
-		}
-	}
-	if _, err := client.Write([]byte{0x05, 0x00}); err != nil {
-		return
-	}
-
-	// SOCKS5 CONNECT request.
-	hdr := make([]byte, 4)
-	if _, err := io.ReadFull(client, hdr); err != nil {
-		return
-	}
-	if hdr[1] != 0x01 {
-		_, _ = client.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		return
-	}
-	var host string
-	switch hdr[3] {
-	case 0x01:
-		ip := make([]byte, 4)
-		if _, err := io.ReadFull(client, ip); err != nil {
-			return
-		}
-		host = net.IP(ip).String()
-	case 0x03:
-		length := make([]byte, 1)
-		if _, err := io.ReadFull(client, length); err != nil {
-			return
-		}
-		name := make([]byte, int(length[0]))
-		if _, err := io.ReadFull(client, name); err != nil {
-			return
-		}
-		host = string(name)
-	default:
-		_, _ = client.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		return
-	}
-	portBuf := make([]byte, 2)
-	if _, err := io.ReadFull(client, portBuf); err != nil {
-		return
-	}
-	port := binary.BigEndian.Uint16(portBuf)
-	target := fmt.Sprintf("%s:%d", host, port)
 
 	// Send HTTP/2 CONNECT to the proxy.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -237,18 +186,18 @@ func handleH2Socks(client net.Conn, transport *http.Transport, proxyBase string)
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		_ = pw.Close()
-		_, _ = client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		socks5SendFail(client)
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
 		_ = pw.Close()
-		_, _ = client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		socks5SendFail(client)
 		return
 	}
 
 	// SOCKS5 success.
-	if _, err := client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+	if err := socks5SendSuccess(client); err != nil {
 		_ = resp.Body.Close()
 		_ = pw.Close()
 		return

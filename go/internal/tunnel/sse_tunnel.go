@@ -26,7 +26,7 @@ import (
 // The uplink is a series of ordinary HTTP POST requests.
 //
 // Key bypass properties:
-//   - SSE is standard HTTP/1.1 or HTTP/2 �� no exotic protocols.
+//   - SSE is standard HTTP/1.1 or HTTP/2 — no exotic protocols.
 //   - Every major captive portal allows chunked transfer encoding because
 //     blocking it would break all streaming web applications.
 //   - Data is base64-encoded in the `data:` field of SSE events, matching
@@ -130,67 +130,17 @@ func handleSSESocks(client net.Conn, baseURL string) {
 	defer func() { _ = client.Close() }()
 	_ = client.SetDeadline(time.Now().Add(30 * time.Second))
 
-	// SOCKS5 greeting.
-	greet := make([]byte, 257)
-	if _, err := io.ReadAtLeast(client, greet[:2], 2); err != nil {
+	// SOCKS5 handshake — shared helper parses greeting + CONNECT request.
+	target, err := socks5Handshake(client)
+	if err != nil {
 		return
 	}
-	if greet[0] != 0x05 {
-		return
-	}
-	nmethods := int(greet[1])
-	if nmethods > 0 {
-		if _, err := io.ReadFull(client, greet[:nmethods]); err != nil {
-			return
-		}
-	}
-	if _, err := client.Write([]byte{0x05, 0x00}); err != nil {
-		return
-	}
-
-	// SOCKS5 CONNECT.
-	hdr := make([]byte, 4)
-	if _, err := io.ReadFull(client, hdr); err != nil {
-		return
-	}
-	if hdr[1] != 0x01 {
-		_, _ = client.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		return
-	}
-	var host string
-	switch hdr[3] {
-	case 0x01:
-		ip := make([]byte, 4)
-		if _, err := io.ReadFull(client, ip); err != nil {
-			return
-		}
-		host = net.IP(ip).String()
-	case 0x03:
-		length := make([]byte, 1)
-		if _, err := io.ReadFull(client, length); err != nil {
-			return
-		}
-		name := make([]byte, int(length[0]))
-		if _, err := io.ReadFull(client, name); err != nil {
-			return
-		}
-		host = string(name)
-	default:
-		_, _ = client.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		return
-	}
-	portBuf := make([]byte, 2)
-	if _, err := io.ReadFull(client, portBuf); err != nil {
-		return
-	}
-	port := (int(portBuf[0]) << 8) | int(portBuf[1])
-	target := fmt.Sprintf("%s:%d", host, port)
 
 	// Open SSE downlink stream with target in query parameter.
 	streamURL := fmt.Sprintf("%s/stream?target=%s", baseURL, target)
 	req, err := http.NewRequest("GET", streamURL, nil)
 	if err != nil {
-		_, _ = client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		socks5SendFail(client)
 		return
 	}
 	req.Header.Set("Accept", "text/event-stream")
@@ -200,7 +150,7 @@ func handleSSESocks(client net.Conn, baseURL string) {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
-		_, _ = client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		socks5SendFail(client)
 		return
 	}
 
@@ -212,7 +162,7 @@ func handleSSESocks(client net.Conn, baseURL string) {
 	}
 
 	// SOCKS5 success.
-	if _, err := client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+	if err := socks5SendSuccess(client); err != nil {
 		_ = resp.Body.Close()
 		return
 	}

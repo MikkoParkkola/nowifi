@@ -68,7 +68,7 @@ func init() {
 	serverListenCmd.Flags().StringVar(&serverListenWriteKey, "write-key", "",
 		"Write a fresh self-signed key to this path and exit (use with --write-cert)")
 	serverListenCmd.Flags().StringVar(&serverListenMode, "mode", "quic",
-		`Server mode: "quic" (raw QUIC, #22), "h3" (MASQUE+WT, #27-28), "h2" (HTTP/2 CONNECT, #29), "sse" (SSE relay, #30)`)
+		`Server mode: "quic" (raw QUIC, #22), "h3" (MASQUE+WT, #27-28), "h2" (HTTP/2 CONNECT, #29), "sse" (SSE relay, #30), "grpc" (gRPC tunnel, #31)`)
 
 	serverCmd.AddCommand(serverListenCmd)
 }
@@ -107,6 +107,8 @@ func runServerListen(cmd *cobra.Command, _ []string) error {
 		return runH2ProxyServer(cmd, cfg)
 	case "sse":
 		return runSSERelayServer(cmd, cfg)
+	case "grpc":
+		return runGRPCTunnelServer(cmd, cfg)
 	}
 
 	srv, err := tunnel.ListenHTTP3Tunnel(cfg)
@@ -157,6 +159,26 @@ func runSSERelayServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "nowifi SSE relay listening on %s\n", srv.Addr())
 	fmt.Fprintln(cmd.OutOrStdout(), "Endpoints: /stream (SSE downlink), /send (POST uplink) — pairs with --sse-server clients (#30)")
+	if serverListenCert == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Fprintln(cmd.OutOrStdout(), "\nshutting down...")
+	return nil
+}
+
+func runGRPCTunnelServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error {
+	srv, err := tunnel.ListenGRPCTunnel(cfg)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	fmt.Fprintf(cmd.OutOrStdout(), "nowifi gRPC tunnel server listening on %s\n", srv.Addr())
+	fmt.Fprintln(cmd.OutOrStdout(), "Path: /grpc.tunnel.v1.Tunnel/Bidi — traffic looks like cloud API (application/grpc)")
 	if serverListenCert == "" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
 	}

@@ -256,6 +256,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		WTServerURL:        flagWTServer,
 		H2ProxyURL:         flagH2Proxy,
 		SSEServerURL:       flagSSEServer,
+		GRPCServerURL:     flagGRPCServer,
 		Stealth:            stealth,
 	}
 

@@ -151,6 +151,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		H2ConnectTunnel,
 		// Wave 22: SSE streaming tunnel.
 		SSETunnel,
+		// Wave 22: gRPC bidi streaming tunnel.
+		GRPCTunnel,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,
