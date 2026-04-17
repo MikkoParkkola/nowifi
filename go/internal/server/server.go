@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/techniques"
@@ -34,13 +35,15 @@ import (
 
 // Info holds metadata about a provisioned server.
 type Info struct {
-	Provider  string `json:"provider"`   // "cloudflare_worker", "digitalocean", "hetzner", "custom"
-	ServerID  string `json:"server_id"`  // Droplet ID, Hetzner server ID, or Worker name
-	IP        string `json:"ip"`         // Public IP (empty for CF Workers)
-	URL       string `json:"url"`        // Chisel/proxy URL
-	CreatedAt string `json:"created_at"` // ISO 8601 timestamp
-	TTLHours  int    `json:"ttl_hours"`  // Auto-destroy after this (0 = never)
-	Status    string `json:"status"`     // "active", "creating", "destroyed"
+	Provider  string            `json:"provider"`        // "cloudflare_worker", "digitalocean", "hetzner", "cloudflare_quick", "custom"
+	ServerID  string            `json:"server_id"`       // Droplet ID, Hetzner server ID, or Worker / tunnel name
+	IP        string            `json:"ip"`              // Public IP (empty for CF Workers / quick tunnels)
+	URL       string            `json:"url"`             // Chisel/proxy URL
+	CreatedAt string            `json:"created_at"`      // ISO 8601 timestamp
+	TTLHours  int               `json:"ttl_hours"`       // Auto-destroy after this (0 = never)
+	Status    string            `json:"status"`          // "active", "creating", "destroyed"
+	PID       int               `json:"pid,omitempty"`   // OS process ID (cloudflare_quick only)
+	Extra     map[string]string `json:"extra,omitempty"` // Provider-specific metadata
 }
 
 // ---------------------------------------------------------------------------
@@ -370,20 +373,13 @@ func findWrangler() string {
 //
 // Supported providers: "digitalocean", "hetzner".
 // Uses cloud-init to install chisel + iodine + hans on first boot.
+// Delegates to the provider registry; adding a new VPS provider requires
+// only a new provider_*.go file with an init() — no edits here.
 func CreateVPS(provider, apiToken string, ttlHours int) (*Info, error) {
-	token, err := getToken(provider, apiToken)
-	if err != nil {
-		return nil, err
-	}
-
-	switch provider {
-	case "digitalocean":
-		return createDigitalOcean(token, ttlHours)
-	case "hetzner":
-		return createHetzner(token, ttlHours)
-	default:
-		return nil, fmt.Errorf("unknown provider: %q. Use 'digitalocean' or 'hetzner'", provider)
-	}
+	return CreateViaRegistry(context.Background(), provider, CreateOpts{
+		APIToken: apiToken,
+		TTLHours: ttlHours,
+	})
 }
 
 // createDigitalOcean creates a DigitalOcean droplet ($0.007/hr, smallest instance).
@@ -634,28 +630,10 @@ func waitForHetznerIP(token, serverID string, timeout time.Duration) (string, er
 
 // DestroyServer destroys a provisioned server (VPS or CF Worker).
 // Returns nil on success.
+// Delegates to the provider registry; adding a new provider requires
+// only a new provider_*.go file with an init() — no edits here.
 func DestroyServer(info *Info, apiToken string) error {
-	switch info.Provider {
-	case "digitalocean":
-		token, err := getToken("digitalocean", apiToken)
-		if err != nil {
-			return err
-		}
-		return destroyDigitalOcean(token, info.ServerID)
-
-	case "hetzner":
-		token, err := getToken("hetzner", apiToken)
-		if err != nil {
-			return err
-		}
-		return destroyHetzner(token, info.ServerID)
-
-	case "cloudflare_worker":
-		return destroyCloudflareWorker(info.ServerID)
-
-	default:
-		return fmt.Errorf("unknown provider: %q", info.Provider)
-	}
+	return DestroyViaRegistry(context.Background(), info, apiToken)
 }
 
 func destroyDigitalOcean(token, dropletID string) error {
@@ -718,6 +696,38 @@ func destroyCloudflareWorker(workerName string) error {
 	}
 
 	if err := markDestroyed("cloudflare_worker", workerName); err != nil {
+		return fmt.Errorf("mark destroyed: %w", err)
+	}
+	return nil
+}
+
+// destroyCloudflareQuick terminates the cloudflared process stored in
+// info.PID.  It sends SIGTERM first, waits up to 3 seconds, then SIGKILLs.
+func destroyCloudflareQuick(info *Info) error {
+	if info.PID > 0 {
+		proc, err := os.FindProcess(info.PID)
+		if err == nil {
+			// SIGTERM — polite shutdown.
+			_ = proc.Signal(syscall.SIGTERM)
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := proc.Wait()
+				done <- err
+			}()
+
+			select {
+			case <-done:
+				// Process exited cleanly.
+			case <-time.After(3 * time.Second):
+				// Timeout — force kill.
+				_ = proc.Signal(syscall.SIGKILL)
+				<-done
+			}
+		}
+	}
+
+	if err := markDestroyed(info.Provider, info.ServerID); err != nil {
 		return fmt.Errorf("mark destroyed: %w", err)
 	}
 	return nil
