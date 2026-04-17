@@ -4,7 +4,7 @@
 
 ## What To Do
 
-You are setting up `nowifi` -- a captive portal bypass tool. One command, 40 techniques, browser works immediately.
+You are setting up `nowifi` -- a captive portal bypass tool. One command, 43 techniques, browser works immediately.
 
 ### Step 1: Install
 
@@ -33,7 +33,7 @@ nowifi diagnose
 nowifi tools
 ```
 
-That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tries 32 bypass techniques (most powerful first), stops on the first one that works, and maintains your connection until `Ctrl+C`. All network changes are restored on exit.
+That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tries 35 bypass techniques (most powerful first), stops on the first one that works, and maintains your connection until `Ctrl+C`. All network changes are restored on exit.
 
 ---
 
@@ -61,9 +61,9 @@ That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tri
 | `nowifi ui` | Launch web dashboard |
 | `sudo nowifi reset` | Emergency network reset after crash |
 
-## 40 Techniques
+## 43 Techniques
 
-**Portal Bypass (32)**: IPv6 bypass, HTTPS/WS tunnel, CNA User-Agent spoof, JS-only bypass, HTTP CONNECT abuse, MAC clone (idle), MAC clone (any), DNS tunnel, ICMP tunnel, VPN on port 53, whitelist domain, session cookie replay, portal default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP tunnel, DoH tunnel, CAPPORT session extend, DoQ tunnel, HTTP/3 tunnel, DHCP route bypass, ECH domain fronting, WireGuard-over-WebSocket, secondary interface bypass, MASQUE tunnel, WebTransport tunnel, HTTP/2 CONNECT tunnel, SSE streaming tunnel, gRPC bidi streaming tunnel, CONNECT-IP tunnel.
+**Portal Bypass (35)**: IPv6 bypass, HTTPS/WS tunnel, CNA User-Agent spoof, JS-only bypass, HTTP CONNECT abuse, MAC clone (idle), MAC clone (any), DNS tunnel, ICMP tunnel, VPN on port 53, whitelist domain, session cookie replay, portal default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP tunnel, DoH tunnel, CAPPORT session extend, DoQ tunnel, HTTP/3 tunnel, DHCP route bypass, ECH domain fronting, WireGuard-over-WebSocket, secondary interface bypass, MASQUE tunnel, WebTransport tunnel, HTTP/2 CONNECT tunnel, SSE streaming tunnel, gRPC bidi streaming tunnel, CONNECT-IP tunnel, Cloudflare WARP tunnel, portal self-relay, TURN relay.
 
 **WPA Cracking (4)**: PMKID capture, WPS Pixie-Dust, handshake capture + hashcat, WPS PIN brute force.
 
