@@ -4,7 +4,9 @@
 package bypass
 
 import (
+	"encoding/base64"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
@@ -31,17 +33,34 @@ func tryECHFronting(config *Config, _ *ProbeResults) Result {
 			Details: "ECH technique requires --ech-server and --ech-config-list.",
 		}
 	}
-	if config.ECHServerURL == "" || config.ECHConfigListBase64 == "" {
+	if config.ECHServerURL == "" {
 		return Result{
 			Method:  ECHFronting,
 			Success: false,
-			Details: "ECH not configured. Provide --ech-server <https-url> and --ech-config-list <base64>.",
+			Details: "ECH not configured. Provide --ech-server <https-url>.",
+		}
+	}
+
+	// Auto-discover ECHConfigList via DoH if not manually provided.
+	echConfigB64 := config.ECHConfigListBase64
+	if echConfigB64 == "" {
+		if u, err := url.Parse(config.ECHServerURL); err == nil && u.Hostname() != "" {
+			if discovered, err := tunnel.DiscoverECHConfigList(u.Hostname()); err == nil && len(discovered) > 0 {
+				echConfigB64 = base64.StdEncoding.EncodeToString(discovered)
+			}
+		}
+	}
+	if echConfigB64 == "" {
+		return Result{
+			Method:  ECHFronting,
+			Success: false,
+			Details: "ECH config not found via DoH auto-discovery. Provide --ech-config-list <base64> manually.",
 		}
 	}
 
 	handle, err := tunnel.StartECHProxy(tunnel.ECHServerConfig{
 		ServerURL:           config.ECHServerURL,
-		ECHConfigListBase64: config.ECHConfigListBase64,
+		ECHConfigListBase64: echConfigB64,
 		Timeout:             15 * time.Second,
 	}, 0)
 	if err != nil {
