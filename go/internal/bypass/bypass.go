@@ -38,6 +38,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/MikkoParkkola/nowifi/internal/inflight"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
@@ -148,6 +149,13 @@ type Config struct {
 	GRPCServerURL string
 	// ConnectIPServerURL is the CONNECT-IP proxy endpoint (https://...). Powers #32.
 	ConnectIPServerURL string
+	// InflightProvider, when set, identifies the detected airline WiFi provider.
+	// When non-empty, the bypass engine looks up the provider's RecommendedOrder
+	// from the inflight package and runs techniques in provider-optimized order.
+	// Techniques not in RecommendedOrder run afterward in canonical order.
+	// Techniques in IneffectiveTechniques are skipped entirely.
+	// Empty string = use canonical technique ordering.
+	InflightProvider string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -274,7 +282,7 @@ func RunBypasses(probes *ProbeResults, config *Config, plat PlatformOps) []Resul
 	}
 
 	var results []Result
-	for _, t := range orderedTechniqueRunners() {
+	for _, t := range orderedTechniqueRunnersFor(config) {
 		tName := t.runName // capture for panic recovery
 		logStatus("Trying: %s...", tName)
 		r := func() (result Result) {
@@ -486,19 +494,88 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 }
 
 func orderedTechniqueRunners() []techniqueRunner {
+	return orderedTechniqueRunnersFor(nil)
+}
+
+// orderedTechniqueRunnersFor returns technique runners in an order optimized
+// for the detected inflight provider, falling back to canonical order.
+//
+// When config.InflightProvider is set:
+//  1. Ineffective techniques for the provider are filtered out entirely
+//  2. RecommendedOrder techniques run first (in provider-specified order)
+//  3. Remaining techniques run in canonical order
+//
+// When config is nil or InflightProvider is empty, returns canonical ordering.
+func orderedTechniqueRunnersFor(config *Config) []techniqueRunner {
 	infos := techniques.BypassTechniqueInfos()
-	runners := make([]techniqueRunner, 0, len(infos))
+	runnerByID := make(map[techniques.ID]techniqueRunner, len(infos))
+	infoByID := make(map[techniques.ID]techniques.BypassTechniqueInfo, len(infos))
+
 	for _, info := range infos {
+		infoByID[info.ID] = info
 		runner, ok := techniqueRunnerByMethod[Method(info.ID)]
 		if !ok {
-			runners = append(runners, missingTechniqueRunner(info))
+			runnerByID[info.ID] = missingTechniqueRunner(info)
 			continue
 		}
 		if runner.runName == "" {
 			runner.runName = info.Name
 		}
-		runners = append(runners, runner)
+		runnerByID[info.ID] = runner
 	}
+
+	// No provider-specific override: canonical order.
+	if config == nil || config.InflightProvider == "" {
+		runners := make([]techniqueRunner, 0, len(infos))
+		for _, info := range infos {
+			runners = append(runners, runnerByID[info.ID])
+		}
+		return runners
+	}
+
+	profile := inflight.GetProfile(inflight.Provider(config.InflightProvider))
+	if profile == nil {
+		// Unknown provider — fall back to canonical order.
+		runners := make([]techniqueRunner, 0, len(infos))
+		for _, info := range infos {
+			runners = append(runners, runnerByID[info.ID])
+		}
+		return runners
+	}
+
+	// Build lookup sets.
+	ineffective := make(map[techniques.ID]bool, len(profile.IneffectiveTechniques))
+	for _, id := range profile.IneffectiveTechniques {
+		ineffective[techniques.ID(id)] = true
+	}
+
+	emitted := make(map[techniques.ID]bool, len(infos))
+	runners := make([]techniqueRunner, 0, len(infos))
+
+	// Pass 1: emit recommended techniques in provider's preferred order.
+	for _, id := range profile.RecommendedOrder {
+		techID := techniques.ID(id)
+		if ineffective[techID] {
+			continue
+		}
+		if emitted[techID] {
+			continue
+		}
+		if runner, ok := runnerByID[techID]; ok {
+			runners = append(runners, runner)
+			emitted[techID] = true
+		}
+	}
+
+	// Pass 2: emit remaining techniques in canonical order, skipping ineffective.
+	for _, info := range infos {
+		if emitted[info.ID] || ineffective[info.ID] {
+			continue
+		}
+		runners = append(runners, runnerByID[info.ID])
+		emitted[info.ID] = true
+	}
+
 	return runners
 }
 

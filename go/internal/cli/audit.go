@@ -235,6 +235,8 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
 	// Discover RFC 3442 option 121 routes (non-fatal if absent) for Wave 21 #23.
 	dhcpRoutes, _ := platform.GetDHCPClasslessRoutes(flagInterface)
+	// Detect inflight provider for technique ordering (Wave 23).
+	inflightProvider := detectInflightProvider(portalInfo)
 
 	bpConfig := &bypass.Config{
 		Interface:           flagInterface,
@@ -258,6 +260,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 		SSEServerURL:       flagSSEServer,
 		GRPCServerURL:        flagGRPCServer,
 		ConnectIPServerURL:  flagConnectIPServer,
+		InflightProvider:   inflightProvider,
 		Stealth:             stealth,
 	}
 
@@ -589,6 +592,7 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		SSEServerURL:        flagSSEServer,
 		GRPCServerURL:       flagGRPCServer,
 		ConnectIPServerURL:  flagConnectIPServer,
+		InflightProvider:    detectInflightProvider(portalInfo),
 		Stealth:             stealth,
 	}
 	if !flagProbeOnly {
