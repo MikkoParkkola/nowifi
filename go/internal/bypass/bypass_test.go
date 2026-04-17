@@ -157,6 +157,9 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		ConnectIPTunnel,
 		// Wave 22: Cloudflare WARP (zero-config).
 		WARPTunnel,
+		// Wave 23: Zero-config relay techniques.
+		PortalRelay,
+		TURNRelay,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,

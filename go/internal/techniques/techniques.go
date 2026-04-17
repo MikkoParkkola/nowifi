@@ -44,6 +44,9 @@ const (
 	GRPCTunnel      ID = "grpc_tunnel"       // gRPC bidi streaming via HTTP/2
 	ConnectIPTunnel ID = "connect_ip_tunnel" // RFC 9484 IP-layer MASQUE proxy
 	WARPTunnel      ID = "warp_tunnel"       // Cloudflare WARP bootstrap (zero-config)
+	// Wave 23: Zero-config relay techniques (2026-04).
+	PortalRelay ID = "portal_relay" // Tunnel through portal-whitelisted domains
+	TURNRelay   ID = "turn_relay"   // Relay through public TURN/STUN servers
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -642,6 +645,49 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Remediation: "Block engage.cloudflareclient.com — but this also blocks Cloudflare WARP " +
 				"for all legitimate users (10M+ devices). Deep-inspect HTTP/2 CONNECT to WARP " +
 				"endpoints for unauthenticated portal sessions.",
+		},
+	},
+	// Wave 23 #34: Portal self-relay — tunnel through whitelisted domains.
+	{
+		info: BypassTechniqueInfo{
+			Number: 34, ID: PortalRelay, Name: "Portal self-relay (whitelisted domain)", HelpName: "Portal relay",
+			RequiresServer: false, Confidence: "MEDIUM",
+			Reason: "Portal whitelists payment/CDN/connectivity-check domains",
+			Risk:   "Depends on portal allowing HTTP/2 CONNECT to whitelisted hosts",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.PortalDetected && signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via HTTP/2 CONNECT through portal-whitelisted domain. " +
+				"Portal trusts the SNI/DNS (stripe.com, googleapis.com, apple.com) and " +
+				"does not inspect the HTTP/2 session. Zero-config — no server deployment needed.",
+			Remediation: "Inspect HTTP/2 CONNECT method within TLS sessions to whitelisted domains. " +
+				"Use application-layer filtering, not just SNI-based whitelisting. " +
+				"Deploy HTTP/2-aware DPI that validates CONNECT targets against whitelist policy.",
+		},
+	},
+	// Wave 23 #35: TURN relay — tunnel through public WebRTC TURN servers.
+	{
+		info: BypassTechniqueInfo{
+			Number: 35, ID: TURNRelay, Name: "TURN relay (public WebRTC servers)", HelpName: "TURN relay",
+			RequiresServer: false, Confidence: "MEDIUM",
+			Reason: "TURN servers use TCP/443 (indistinguishable from HTTPS)",
+			Risk:   "Depends on public TURN server availability and portal not blocking them",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "high",
+			Impact: "Internet via public TURN server relay (RFC 5766). TURN-over-TLS on TCP/443 " +
+				"is indistinguishable from HTTPS to portal DPI. Uses public servers " +
+				"(openrelay.metered.ca, relay.metered.ca) — no account needed. " +
+				"Bandwidth limited by TURN relay capacity (~1-5 Mbps).",
+			Remediation: "Block known TURN server domains/IPs for unauthenticated clients. " +
+				"Inspect TLS sessions for STUN/TURN protocol signatures. " +
+				"Note: blocking TURN also breaks WebRTC video calls (Zoom, Teams, Meet).",
 		},
 	},
 }

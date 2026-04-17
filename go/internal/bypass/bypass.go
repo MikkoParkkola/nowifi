@@ -94,6 +94,9 @@ const (
 	ConnectIPTunnel Method = techniques.ConnectIPTunnel
 	// Wave 22: Cloudflare WARP bootstrap (zero-config).
 	WARPTunnel Method = techniques.WARPTunnel
+	// Wave 23: Zero-config relay techniques.
+	PortalRelay Method = techniques.PortalRelay
+	TURNRelay   Method = techniques.TURNRelay
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -468,6 +471,16 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	WARPTunnel: {
 		run: func(_ *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryWARPTunnel(config, nil)
+		},
+	},
+	PortalRelay: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryPortalRelay(config, probes)
+		},
+	},
+	TURNRelay: {
+		run: func(_ *ProbeResults, _ *Config, _ PlatformOps) Result {
+			return tryTURNRelay(nil, nil)
 		},
 	},
 }

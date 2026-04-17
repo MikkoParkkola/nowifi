@@ -584,6 +584,11 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 		ECHServerURL:        flagECHServer,
 		ECHConfigListBase64: flagECHConfigB64,
 		MASQUEServerURL:     flagMASQUEServer,
+		WTServerURL:         flagWTServer,
+		H2ProxyURL:          flagH2Proxy,
+		SSEServerURL:        flagSSEServer,
+		GRPCServerURL:       flagGRPCServer,
+		ConnectIPServerURL:  flagConnectIPServer,
 		Stealth:             stealth,
 	}
 	if !flagProbeOnly {

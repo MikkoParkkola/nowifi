@@ -13,7 +13,7 @@
 
 **Author: Mikko Parkkola**
 
-One command. 41 techniques. Browser works immediately.
+One command. 43 techniques. Browser works immediately.
 
 ```bash
 sudo nowifi
@@ -23,7 +23,7 @@ sudo nowifi
   <img src="screenshot.png" alt="nowifi dashboard" width="800">
 </p>
 
-Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 33 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
+Stuck behind a hotel/airport/cafe WiFi login page? `nowifi` detects the captive portal, probes for weaknesses, and tries 35 bypass techniques automatically -- most powerful first, stops on the first one that works. Your browser works immediately. `Ctrl+C` restores everything.
 
 Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-technique WPA/WPA2 cracking pipeline. It escalates from PMKID and WPS Pixie-Dust through handshake capture, dictionary/smart cracking, and only then to WPS PIN or online brute force, stopping as soon as a password is recovered.
 
@@ -153,9 +153,9 @@ nowifi doctor
 
 ---
 
-## 41 Techniques
+## 43 Techniques
 
-### Portal Bypass (33 techniques)
+### Portal Bypass (35 techniques)
 
 These work when you're connected to WiFi but stuck behind a captive portal login page.
 
@@ -194,6 +194,8 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 31 | **gRPC bidi streaming tunnel** | HTTP/2 + application/grpc framing — looks like Kubernetes/microservice API traffic | High |
 | 32 | **CONNECT-IP tunnel** | RFC 9484 full IP tunnel via QUIC datagrams — identical to Apple Private Relay | Critical |
 | 33 | **Cloudflare WARP tunnel** | Zero-config — auto-registers free WARP device, tunnels via HTTP/2 CONNECT | Critical |
+| 34 | **Portal self-relay** | Zero-config — tunnels through portal-whitelisted domains (Stripe, Google, Apple) via HTTP/2 CONNECT | Critical |
+| 35 | **TURN relay** | Zero-config — relays through public WebRTC TURN servers on TCP/443, indistinguishable from video calls | High |
 
 ### WPA Cracking (4 techniques)
 
