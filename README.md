@@ -310,6 +310,16 @@ Technique #21 (DoQ) connects to a public resolver (default `dns.adguard.com:853`
 
 ---
 
+## Recipes
+
+Hands-on guides for specific scenarios:
+
+- [VPN over Cloudflare Quick Tunnel](docs/recipes/vpn-over-quick-tunnel.md) — carry a VPN through a TCP-only captive portal using zero-config UDP (`nowifi server create -p cloudflare-quick --udp`), plus four alternative strategies (chisel-legacy, OpenVPN TCP, wstunnel, Tailscale/ZeroTier).
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
+
+---
+
 ## Architecture (Go)
 
 ```
