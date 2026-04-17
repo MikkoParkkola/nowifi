@@ -4,7 +4,7 @@
 
 ## What To Do
 
-You are setting up `nowifi` -- a captive portal bypass tool. One command, 27 techniques, browser works immediately.
+You are setting up `nowifi` -- a captive portal bypass tool. One command, 40 techniques, browser works immediately.
 
 ### Step 1: Install
 
@@ -33,7 +33,7 @@ nowifi diagnose
 nowifi tools
 ```
 
-That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tries 19 bypass techniques (most powerful first), stops on the first one that works, and maintains your connection until `Ctrl+C`. All network changes are restored on exit.
+That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tries 32 bypass techniques (most powerful first), stops on the first one that works, and maintains your connection until `Ctrl+C`. All network changes are restored on exit.
 
 ---
 
@@ -45,6 +45,9 @@ That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tri
 | `sudo nowifi -p` | Probe only -- find leaks without exploiting them |
 | `sudo nowifi --fast` | Skip stealth timing (faster but more detectable) |
 | `sudo nowifi -t URL` | Use a specific chisel tunnel server |
+| `sudo nowifi --masque-server URL` | MASQUE tunnel via HTTP/3 Extended CONNECT |
+| `sudo nowifi --grpc-server URL` | gRPC bidi streaming tunnel |
+| `sudo nowifi --connectip-server URL` | CONNECT-IP full IP tunnel (TUN device) |
 | `nowifi diagnose` | Read-only security assessment |
 | `nowifi diagnose -r json` | Assessment as JSON |
 | `nowifi crack` | WPA/WPA2 password cracking (8 techniques) |
@@ -53,20 +56,33 @@ That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tri
 | `nowifi score` | Grade nearby networks A-F |
 | `nowifi tools` | Show installed/missing external tools |
 | `nowifi tools -d` | Auto-download missing tools (chisel, hysteria, cloudflared) |
-| `nowifi server create` | Create a tunnel server (CF Worker or VPS) |
+| `nowifi server listen` | Run a tunnel server (6 modes: quic/h3/h2/sse/grpc/connectip) |
 | `nowifi doctor` | System health check |
 | `nowifi ui` | Launch web dashboard |
 | `sudo nowifi reset` | Emergency network reset after crash |
 
-## 27 Techniques
+## 40 Techniques
 
-**Portal Bypass (19)**: IPv6 bypass, HTTPS/WS tunnel, CNA User-Agent spoof, JS-only bypass, HTTP CONNECT abuse, MAC clone (idle), MAC clone (any), DNS tunnel, ICMP tunnel, VPN on port 53, whitelist domain, session cookie replay, portal default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP tunnel, DoH tunnel.
+**Portal Bypass (32)**: IPv6 bypass, HTTPS/WS tunnel, CNA User-Agent spoof, JS-only bypass, HTTP CONNECT abuse, MAC clone (idle), MAC clone (any), DNS tunnel, ICMP tunnel, VPN on port 53, whitelist domain, session cookie replay, portal default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP tunnel, DoH tunnel, CAPPORT session extend, DoQ tunnel, HTTP/3 tunnel, DHCP route bypass, ECH domain fronting, WireGuard-over-WebSocket, secondary interface bypass, MASQUE tunnel, WebTransport tunnel, HTTP/2 CONNECT tunnel, SSE streaming tunnel, gRPC bidi streaming tunnel, CONNECT-IP tunnel.
 
 **WPA Cracking (4)**: PMKID capture, WPS Pixie-Dust, handshake capture + hashcat, WPS PIN brute force.
 
 **Smart Cracking (4)**: Common passwords, numeric mask, word+number rules, online brute force.
 
 Techniques run in order of power. The tool stops on the first success.
+
+## Server Modes
+
+`nowifi server listen --mode <mode>` runs a tunnel server:
+
+| Mode | Protocol | Looks like |
+|------|----------|------------|
+| `quic` | Raw QUIC bidi streams | Generic QUIC |
+| `h3` | MASQUE + WebTransport | Google Meet / Apple Private Relay |
+| `h2` | HTTP/2 CONNECT proxy | gRPC / Cloud API |
+| `sse` | Server-Sent Events relay | News feed / chat stream |
+| `grpc` | gRPC bidi streaming | Kubernetes API / microservices |
+| `connectip` | CONNECT-IP (RFC 9484) | Apple Private Relay / iCloud+ |
 
 ## Optional External Tools
 
