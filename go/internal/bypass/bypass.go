@@ -84,6 +84,10 @@ const (
 	MASQUETunnel Method = techniques.MASQUETunnel
 	// Wave 21: WebTransport tunnel (RFC 9220).
 	WebTransportTunnel Method = techniques.WebTransportTunnel
+	// Wave 22: HTTP/2 CONNECT tunnel.
+	H2ConnectTunnel Method = techniques.H2ConnectTunnel
+	// Wave 22: SSE streaming tunnel.
+	SSETunnel Method = techniques.SSETunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -127,6 +131,10 @@ type Config struct {
 	MASQUEServerURL string
 	// WTServerURL is the WebTransport tunnel endpoint (https://...). Powers #28.
 	WTServerURL string
+	// H2ProxyURL is an HTTP/2 CONNECT-capable proxy (https://...). Powers #29.
+	H2ProxyURL string
+	// SSEServerURL is the SSE relay endpoint (https://...). Powers #30.
+	SSEServerURL string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -423,6 +431,18 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	WebTransportTunnel: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryWebTransportTunnel(config, probes)
+		},
+	},
+	// Wave 22: HTTP/2 CONNECT tunnel.
+	H2ConnectTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryH2ConnectTunnel(config, probes)
+		},
+	},
+	// Wave 22: SSE streaming tunnel.
+	SSETunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return trySSETunnel(config, probes)
 		},
 	},
 }
