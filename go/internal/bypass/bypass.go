@@ -90,6 +90,8 @@ const (
 	SSETunnel Method = techniques.SSETunnel
 	// Wave 22: gRPC bidi streaming tunnel.
 	GRPCTunnel Method = techniques.GRPCTunnel
+	// Wave 22: CONNECT-IP tunnel (RFC 9484).
+	ConnectIPTunnel Method = techniques.ConnectIPTunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -139,6 +141,8 @@ type Config struct {
 	SSEServerURL string
 	// GRPCServerURL is the gRPC tunnel endpoint (https://...). Powers #31.
 	GRPCServerURL string
+	// ConnectIPServerURL is the CONNECT-IP proxy endpoint (https://...). Powers #32.
+	ConnectIPServerURL string
 }
 
 // Result records the outcome of a single bypass attempt.
@@ -452,6 +456,11 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	GRPCTunnel: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryGRPCTunnel(config, probes)
+		},
+	},
+	ConnectIPTunnel: {
+		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryConnectIPTunnel(config, probes)
 		},
 	},
 }
