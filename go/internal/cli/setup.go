@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -122,40 +123,16 @@ func runSetup(cmd *cobra.Command, args []string) {
 		fmt.Println("   OK     All tools ready for offline use")
 	}
 
-	// 6. Cloudflare Worker (optional zero-config server).
-	fmt.Println("\n6. Cloudflare Worker proxy")
-	fmt.Println("   A free CF Worker gives you serverless tunneling (SSE, HTTP, gRPC).")
-	fmt.Println("   This is optional — nowifi has 16 serverless techniques built-in.")
-
-	// Check if a CF Worker is already deployed.
-	servers, _ := server.ListServers()
-	hasCFWorker := false
-	for _, s := range servers {
-		if s.Provider == "cloudflare_worker" {
-			hasCFWorker = true
-			fmt.Printf("   %s Worker already deployed: %s\n", green("OK"), s.URL)
-			break
-		}
-	}
-
-	if !hasCFWorker {
-		// Check if wrangler is available.
-		if toolchain.FindTool("wrangler") != "" {
-			fmt.Println("   Deploying CF Worker (free, ~10s)...")
-			info, err := server.SetupCloudflareWorker()
-			if err != nil {
-				fmt.Printf("   %s %v\n", dim("SKIP"), err)
-				fmt.Println("   You can deploy later: nowifi server create")
-			} else {
-				fmt.Printf("   %s Worker deployed: %s\n", green("OK"), info.URL)
-				fmt.Println("   Free tier: 100,000 requests/day")
-			}
-		} else {
-			fmt.Println("   SKIP  wrangler not installed (optional)")
-			fmt.Println("         Install: npm install -g wrangler && wrangler login")
-			fmt.Println("         Then: nowifi server create")
-		}
-	}
+	// 6. Public endpoint (auto cascade).
+	//
+	// G3 – mandatory disclosure printed immediately before cascade attempt.
+	fmt.Println("\n6. Public endpoint (auto)")
+	fmt.Println()
+	fmt.Println("   Note: Cloudflare logs the source IP of any tunnel you open. Tunnels are")
+	fmt.Println("   not anonymous. Use only against networks you are authorized to assess.")
+	fmt.Println()
+	fmt.Println("   Trying providers in order (free, no account):")
+	setupPublicEndpointCascade()
 
 	// 7. Anonymous telemetry (opt-in).
 	fmt.Println("\n7. Anonymous telemetry")
@@ -188,4 +165,78 @@ func runSetup(cmd *cobra.Command, args []string) {
 	fmt.Println("   TIP: Run 'nowifi tools -d' and 'nowifi server create' BEFORE")
 	fmt.Println("        going to a location where you'll need nowifi.")
 	fmt.Println()
+}
+
+// setupPublicEndpointCascade tries providers in priority order:
+//
+//  1. cloudflare_quick   — ephemeral trycloudflare.com, zero-config, no account
+//  2. github_codespace   — GitHub Codespace relay (opt-in via NOWIFI_CODESPACE_REPO)
+//  3. cloudflare_worker  — wrangler-deployed Worker, requires CF account
+//
+// Short-circuits if any tunnel endpoint is already active.
+// [2/3] is silently skipped when NOWIFI_CODESPACE_REPO is unset — users opt in
+// by setting the env var; we never prompt for it during setup.
+func setupPublicEndpointCascade() {
+	// Short-circuit: already active.
+	servers, _ := server.ListServers()
+	for _, s := range servers {
+		if s.Provider == "cloudflare_quick" || s.Provider == "cloudflare_worker" ||
+			s.Provider == "github_codespace" {
+			fmt.Printf("   %s Endpoint already active: %s\n", green("OK"), s.URL)
+			return
+		}
+	}
+
+	// [1/3] cloudflare_quick — fastest, zero-config.
+	fmt.Print("     [1/3] cloudflared quick tunnel ....... ")
+	if toolchain.FindTool("cloudflared") != "" {
+		info, err := server.SetupCloudflareQuickTunnel(context.Background(), "http://localhost:8080", 0)
+		if err != nil {
+			fmt.Printf("%s (%v)\n", dim("SKIP"), err)
+		} else {
+			fmt.Printf("%s %s\n", green("OK"), info.URL)
+			return
+		}
+	} else {
+		fmt.Printf("%s (cloudflared not installed)\n", dim("SKIP"))
+	}
+
+	// [2/3] github_codespace — opt-in via NOWIFI_CODESPACE_REPO env var.
+	if repo := os.Getenv("NOWIFI_CODESPACE_REPO"); repo != "" {
+		fmt.Print("     [2/3] github codespace relay ......... ")
+		p, ok := server.Get("github_codespace")
+		if ok {
+			info, err := p.Create(context.Background(), server.CreateOpts{
+				Extra: map[string]string{"repo": repo},
+			})
+			if err != nil {
+				fmt.Printf("%s (%v)\n", dim("SKIP"), err)
+			} else {
+				fmt.Printf("%s %s\n", green("OK"), info.URL)
+				return
+			}
+		} else {
+			fmt.Printf("%s (provider not registered)\n", dim("SKIP"))
+		}
+	}
+
+	// [3/3] cloudflare_worker — needs wrangler + CF account.
+	fmt.Print("     [3/3] cloudflared worker (wrangler) .. ")
+	if toolchain.FindTool("wrangler") != "" {
+		info, err := server.SetupCloudflareWorker()
+		if err != nil {
+			fmt.Printf("%s (%v)\n", dim("SKIP"), err)
+		} else {
+			fmt.Printf("%s %s\n", green("OK"), info.URL)
+			fmt.Println("   Free tier: 100,000 requests/day")
+			return
+		}
+	} else {
+		fmt.Printf("%s (wrangler not installed)\n", dim("SKIP"))
+	}
+
+	fmt.Println()
+	fmt.Println("   No public endpoint configured (optional).")
+	fmt.Println("   Install cloudflared: brew install cloudflared")
+	fmt.Println("   Then: nowifi server create -p cloudflare-quick")
 }

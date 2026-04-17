@@ -4,11 +4,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/server"
+	"github.com/MikkoParkkola/nowifi/internal/server/udpws"
 	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +32,8 @@ var (
 	serverProvider string
 	serverToken    string
 	serverTTL      int
+	serverTarget   string
+	serverUDP      bool
 )
 
 var serverCreateCmd = &cobra.Command{
@@ -65,6 +72,30 @@ Examples:
   nowifi server destroy nowifi-proxy      # Destroy CF Worker
   nowifi server destroy --all             # Destroy everything`,
 	Run: runServerDestroy,
+}
+
+// --- server client ---
+
+var (
+	serverClientURL      string
+	serverClientUDPLocal string
+)
+
+var serverClientCmd = &cobra.Command{
+	Use:   "client",
+	Short: "Start UDP-over-WebSocket client (peer side of --udp tunnel)",
+	Long: `Start the UDP-over-WebSocket client on the remote peer.
+
+The client listens on a local UDP port and tunnels all datagrams to the
+Quick Tunnel WebSocket endpoint opened by 'nowifi server create --udp'.
+
+Examples:
+  # Peer connects WireGuard via the Quick Tunnel (printed by server create):
+  nowifi server client --url wss://shiny-river-42.trycloudflare.com --udp-local 127.0.0.1:51820
+
+  # Custom local bind (e.g. to avoid conflicts):
+  nowifi server client --url wss://... --udp-local 0.0.0.0:5182`,
+	Run: runServerClient,
 }
 
 // --- server info ---
@@ -133,25 +164,105 @@ func serverRequiredTechniqueNames() []string {
 func init() {
 	// server create flags.
 	serverCreateCmd.Flags().StringVarP(&serverProvider, "provider", "p", "cloudflare",
-		"Infrastructure provider: cloudflare, digitalocean, hetzner")
+		"Infrastructure provider: cloudflare, cloudflare-quick, github-codespace, digitalocean, hetzner")
 	serverCreateCmd.Flags().StringVarP(&serverToken, "token", "t", "",
 		"API token for cloud provider")
 	serverCreateCmd.Flags().IntVar(&serverTTL, "ttl", 24,
 		"Auto-destroy after N hours (VPS only)")
+	serverCreateCmd.Flags().StringVar(&serverTarget, "target", "http://localhost:8080",
+		"Local service URL to expose (cloudflare-quick only)")
+	serverCreateCmd.Flags().BoolVar(&serverUDP, "udp", false,
+		"Enable UDP-over-WebSocket mode (cloudflare-quick only); starts in-process udpws bridge")
 
 	// server destroy flags.
 	serverDestroyCmd.Flags().BoolVar(&serverDestroyAll, "all", false,
 		"Destroy all active servers")
+
+	// server client flags.
+	serverClientCmd.Flags().StringVar(&serverClientURL, "url", "",
+		"Quick Tunnel URL (wss://... or https://...) printed by server create --udp")
+	serverClientCmd.Flags().StringVar(&serverClientUDPLocal, "udp-local", "127.0.0.1:51820",
+		"Local UDP address to listen on (WireGuard/VPN peer endpoint)")
+	_ = serverClientCmd.MarkFlagRequired("url")
 
 	// Register subcommands under server.
 	serverCmd.AddCommand(serverCreateCmd)
 	serverCmd.AddCommand(serverListCmd)
 	serverCmd.AddCommand(serverDestroyCmd)
 	serverCmd.AddCommand(serverInfoCmd)
+	serverCmd.AddCommand(serverClientCmd)
 }
 
 func runServerCreate(cmd *cobra.Command, args []string) {
 	switch serverProvider {
+	case "github-codespace":
+		fmt.Println("\nnowifi — GitHub Codespace Relay")
+		fmt.Println()
+		p, ok := server.Get("github_codespace")
+		if !ok {
+			fmt.Printf("  %s provider not registered\n", red("ERROR"))
+			os.Exit(1)
+		}
+		extra := map[string]string{"repo": serverTarget}
+		if repo := os.Getenv("NOWIFI_CODESPACE_REPO"); repo != "" {
+			extra["repo"] = repo
+		}
+		info, err := p.Create(context.Background(), server.CreateOpts{
+			TTLHours: serverTTL,
+			Extra:    extra,
+		})
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			os.Exit(1)
+		}
+		fmt.Printf("  %s Codespace: %s\n", green("OK"), info.ServerID)
+		fmt.Printf("  URL: %s\n", info.URL)
+	case "cloudflare-quick":
+		fmt.Println("\nnowifi — Cloudflare Quick Tunnel")
+		fmt.Printf("  Target: %s\n", serverTarget)
+		if serverUDP {
+			fmt.Println("  Mode: UDP-over-WebSocket")
+		}
+		fmt.Println()
+		extra := map[string]string{}
+		if serverUDP {
+			extra["udp"] = "true"
+		}
+		// Use a cancellable context so cloudflared (launched via exec.CommandContext)
+		// is killed when the context is cancelled on Ctrl-C / SIGTERM.
+		tunnelCtx, tunnelCancel := context.WithCancel(context.Background())
+		defer tunnelCancel()
+
+		info, stop, err := server.SetupCloudflareQuickTunnelWithOpts(tunnelCtx, server.CreateOpts{
+			Target:   serverTarget,
+			TTLHours: serverTTL,
+			Extra:    extra,
+		})
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			os.Exit(1)
+		}
+		fmt.Printf("  %s Tunnel active: %s\n", green("OK"), info.URL)
+		fmt.Printf("  Tunnel name: %s\n", info.ServerID)
+		if info.Extra["udp_mode"] == "true" {
+			fmt.Printf("  UDP bridge: ws://%s/udp\n", info.Extra["udp_listen"])
+			fmt.Printf("  Client cmd: nowifi server client --url %s --udp-local 127.0.0.1:51820\n", info.URL)
+		}
+		fmt.Println()
+		fmt.Println("  Press Ctrl-C to stop tunnel.")
+
+		// Block until SIGINT or SIGTERM.
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+
+		fmt.Println("\n  Stopping tunnel…")
+		tunnelCancel() // cancels exec.CommandContext → cloudflared exits
+		stop()         // SIGTERM/SIGKILL + udpws shutdown
+		_ = server.DestroyServer(info, "")
+		fmt.Println("  Tunnel stopped.")
 	case "cloudflare":
 		fmt.Println("\nnowifi — Deploying Cloudflare Worker")
 		fmt.Println()
@@ -177,7 +288,7 @@ func runServerCreate(cmd *cobra.Command, args []string) {
 		fmt.Printf("  TTL: %dh (auto-destroy)\n", serverTTL)
 		fmt.Printf("  Use: sudo nowifi -t %s\n", info.URL)
 	default:
-		fmt.Printf("  Unknown provider: %s\n", serverProvider)
+		fmt.Printf("  Unknown provider %q. Available: %v\n", serverProvider, server.Names())
 		os.Exit(1)
 	}
 	fmt.Println()
@@ -311,4 +422,55 @@ func runServerInfo(cmd *cobra.Command, args []string) {
 	fmt.Println("  Get a free server: nowifi server create")
 	fmt.Println("  Or use your own:   sudo nowifi -t https://your-server.example.com")
 	fmt.Println()
+}
+
+func runServerClient(cmd *cobra.Command, args []string) {
+	fmt.Println("\nnowifi — UDP-over-WebSocket Client")
+	fmt.Println()
+
+	// Normalise URL: accept https:// or wss:// or bare hostname.
+	// The udpws client needs a ws:// or wss:// URL.
+	wsURL := serverClientURL
+	switch {
+	case strings.HasPrefix(wsURL, "https://"):
+		wsURL = "wss://" + strings.TrimPrefix(wsURL, "https://")
+	case strings.HasPrefix(wsURL, "http://"):
+		wsURL = "ws://" + strings.TrimPrefix(wsURL, "http://")
+	case !strings.HasPrefix(wsURL, "ws://") && !strings.HasPrefix(wsURL, "wss://"):
+		wsURL = "wss://" + wsURL
+	}
+
+	// Append /udp path if not already present.
+	if !strings.HasSuffix(wsURL, "/udp") {
+		wsURL = strings.TrimRight(wsURL, "/") + "/udp"
+	}
+
+	fmt.Printf("  WebSocket: %s\n", wsURL)
+	fmt.Printf("  Local UDP: %s\n\n", serverClientUDPLocal)
+
+	cli := &udpws.Client{
+		UDPListenAddr: serverClientUDPLocal,
+		RemoteURL:     wsURL,
+		OriginURL:     wsURL,
+	}
+
+	listenAddr, stop, err := cli.Start()
+	if err != nil {
+		fmt.Printf("  %s %v\n\n", red("ERROR"), err)
+		os.Exit(1)
+	}
+	defer stop()
+
+	fmt.Printf("  %s Listening on %s\n", green("OK"), listenAddr)
+	fmt.Println("  Ctrl+C to stop.")
+	fmt.Println()
+
+	// Block until SIGINT/SIGTERM.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	fmt.Println("\n  Stopping UDP client.")
+	fmt.Println()
+	_ = context.Background() // keep context import used
 }
