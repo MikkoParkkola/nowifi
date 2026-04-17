@@ -43,6 +43,7 @@ const (
 	SSETunnel       ID = "sse_tunnel"        // Server-Sent Events streaming channel
 	GRPCTunnel      ID = "grpc_tunnel"       // gRPC bidi streaming via HTTP/2
 	ConnectIPTunnel ID = "connect_ip_tunnel" // RFC 9484 IP-layer MASQUE proxy
+	WARPTunnel      ID = "warp_tunnel"       // Cloudflare WARP bootstrap (zero-config)
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -619,6 +620,28 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 			Remediation: "Block QUIC datagrams (UDP/443 with DATAGRAM frames). Inspect HTTP/3 " +
 				"Extended CONNECT for :protocol=connect-ip. Note: blocking this also blocks " +
 				"Apple Private Relay, iCloud+, and Cloudflare WARP — high collateral damage.",
+		},
+	},
+	// Wave 22 #33: Cloudflare WARP bootstrap — zero-config tunnel.
+	{
+		info: BypassTechniqueInfo{
+			Number: 33, ID: WARPTunnel, Name: "Cloudflare WARP tunnel (zero-config)", HelpName: "WARP tunnel",
+			RequiresServer: false, Confidence: "HIGH",
+			Reason: "HTTPS open (WARP uses engage.cloudflareclient.com:443)",
+			Risk:   "Depends on Cloudflare WARP API availability",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Zero-config internet via Cloudflare WARP free tier. Auto-registers device, " +
+				"connects via HTTP/2 CONNECT to engage.cloudflareclient.com:443. Traffic is " +
+				"genuine Cloudflare WARP — identical to 10M+ WARP users. No server to deploy, " +
+				"no account needed, no URL to remember.",
+			Remediation: "Block engage.cloudflareclient.com — but this also blocks Cloudflare WARP " +
+				"for all legitimate users (10M+ devices). Deep-inspect HTTP/2 CONNECT to WARP " +
+				"endpoints for unauthenticated portal sessions.",
 		},
 	},
 }

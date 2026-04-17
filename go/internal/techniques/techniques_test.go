@@ -7,8 +7,8 @@ import "testing"
 
 func TestBypassTechniqueInfosAreOrderedAndUnique(t *testing.T) {
 	infos := BypassTechniqueInfos()
-	if len(infos) != 32 {
-		t.Fatalf("BypassTechniqueInfos() length = %d, want 32", len(infos))
+	if len(infos) != 33 {
+		t.Fatalf("BypassTechniqueInfos() length = %d, want 33", len(infos))
 	}
 
 	seen := make(map[ID]bool, len(infos))
@@ -34,8 +34,8 @@ func TestServerRequirementSplitMatchesCurrentTechniqueContract(t *testing.T) {
 	serverless := ServerlessBypassTechniqueInfos()
 	serverRequired := ServerRequiredBypassTechniqueInfos()
 
-	if len(serverless) != 13 {
-		t.Fatalf("len(ServerlessBypassTechniqueInfos()) = %d, want 13", len(serverless))
+	if len(serverless) != 14 {
+		t.Fatalf("len(ServerlessBypassTechniqueInfos()) = %d, want 14", len(serverless))
 	}
 	if len(serverRequired) != 19 {
 		t.Fatalf("len(ServerRequiredBypassTechniqueInfos()) = %d, want 19", len(serverRequired))
@@ -73,8 +73,8 @@ func TestCountFeasibleBypassTechniquesMatchesCurrentRules(t *testing.T) {
 		GRPCServerConfigured:      true,
 		ConnectIPServerConfigured: true,
 	}
-	if got := CountFeasibleBypassTechniques(allOpen); got != 25 {
-		t.Fatalf("CountFeasibleBypassTechniques(allOpen) = %d, want 25", got)
+	if got := CountFeasibleBypassTechniques(allOpen); got != 26 {
+		t.Fatalf("CountFeasibleBypassTechniques(allOpen) = %d, want 26", got)
 	}
 
 	captiveOnly := BypassTechniqueSignals{PortalDetected: true}

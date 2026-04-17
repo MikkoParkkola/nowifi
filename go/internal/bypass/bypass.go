@@ -92,6 +92,8 @@ const (
 	GRPCTunnel Method = techniques.GRPCTunnel
 	// Wave 22: CONNECT-IP tunnel (RFC 9484).
 	ConnectIPTunnel Method = techniques.ConnectIPTunnel
+	// Wave 22: Cloudflare WARP bootstrap (zero-config).
+	WARPTunnel Method = techniques.WARPTunnel
 )
 
 // Config holds user-specified settings for the bypass engine.
@@ -461,6 +463,11 @@ var techniqueRunnerByMethod = map[Method]techniqueRunner{
 	ConnectIPTunnel: {
 		run: func(probes *ProbeResults, config *Config, _ PlatformOps) Result {
 			return tryConnectIPTunnel(config, probes)
+		},
+	},
+	WARPTunnel: {
+		run: func(_ *ProbeResults, config *Config, _ PlatformOps) Result {
+			return tryWARPTunnel(config, nil)
 		},
 	},
 }

@@ -155,6 +155,8 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		GRPCTunnel,
 		// Wave 22: CONNECT-IP tunnel (RFC 9484).
 		ConnectIPTunnel,
+		// Wave 22: Cloudflare WARP (zero-config).
+		WARPTunnel,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,
