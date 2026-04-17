@@ -15,6 +15,7 @@ import (
 )
 
 // Config holds the persistent settings for nowifi.
+// All server URLs are remembered after first use — configure once, use forever.
 type Config struct {
 	Interface    string `json:"interface,omitempty"`
 	TunnelServer string `json:"tunnel_server,omitempty"`
@@ -23,8 +24,22 @@ type Config struct {
 	CFWorkers    string `json:"cf_workers,omitempty"`
 	QUICServer   string `json:"quic_server,omitempty"`
 	NTPServer    string `json:"ntp_server,omitempty"`
+	VPNServer    string `json:"vpn_server,omitempty"`
+	DoQServer    string `json:"doq_server,omitempty"`
+	HTTP3Server  string `json:"http3_server,omitempty"`
 	Stealth      bool   `json:"stealth"`
 	AutoLogin    bool   `json:"auto_login"`
+
+	// Wave 21-22 server URLs (persisted for zero-config reuse).
+	WSServer        string `json:"ws_server,omitempty"`
+	ECHServer       string `json:"ech_server,omitempty"`
+	ECHConfigList   string `json:"ech_config_list,omitempty"`
+	MASQUEServer    string `json:"masque_server,omitempty"`
+	WTServer        string `json:"wt_server,omitempty"`
+	H2Proxy         string `json:"h2_proxy,omitempty"`
+	SSEServer       string `json:"sse_server,omitempty"`
+	GRPCServer      string `json:"grpc_server,omitempty"`
+	ConnectIPServer string `json:"connectip_server,omitempty"`
 }
 
 var (

@@ -13,7 +13,11 @@ import (
 	"os"
 	"strings"
 
+	"time"
+
+	"github.com/MikkoParkkola/nowifi/internal/config"
 	"github.com/MikkoParkkola/nowifi/internal/crack"
+	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/spf13/cobra"
@@ -131,9 +135,131 @@ func init() {
 	rootCmd.AddCommand(scoreCmd)
 }
 
+// loadConfigDefaults fills unset CLI flags from ~/.nowifi/config.json.
+// This is the "configure once, use forever" mechanism: any flag the user
+// has previously set is automatically reused in subsequent runs.
+func loadConfigDefaults(cmd *cobra.Command) {
+	cfg, err := config.Load()
+	if err != nil {
+		return // silently use flag defaults on config error
+	}
+
+	// Helper: set flag value from config if the flag wasn't explicitly provided.
+	fill := func(name, val string) {
+		if val != "" && !cmd.Flags().Changed(name) {
+			_ = cmd.Flags().Set(name, val)
+		}
+	}
+
+	fill("tunnel-server", cfg.TunnelServer)
+	fill("dns-domain", cfg.DNSDomain)
+	fill("icmp-server", cfg.ICMPServer)
+	fill("cf-workers", cfg.CFWorkers)
+	fill("quic-server", cfg.QUICServer)
+	fill("ntp-server", cfg.NTPServer)
+	fill("vpn-server", cfg.VPNServer)
+	fill("http3-server", cfg.HTTP3Server)
+	fill("doq-server", cfg.DoQServer)
+	fill("ws-server", cfg.WSServer)
+	fill("masque-server", cfg.MASQUEServer)
+	fill("wt-server", cfg.WTServer)
+	fill("h2-proxy", cfg.H2Proxy)
+	fill("sse-server", cfg.SSEServer)
+	fill("grpc-server", cfg.GRPCServer)
+	fill("connectip-server", cfg.ConnectIPServer)
+	fill("ech-server", cfg.ECHServer)
+	fill("ech-config-list", cfg.ECHConfigList)
+}
+
+// saveConfigFromFlags persists any newly-set server flags to config.
+// Only saves fields that were explicitly set via CLI (cmd.Flags().Changed).
+func saveConfigFromFlags(cmd *cobra.Command) {
+	cfg, err := config.Load()
+	if err != nil {
+		return
+	}
+
+	changed := false
+	save := func(name string, target *string, val string) {
+		if cmd.Flags().Changed(name) && val != "" && val != *target {
+			*target = val
+			changed = true
+		}
+	}
+
+	save("tunnel-server", &cfg.TunnelServer, flagTunnelServer)
+	save("dns-domain", &cfg.DNSDomain, flagDNSDomain)
+	save("icmp-server", &cfg.ICMPServer, flagICMPServer)
+	save("cf-workers", &cfg.CFWorkers, flagCFWorkers)
+	save("quic-server", &cfg.QUICServer, flagQUICServer)
+	save("ntp-server", &cfg.NTPServer, flagNTPServer)
+	save("vpn-server", &cfg.VPNServer, flagVPNServer)
+	save("http3-server", &cfg.HTTP3Server, flagHTTP3Server)
+	save("doq-server", &cfg.DoQServer, flagDoQServer)
+	save("ws-server", &cfg.WSServer, flagWSServer)
+	save("masque-server", &cfg.MASQUEServer, flagMASQUEServer)
+	save("wt-server", &cfg.WTServer, flagWTServer)
+	save("h2-proxy", &cfg.H2Proxy, flagH2Proxy)
+	save("sse-server", &cfg.SSEServer, flagSSEServer)
+	save("grpc-server", &cfg.GRPCServer, flagGRPCServer)
+	save("connectip-server", &cfg.ConnectIPServer, flagConnectIPServer)
+	save("ech-server", &cfg.ECHServer, flagECHServer)
+	save("ech-config-list", &cfg.ECHConfigList, flagECHConfigB64)
+
+	if changed {
+		_ = config.Save(cfg)
+	}
+}
+
+// autoDiscoverServers tries mDNS discovery for nowifi tunnel servers on the
+// local network. Only runs when no server flags are set (neither CLI nor config).
+func autoDiscoverServers(cmd *cobra.Command) {
+	// Only discover if no server flags are set at all.
+	serverFlags := []string{
+		"tunnel-server", "masque-server", "wt-server", "h2-proxy",
+		"sse-server", "grpc-server", "connectip-server", "http3-server",
+		"ws-server", "ech-server",
+	}
+	for _, name := range serverFlags {
+		if f := cmd.Flags().Lookup(name); f != nil && f.Value.String() != "" {
+			return // at least one server configured, skip discovery
+		}
+	}
+
+	servers, err := tunnel.DiscoverServers(2 * time.Second)
+	if err != nil || len(servers) == 0 {
+		return
+	}
+
+	// Map discovered servers to the appropriate flags.
+	flagMap := map[string]string{
+		"quic":      "http3-server",
+		"h3":        "masque-server",
+		"h2":        "h2-proxy",
+		"sse":       "sse-server",
+		"grpc":      "grpc-server",
+		"connectip": "connectip-server",
+	}
+
+	for _, srv := range servers {
+		if flagName, ok := flagMap[srv.Mode]; ok {
+			if f := cmd.Flags().Lookup(flagName); f != nil && f.Value.String() == "" {
+				_ = cmd.Flags().Set(flagName, srv.URL)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Auto-discovered %s server: %s\n", srv.Mode, srv.URL)
+			}
+		}
+	}
+}
+
 // validateFlags validates all user-provided CLI flags at the boundary
 // before they can reach any exec.Command call. Rejects invalid input early.
 func validateFlags(cmd *cobra.Command, args []string) error {
+	// Load saved config as defaults for unset flags.
+	loadConfigDefaults(cmd)
+	// Save any new flag values for future runs.
+	saveConfigFromFlags(cmd)
+	// Try mDNS discovery if no servers configured.
+	autoDiscoverServers(cmd)
 	// Interface name: must be a valid network interface identifier.
 	if _, err := platform.ValidateInterface(flagInterface); err != nil {
 		return fmt.Errorf("--interface: %w", err)
