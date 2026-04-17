@@ -10,6 +10,7 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/detect"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/server"
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 	"github.com/spf13/cobra"
 )
@@ -116,8 +117,43 @@ func runSetup(cmd *cobra.Command, args []string) {
 		fmt.Println("   OK     All tools ready for offline use")
 	}
 
-	// 6. Summary.
-	fmt.Println("\n6. Ready!")
+	// 6. Cloudflare Worker (optional zero-config server).
+	fmt.Println("\n6. Cloudflare Worker proxy")
+	fmt.Println("   A free CF Worker gives you serverless tunneling (SSE, HTTP, gRPC).")
+	fmt.Println("   This is optional — nowifi has 16 serverless techniques built-in.")
+
+	// Check if a CF Worker is already deployed.
+	servers, _ := server.ListServers()
+	hasCFWorker := false
+	for _, s := range servers {
+		if s.Provider == "cloudflare_worker" {
+			hasCFWorker = true
+			fmt.Printf("   %s Worker already deployed: %s\n", green("OK"), s.URL)
+			break
+		}
+	}
+
+	if !hasCFWorker {
+		// Check if wrangler is available.
+		if toolchain.FindTool("wrangler") != "" {
+			fmt.Println("   Deploying CF Worker (free, ~10s)...")
+			info, err := server.SetupCloudflareWorker()
+			if err != nil {
+				fmt.Printf("   %s %v\n", dim("SKIP"), err)
+				fmt.Println("   You can deploy later: nowifi server create")
+			} else {
+				fmt.Printf("   %s Worker deployed: %s\n", green("OK"), info.URL)
+				fmt.Println("   Free tier: 100,000 requests/day")
+			}
+		} else {
+			fmt.Println("   SKIP  wrangler not installed (optional)")
+			fmt.Println("         Install: npm install -g wrangler && wrangler login")
+			fmt.Println("         Then: nowifi server create")
+		}
+	}
+
+	// 7. Summary.
+	fmt.Println("\n7. Ready!")
 	fmt.Println("   Available commands:")
 	fmt.Println()
 	fmt.Println("   sudo nowifi          Auto-detect and bypass (works offline)")

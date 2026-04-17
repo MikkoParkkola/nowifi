@@ -68,7 +68,7 @@ func init() {
 	serverListenCmd.Flags().StringVar(&serverListenWriteKey, "write-key", "",
 		"Write a fresh self-signed key to this path and exit (use with --write-cert)")
 	serverListenCmd.Flags().StringVar(&serverListenMode, "mode", "quic",
-		`Server mode: "quic" (raw QUIC, #22), "h3" (MASQUE+WT, #27-28), "h2" (HTTP/2 CONNECT, #29), "sse" (SSE relay, #30), "grpc" (gRPC tunnel, #31), "connectip" (CONNECT-IP, #32)`)
+		`Server mode: "quic" (raw QUIC, #22), "h3" (MASQUE+WT, #27-28), "h2" (HTTP/2 CONNECT, #29), "sse" (SSE relay, #30), "grpc" (gRPC tunnel, #31), "connectip" (CONNECT-IP, #32), "all" (H2+SSE+gRPC on one port)`)
 
 	serverCmd.AddCommand(serverListenCmd)
 }
@@ -111,6 +111,8 @@ func runServerListen(cmd *cobra.Command, _ []string) error {
 		return runGRPCTunnelServer(cmd, cfg)
 	case "connectip":
 		return runConnectIPServer(cmd, cfg)
+	case "all":
+		return runAllModesServer(cmd, cfg)
 	}
 
 	srv, err := tunnel.ListenHTTP3Tunnel(cfg)
@@ -201,6 +203,29 @@ func runGRPCTunnelServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error
 
 	fmt.Fprintf(cmd.OutOrStdout(), "nowifi gRPC tunnel server listening on %s\n", srv.Addr())
 	fmt.Fprintln(cmd.OutOrStdout(), "Path: /grpc.tunnel.v1.Tunnel/Bidi — traffic looks like cloud API (application/grpc)")
+	if serverListenCert == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Fprintln(cmd.OutOrStdout(), "\nshutting down...")
+	return nil
+}
+
+func runAllModesServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error {
+	// Start all TCP-based servers (H2, SSE, gRPC) on the same TLS listener.
+	// Each uses a different HTTP path prefix so they can share one port.
+	srv, err := tunnel.ListenAllModes(cfg)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	fmt.Fprintf(cmd.OutOrStdout(), "nowifi unified server listening on %s\n", srv.Addr())
+	fmt.Fprintln(cmd.OutOrStdout(), "Serving: HTTP/2 CONNECT (#29) + SSE relay (#30) + gRPC tunnel (#31)")
+	fmt.Fprintln(cmd.OutOrStdout(), "All protocols share one TLS port — one server does it all.")
 	if serverListenCert == "" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
 	}
