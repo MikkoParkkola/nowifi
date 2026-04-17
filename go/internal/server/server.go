@@ -199,6 +199,25 @@ func getToken(provider, explicitToken string) (string, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Package-level injection points (overridable for tests)
+// ---------------------------------------------------------------------------
+
+// digitalOceanAPIBase is the DigitalOcean API root URL. // overridable for tests
+var digitalOceanAPIBase = "https://api.digitalocean.com"
+
+// hetznerAPIBase is the Hetzner Cloud API root URL. // overridable for tests
+var hetznerAPIBase = "https://api.hetzner.cloud"
+
+// findWranglerFn locates the wrangler CLI binary. // overridable for tests
+var findWranglerFn = func() string {
+	p, err := exec.LookPath("wrangler")
+	if err == nil {
+		return p
+	}
+	return ""
+}
+
+// ---------------------------------------------------------------------------
 // Embedded assets
 // ---------------------------------------------------------------------------
 
@@ -357,13 +376,8 @@ func SetupCloudflareWorker() (*Info, error) {
 	return info, nil
 }
 
-func findWrangler() string {
-	p, err := exec.LookPath("wrangler")
-	if err == nil {
-		return p
-	}
-	return ""
-}
+// findWrangler delegates to the package-level findWranglerFn (overridable for tests).
+func findWrangler() string { return findWranglerFn() }
 
 // ---------------------------------------------------------------------------
 // Option B: Ephemeral VPS
@@ -398,7 +412,7 @@ func createDigitalOcean(token string, ttlHours int) (*Info, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.digitalocean.com/v2/droplets", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, digitalOceanAPIBase+"/v2/droplets", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +473,7 @@ func waitForDropletIP(token, dropletID string, timeout time.Duration) (string, e
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	for time.Since(start) < timeout {
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.digitalocean.com/v2/droplets/"+dropletID, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, digitalOceanAPIBase+"/v2/droplets/"+dropletID, nil)
 		if err != nil {
 			return "", err
 		}
@@ -516,7 +530,7 @@ func createHetzner(token string, ttlHours int) (*Info, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.hetzner.cloud/v1/servers", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, hetznerAPIBase+"/v1/servers", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +600,7 @@ func waitForHetznerIP(token, serverID string, timeout time.Duration) (string, er
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	for time.Since(start) < timeout {
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.hetzner.cloud/v1/servers/"+serverID, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, hetznerAPIBase+"/v1/servers/"+serverID, nil)
 		if err != nil {
 			return "", err
 		}
@@ -637,7 +651,7 @@ func DestroyServer(info *Info, apiToken string) error {
 }
 
 func destroyDigitalOcean(token, dropletID string) error {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, "https://api.digitalocean.com/v2/droplets/"+dropletID, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, digitalOceanAPIBase+"/v2/droplets/"+dropletID, nil)
 	if err != nil {
 		return err
 	}
@@ -661,7 +675,7 @@ func destroyDigitalOcean(token, dropletID string) error {
 }
 
 func destroyHetzner(token, serverID string) error {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, "https://api.hetzner.cloud/v1/servers/"+serverID, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, hetznerAPIBase+"/v1/servers/"+serverID, nil)
 	if err != nil {
 		return err
 	}

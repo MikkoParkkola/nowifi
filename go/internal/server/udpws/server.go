@@ -77,15 +77,23 @@ func (s *Server) logf(format string, args ...any) {
 // occurs.  It returns the actual listen address (useful when HTTPAddr is ":0")
 // and a stop function.
 func (s *Server) Serve() (listenAddr string, stop func(), err error) {
-	mux := http.NewServeMux()
-	mux.Handle("/udp", websocket.Handler(s.handleWS))
-
 	ln, err := net.Listen("tcp", s.HTTPAddr)
 	if err != nil {
 		return "", nil, fmt.Errorf("udpws server listen %s: %w", s.HTTPAddr, err)
 	}
+	stopFn, hs := s.serveOn(ln)
+	_ = hs
+	return ln.Addr().String(), stopFn, nil
+}
 
-	hs := &http.Server{Handler: mux}
+// serveOn starts serving on an already-bound listener.  Extracted to allow
+// test injection of a custom net.Listener (e.g. to trigger non-ErrServerClosed
+// paths).  Returns the stop function and the underlying http.Server.
+func (s *Server) serveOn(ln net.Listener) (stop func(), hs *http.Server) {
+	mux := http.NewServeMux()
+	mux.Handle("/udp", websocket.Handler(s.handleWS))
+
+	hs = &http.Server{Handler: mux}
 	s.mu.Lock()
 	s.httpServer = hs
 	s.mu.Unlock()
@@ -96,10 +104,7 @@ func (s *Server) Serve() (listenAddr string, stop func(), err error) {
 		}
 	}()
 
-	stopFn := func() {
-		_ = hs.Close()
-	}
-	return ln.Addr().String(), stopFn, nil
+	return func() { _ = hs.Close() }, hs
 }
 
 // handleWS is called for each incoming WebSocket connection on /udp.
