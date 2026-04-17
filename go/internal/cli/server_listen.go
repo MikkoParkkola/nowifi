@@ -68,7 +68,7 @@ func init() {
 	serverListenCmd.Flags().StringVar(&serverListenWriteKey, "write-key", "",
 		"Write a fresh self-signed key to this path and exit (use with --write-cert)")
 	serverListenCmd.Flags().StringVar(&serverListenMode, "mode", "quic",
-		`Server mode: "quic" (raw QUIC streams, HTTP3Tunnel #22 clients) or "h3" (HTTP/3 Extended CONNECT + WebTransport, MASQUE #27 + WT #28 clients)`)
+		`Server mode: "quic" (raw QUIC, #22), "h3" (MASQUE+WT, #27-28), "h2" (HTTP/2 CONNECT, #29), "sse" (SSE relay, #30)`)
 
 	serverCmd.AddCommand(serverListenCmd)
 }
@@ -100,8 +100,13 @@ func runServerListen(cmd *cobra.Command, _ []string) error {
 		Hostname: serverListenHostname,
 	}
 
-	if serverListenMode == "h3" {
+	switch serverListenMode {
+	case "h3":
 		return runH3UnifiedServer(cmd, cfg)
+	case "h2":
+		return runH2ProxyServer(cmd, cfg)
+	case "sse":
+		return runSSERelayServer(cmd, cfg)
 	}
 
 	srv, err := tunnel.ListenHTTP3Tunnel(cfg)
@@ -112,6 +117,46 @@ func runServerListen(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "nowifi HTTP/3 tunnel server listening on %s (ALPN h3, raw QUIC mode)\n", srv.Addr())
 	fmt.Fprintln(cmd.OutOrStdout(), "Tip: use --mode h3 for MASQUE + WebTransport client support")
+	if serverListenCert == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Fprintln(cmd.OutOrStdout(), "\nshutting down...")
+	return nil
+}
+
+func runH2ProxyServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error {
+	srv, err := tunnel.ListenH2Proxy(cfg)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	fmt.Fprintf(cmd.OutOrStdout(), "nowifi HTTP/2 CONNECT proxy listening on %s\n", srv.Addr())
+	fmt.Fprintln(cmd.OutOrStdout(), "Accepts HTTP/2 CONNECT requests — pairs with --h2-proxy clients (#29)")
+	if serverListenCert == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Fprintln(cmd.OutOrStdout(), "\nshutting down...")
+	return nil
+}
+
+func runSSERelayServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error {
+	srv, err := tunnel.ListenSSERelay(cfg)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	fmt.Fprintf(cmd.OutOrStdout(), "nowifi SSE relay listening on %s\n", srv.Addr())
+	fmt.Fprintln(cmd.OutOrStdout(), "Endpoints: /stream (SSE downlink), /send (POST uplink) — pairs with --sse-server clients (#30)")
 	if serverListenCert == "" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
 	}
