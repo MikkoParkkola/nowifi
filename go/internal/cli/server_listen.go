@@ -51,6 +51,7 @@ Examples:
 var (
 	serverListenWriteCert string
 	serverListenWriteKey  string
+	serverListenMode      string
 )
 
 func init() {
@@ -66,6 +67,8 @@ func init() {
 		"Write a fresh self-signed cert to this path and exit")
 	serverListenCmd.Flags().StringVar(&serverListenWriteKey, "write-key", "",
 		"Write a fresh self-signed key to this path and exit (use with --write-cert)")
+	serverListenCmd.Flags().StringVar(&serverListenMode, "mode", "quic",
+		`Server mode: "quic" (raw QUIC streams, HTTP3Tunnel #22 clients) or "h3" (HTTP/3 Extended CONNECT + WebTransport, MASQUE #27 + WT #28 clients)`)
 
 	serverCmd.AddCommand(serverListenCmd)
 }
@@ -90,18 +93,45 @@ func runServerListen(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	srv, err := tunnel.ListenHTTP3Tunnel(tunnel.HTTP3ServerConfig{
+	cfg := tunnel.HTTP3ServerConfig{
 		Listen:   serverListenAddr,
 		CertFile: serverListenCert,
 		KeyFile:  serverListenKey,
 		Hostname: serverListenHostname,
-	})
+	}
+
+	if serverListenMode == "h3" {
+		return runH3UnifiedServer(cmd, cfg)
+	}
+
+	srv, err := tunnel.ListenHTTP3Tunnel(cfg)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
 	defer func() { _ = srv.Close() }()
 
-	fmt.Fprintf(cmd.OutOrStdout(), "nowifi HTTP/3 tunnel server listening on %s (ALPN h3)\n", srv.Addr())
+	fmt.Fprintf(cmd.OutOrStdout(), "nowifi HTTP/3 tunnel server listening on %s (ALPN h3, raw QUIC mode)\n", srv.Addr())
+	fmt.Fprintln(cmd.OutOrStdout(), "Tip: use --mode h3 for MASQUE + WebTransport client support")
+	if serverListenCert == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Fprintln(cmd.OutOrStdout(), "\nshutting down...")
+	return nil
+}
+
+func runH3UnifiedServer(cmd *cobra.Command, cfg tunnel.HTTP3ServerConfig) error {
+	srv, err := tunnel.ListenH3Unified(cfg)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	fmt.Fprintf(cmd.OutOrStdout(), "nowifi unified HTTP/3 server listening on %s\n", srv.Addr())
+	fmt.Fprintf(cmd.OutOrStdout(), "Protocols: %v\n", srv.Protocols())
 	if serverListenCert == "" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Using self-signed certificate (pass --cert/--key for a real cert)")
 	}
