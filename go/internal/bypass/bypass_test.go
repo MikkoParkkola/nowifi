@@ -147,6 +147,10 @@ func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
 		MASQUETunnel,
 		// Wave 21: WebTransport tunnel (RFC 9220).
 		WebTransportTunnel,
+		// Wave 22: HTTP/2 CONNECT tunnel.
+		H2ConnectTunnel,
+		// Wave 22: SSE streaming tunnel.
+		SSETunnel,
 	}
 	crackMethods := []crack.Method{
 		crack.PMKID,

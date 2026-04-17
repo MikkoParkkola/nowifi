@@ -38,6 +38,9 @@ const (
 	WGOverWebSocket      ID = "wg_over_websocket"
 	MASQUETunnel         ID = "masque_tunnel"         // RFC 9298 CONNECT via HTTP/3 Extended CONNECT
 	WebTransportTunnel   ID = "webtransport_tunnel"   // RFC 9220 WebTransport over HTTP/3
+	// Wave 22: Application-layer smuggling techniques (2026-04).
+	H2ConnectTunnel ID = "h2_connect_tunnel" // HTTP/2 CONNECT via gRPC-style framing
+	SSETunnel       ID = "sse_tunnel"        // Server-Sent Events streaming channel
 )
 
 // BypassTechniqueSignals captures the probe facts needed for feasibility
@@ -84,6 +87,10 @@ type BypassTechniqueSignals struct {
 	MASQUEServerConfigured bool
 	// WTServerConfigured is true when a WebTransport tunnel server URL is set.
 	WTServerConfigured bool
+	// H2ProxyConfigured is true when an HTTP/2 CONNECT proxy URL is set.
+	H2ProxyConfigured bool
+	// SSEServerConfigured is true when an SSE tunnel relay URL is set.
+	SSEServerConfigured bool
 }
 
 // BypassTechniqueInfo is the canonical user-facing metadata for a bypass
@@ -521,6 +528,48 @@ var bypassTechniqueSpecs = []bypassTechniqueSpec{
 				"browser-initiated WebTransport. No commercial DPI distinguishes this from video calls.",
 			Remediation: "Inspect WebTransport session targets. Block CONNECT :protocol webtransport " +
 				"to untrusted destinations for unauthenticated clients. Deploy HTTP/3-aware DPI.",
+		},
+	},
+	// Wave 22 #29: HTTP/2 CONNECT tunnel (gRPC-style binary framing).
+	{
+		info: BypassTechniqueInfo{
+			Number: 29, ID: H2ConnectTunnel, Name: "HTTP/2 CONNECT tunnel", HelpName: "H2 CONNECT",
+			RequiresServer: true, Confidence: "HIGH",
+			Reason: "TCP/443 open + HTTP/2 proxy configured",
+			Risk:   "Requires an HTTP/2 CONNECT-capable proxy",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.H2ProxyConfigured && signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "critical",
+			Impact: "Full internet via HTTP/2 CONNECT (RFC 9113). Binary framing is opaque to " +
+				"HTTP/1.1-only DPI. Traffic is indistinguishable from gRPC health checks or " +
+				"Google Cloud API calls. Multiplexed streams share one TLS connection.",
+			Remediation: "Deploy HTTP/2-aware DPI that inspects CONNECT method across multiplexed " +
+				"streams. Block CONNECT to non-whitelisted targets. Most portals only inspect " +
+				"HTTP/1.1 — upgrading to HTTP/2-aware filtering is the primary mitigation.",
+		},
+	},
+	// Wave 22 #30: SSE (Server-Sent Events) streaming covert channel.
+	{
+		info: BypassTechniqueInfo{
+			Number: 30, ID: SSETunnel, Name: "SSE streaming tunnel", HelpName: "SSE tunnel",
+			RequiresServer: true, Confidence: "MEDIUM",
+			Reason: "HTTPS open + SSE relay configured",
+			Risk:   "Asymmetric bandwidth (uplink limited by POST rate)",
+		},
+		feasible: func(signals BypassTechniqueSignals) bool {
+			return signals.SSEServerConfigured && signals.HTTP443Open
+		},
+		success: BypassTechniqueResultMetadata{
+			Severity: "high",
+			Impact: "Internet via SSE downlink + HTTP POST uplink. Downlink is a chunked " +
+				"text/event-stream response indistinguishable from a news feed or chat stream. " +
+				"Uplink uses standard HTTP POST. Serverless CF Workers variant available.",
+			Remediation: "Inspect SSE event payloads for non-text content (base64 data patterns). " +
+				"Rate-limit chunked transfer encoding sessions. Enforce response size limits " +
+				"for unauthenticated clients — note this may break legitimate streaming apps.",
 		},
 	},
 }
