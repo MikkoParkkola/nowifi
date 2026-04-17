@@ -49,7 +49,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           go build \
             -trimpath \
-            -ldflags "-s -w -X main.version=${VERSION}" \
+            -ldflags "-s -w -X github.com/MikkoParkkola/nowifi/internal/cli.version=${VERSION}" \
             -o "bin/nowifi-${{ matrix.target }}" \
             ./cmd/nowifi
 
