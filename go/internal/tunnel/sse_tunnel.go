@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -137,7 +138,10 @@ func handleSSESocks(client net.Conn, baseURL string) {
 	}
 
 	// Open SSE downlink stream with target in query parameter.
-	streamURL := fmt.Sprintf("%s/stream?target=%s", baseURL, target)
+	// url.QueryEscape so targets containing `&`, `?`, `#`, spaces, or other
+	// reserved characters cannot split the query string or inject extra
+	// parameters.
+	streamURL := fmt.Sprintf("%s/stream?target=%s", baseURL, url.QueryEscape(target))
 	req, err := http.NewRequest("GET", streamURL, nil)
 	if err != nil {
 		socks5SendFail(client)
@@ -228,7 +232,11 @@ func sseReadLoop(body io.Reader, client net.Conn) {
 // them to the relay server's uplink endpoint.
 func sseWriteLoop(client net.Conn, baseURL, sessionID string) {
 	buf := make([]byte, 4096)
-	sendURL := fmt.Sprintf("%s/send?session=%s", baseURL, sessionID)
+	// url.QueryEscape the session id for the same reason as the target:
+	// server-assigned ids (X-Session-Id) are usually safe, but the fallback
+	// path re-uses the target string as the session id, which may contain
+	// reserved characters.
+	sendURL := fmt.Sprintf("%s/send?session=%s", baseURL, url.QueryEscape(sessionID))
 
 	for {
 		n, err := client.Read(buf)

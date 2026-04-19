@@ -287,10 +287,17 @@ func StartDoQTunnel(doqServer string, localPort int, timeout time.Duration) (*Ha
 		doqServer = "dns.adguard.com:853"
 	}
 	// RFC 9250: ALPN must be "doq".
+	// Use net.SplitHostPort so that IPv6 literal addresses (e.g.
+	// "[2001:db8::1]:853") are parsed correctly; strings.SplitN on ":" would
+	// truncate the host at the first colon and produce an invalid SNI.
+	sni := doqServer
+	if host, _, err := net.SplitHostPort(doqServer); err == nil {
+		sni = host
+	}
 	tlsConf := &tls.Config{
 		NextProtos: []string{"doq"},
 		MinVersion: tls.VersionTLS13,
-		ServerName: strings.SplitN(doqServer, ":", 2)[0],
+		ServerName: sni,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -328,9 +335,17 @@ func StartDoQTunnel(doqServer string, localPort int, timeout time.Duration) (*Ha
 	return h, nil
 }
 
+// doqProxyConcurrency caps the number of in-flight DoQ forwarder goroutines
+// per local UDP listener. Without this bound a query flood could spawn
+// unbounded goroutines, each opening a QUIC stream, which starves the
+// process and the upstream DoQ server. 256 is enough for interactive
+// resolution plus bursts; extra queries wait briefly before being dropped.
+const doqProxyConcurrency = 256
+
 func serveDoQProxy(udp *net.UDPConn, conn *quic.Conn, stop chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 	buf := make([]byte, 4096)
+	sem := make(chan struct{}, doqProxyConcurrency)
 	for {
 		select {
 		case <-stop:
@@ -345,7 +360,15 @@ func serveDoQProxy(udp *net.UDPConn, conn *quic.Conn, stop chan struct{}, wg *sy
 			}
 			return
 		}
+		// Acquire a slot; drop the query if the pool is saturated so a
+		// flood cannot wedge the loop or explode goroutine count.
+		select {
+		case sem <- struct{}{}:
+		default:
+			continue
+		}
 		go func(query []byte, from *net.UDPAddr) {
+			defer func() { <-sem }()
 			reply, err := doqQuery(conn, query)
 			if err != nil {
 				return

@@ -101,7 +101,9 @@ func TestVersionFlag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// --help contains "19 portal bypass techniques"
+// --help contains "<N> portal bypass techniques" where N is kept in sync with
+// techniques.BypassTechniqueCount(). The current assertion below is the source
+// of truth; update both together whenever the technique count changes.
 // ---------------------------------------------------------------------------
 
 func TestHelpContainsBypassTechniqueCount(t *testing.T) {

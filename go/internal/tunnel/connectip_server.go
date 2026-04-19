@@ -83,7 +83,7 @@ func ListenConnectIP(cfg HTTP3ServerConfig) (*ConnectIPServer, error) {
 		ln:   ln,
 		addr: udpConn.LocalAddr().String(),
 	}
-	srv.nextIP.Store(2) // start at 10.73.0.2
+	srv.nextIP.Store(1) // first session → 10.73.1.0/24
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", srv.handleConnectIP)
@@ -130,13 +130,19 @@ func (s *ConnectIPServer) handleConnectIP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Assign virtual IP from 10.73.0.0/24 pool.
-	ipNum := s.nextIP.Add(1) - 1
-	if ipNum > 254 {
-		http.Error(w, "IP pool exhausted", http.StatusServiceUnavailable)
+	// Assign a unique /24 per concurrent session from 10.73.0.0/16, so every
+	// session gets its own gateway IP (session N → 10.73.N.1 gateway,
+	// 10.73.N.2 client). Previously every concurrent session was handed
+	// 10.73.0.1 as its gateway and a sequential host within 10.73.0.0/24,
+	// which collides as soon as two clients are active: both server-side TUNs
+	// try to configure 10.73.0.1 and forwarding becomes ambiguous.
+	sessionNum := s.nextIP.Add(1) - 1
+	if sessionNum > 255 {
+		http.Error(w, "session pool exhausted", http.StatusServiceUnavailable)
 		return
 	}
-	assignedIP := net.IPv4(10, 73, 0, byte(ipNum))
+	assignedIP := net.IPv4(10, 73, byte(sessionNum), 2)
+	gatewayIP := net.IPv4(10, 73, byte(sessionNum), 1)
 
 	// Hijack the HTTP/3 stream to access datagram methods.
 	streamer, ok := w.(http3.HTTPStreamer)
@@ -170,8 +176,7 @@ func (s *ConnectIPServer) handleConnectIP(w http.ResponseWriter, r *http.Request
 	}
 	defer func() { _ = tun.Close() }()
 
-	// Configure the server-side TUN with the assigned IP's gateway.
-	gatewayIP := net.IPv4(10, 73, 0, 1)
+	// Configure the server-side TUN with this session's gateway IP.
 	if err := configureTUNAddress(tun.Name(), gatewayIP); err != nil {
 		log.Printf("  connect-ip: TUN configure: %v", err)
 		return

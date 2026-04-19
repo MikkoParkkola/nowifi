@@ -74,14 +74,23 @@ func StartH2ConnectTunnel(serverURL string, localPort int, timeout time.Duration
 
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), timeout)
 	defer probeCancel()
-	probeConn, err := (&tls.Dialer{}).DialContext(probeCtx, "tcp", addr)
+	// Pass the ALPN-carrying tlsConf into the probe dialer; the zero-value
+	// tls.Dialer{} sends no NextProtos, so NegotiatedProtocol is always the
+	// empty string and the h2 check below always fails (or, worse, succeeds
+	// against a server that ignores the missing ALPN and happens to speak h2
+	// by default).
+	probeConn, err := (&tls.Dialer{Config: tlsConf}).DialContext(probeCtx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("h2 tunnel: TLS dial %s: %w", addr, err)
 	}
 	tlsConn, ok := probeConn.(*tls.Conn)
 	if !ok || tlsConn.ConnectionState().NegotiatedProtocol != "h2" {
+		negotiated := ""
+		if ok {
+			negotiated = tlsConn.ConnectionState().NegotiatedProtocol
+		}
 		_ = probeConn.Close()
-		return nil, fmt.Errorf("h2 tunnel: server did not negotiate h2 (got %q)", tlsConn.ConnectionState().NegotiatedProtocol)
+		return nil, fmt.Errorf("h2 tunnel: server did not negotiate h2 (got %q)", negotiated)
 	}
 	_ = probeConn.Close()
 
@@ -180,7 +189,15 @@ func handleH2Socks(client net.Conn, transport *http.Transport, proxyBase string)
 	defer cancel()
 
 	pr, pw := io.Pipe()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodConnect, proxyBase, pr)
+	req, reqErr := http.NewRequestWithContext(ctx, http.MethodConnect, proxyBase, pr)
+	if reqErr != nil {
+		// Defensive: NewRequestWithContext can return nil,err on URL parse
+		// errors. The previous code discarded the error and dereferenced
+		// the nil request on the next line, crashing the goroutine.
+		_ = pw.Close()
+		socks5SendFail(client)
+		return
+	}
 	req.Host = target
 
 	resp, err := transport.RoundTrip(req)

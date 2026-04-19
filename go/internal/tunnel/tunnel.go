@@ -41,6 +41,7 @@ type Handle struct {
 	stop      chan struct{}
 	wg        *sync.WaitGroup
 	extraStop func()
+	stopOnce  sync.Once
 }
 
 // Stop terminates the tunnel gracefully, then forcefully if needed.
@@ -48,15 +49,15 @@ type Handle struct {
 func (h *Handle) Stop() {
 	// In-process tunnel: signal goroutines, close listeners/transports, wait.
 	if h.extraStop != nil {
-		// Signal stop exactly once; guard against double-close on repeat calls.
-		if h.stop != nil {
-			select {
-			case <-h.stop:
-				// Already closed.
-			default:
+		// Signal stop exactly once; a select/default guard is not safe
+		// against concurrent Stop() callers (two callers can each see the
+		// default branch and race into close()). sync.Once is the correct
+		// primitive here.
+		h.stopOnce.Do(func() {
+			if h.stop != nil {
 				close(h.stop)
 			}
-		}
+		})
 		h.extraStop()
 		h.extraStop = nil
 		if h.wg != nil {
