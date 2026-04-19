@@ -100,6 +100,15 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 		_ = syscall.Close(fd)
 		return nil, fmt.Errorf("tun: get ifname: %w", errno)
 	}
+	// Guard against pathological kernel responses: getsockopt is expected to
+	// write a NUL-terminated interface name (e.g. "utun3\x00", ifnameLen=6),
+	// but if it ever returns ifnameLen == 0 the old "[:ifnameLen-1]" slice
+	// expression would panic with a negative bound. Treat zero-length as an
+	// error and refuse to construct the device.
+	if ifnameLen == 0 {
+		_ = syscall.Close(fd)
+		return nil, fmt.Errorf("tun: kernel returned empty ifname")
+	}
 	ifname := string(ifnameBuf[:ifnameLen-1]) // trim null terminator
 
 	// Set MTU via ifconfig (simplest cross-version approach).
@@ -131,9 +140,13 @@ func (t *darwinTUN) Read(p []byte) (int, error) {
 	if n < 4 {
 		return 0, fmt.Errorf("tun: short read (%d bytes)", n)
 	}
-	// Strip the 4-byte AF header.
-	copy(p, buf[4:n])
-	return n - 4, nil
+	// Strip the 4-byte AF header and report only the bytes actually copied
+	// into the caller's buffer. Previously we always returned n-4, which
+	// over-reports when len(p) < n-4 (io.Reader callers would then read past
+	// the valid data or mis-account the remaining IP packet length).
+	payload := buf[4:n]
+	copied := copy(p, payload)
+	return copied, nil
 }
 
 // Write writes a raw IP packet to the TUN device. On macOS, we must
