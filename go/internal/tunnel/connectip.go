@@ -147,9 +147,15 @@ func StartConnectIPTunnel(cfg ConnectIPConfig) (*Handle, error) {
 	}
 
 	// Receive assigned IP address from first datagram.
+	// Per RFC 9298, CONNECT-IP uses HTTP/3 STREAM datagrams bound to the
+	// request stream, not connection-level datagrams. The server (see
+	// connectip_server.go) sends via str.SendDatagram(), so we must
+	// receive via rstr.ReceiveDatagram() — qconn.ReceiveDatagram() reads
+	// from the connection-level datagram queue, which the server never
+	// populates, so that path would hang until timeout.
 	addrCtx, addrCancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer addrCancel()
-	addrDgram, err := qconn.ReceiveDatagram(addrCtx)
+	addrDgram, err := rstr.ReceiveDatagram(addrCtx)
 	if err != nil {
 		_ = qconn.CloseWithError(0, "")
 		return nil, fmt.Errorf("connect-ip: receive address: %w", err)
@@ -183,10 +189,10 @@ func StartConnectIPTunnel(cfg ConnectIPConfig) (*Handle, error) {
 		wg:        &sync.WaitGroup{},
 	}
 
-	// Start bidirectional forwarding: TUN ↔ QUIC datagrams.
+	// Start bidirectional forwarding: TUN ↔ HTTP/3 stream datagrams.
 	h.wg.Add(2)
-	go tunToQUIC(tun, qconn, h.stop, h.wg)
-	go quicToTUN(tun, qconn, h.stop, h.wg)
+	go tunToQUIC(tun, rstr, h.stop, h.wg)
+	go quicToTUN(tun, rstr, h.stop, h.wg)
 
 	h.extraStop = func() {
 		_ = tun.Close()
@@ -217,8 +223,10 @@ func parseConnectIPEndpoint(s string) (addr, sni string, err error) {
 }
 
 // tunToQUIC reads IP packets from the TUN device and sends them as
-// QUIC datagrams. Datagram format: [0x00 (data marker)] [IP packet].
-func tunToQUIC(tun TUNDevice, conn *quic.Conn, stop chan struct{}, wg *sync.WaitGroup) {
+// HTTP/3 stream datagrams. Datagram format: [0x00 (data marker)] [IP packet].
+// Uses the request-bound stream (RFC 9298) so the server sees the frames on
+// the matching stream ID.
+func tunToQUIC(tun TUNDevice, rstr *http3.RequestStream, stop chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 	buf := make([]byte, connectIPDefaultMTU)
 	for {
@@ -238,14 +246,16 @@ func tunToQUIC(tun TUNDevice, conn *quic.Conn, stop chan struct{}, wg *sync.Wait
 		dgram := make([]byte, 1+n)
 		dgram[0] = 0x00 // data packet
 		copy(dgram[1:], buf[:n])
-		if sendErr := conn.SendDatagram(dgram); sendErr != nil {
+		if sendErr := rstr.SendDatagram(dgram); sendErr != nil {
 			return
 		}
 	}
 }
 
-// quicToTUN reads QUIC datagrams and writes IP packets to the TUN device.
-func quicToTUN(tun TUNDevice, conn *quic.Conn, stop chan struct{}, wg *sync.WaitGroup) {
+// quicToTUN reads HTTP/3 stream datagrams and writes IP packets to the TUN
+// device. Matches the server's send path (str.SendDatagram on the request
+// stream) per RFC 9298.
+func quicToTUN(tun TUNDevice, rstr *http3.RequestStream, stop chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 		select {
@@ -253,7 +263,7 @@ func quicToTUN(tun TUNDevice, conn *quic.Conn, stop chan struct{}, wg *sync.Wait
 			return
 		default:
 		}
-		dgram, err := conn.ReceiveDatagram(context.Background())
+		dgram, err := rstr.ReceiveDatagram(context.Background())
 		if err != nil {
 			return
 		}
