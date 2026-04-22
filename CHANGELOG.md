@@ -4,6 +4,33 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-04-22
+
+### Fixed
+- **Tunnel correctness pass** (PR #30, four squashed fixes):
+  * CONNECT-IP now aligned with the HTTP/3 stream-datagram protocol —
+    fixes silent packet loss when the server sat behind an HTTP/3
+    front-end that strict-checked the datagram framing.
+  * TUN `Read` no longer truncates oversized packets; ifname lookup
+    is panic-guarded so a missing interface returns an error instead
+    of crashing the tunnel goroutine.
+  * IPv6 SNI is honoured on dial; `Stop()` is no longer racy with
+    in-flight datagrams; the DoQ resolver's worker pool is bounded
+    so a query storm cannot fork unbounded goroutines.
+  * H2 CONNECT path now does an ALPN probe before assuming HTTP/2,
+    surfaces upstream errors instead of swallowing them, and
+    URL-escapes the host header.
+- CI ldflag target was `cli.version` but the binary reads
+  `main.version`; switching the symbol now produces correct
+  `nowifi --version` output in release artifacts.
+
+### Internal
+- Coverage uplift: `internal/server/udpws` 95.6 %, `internal/server`
+  84.7 % — locks in the udpws / server interfaces against the
+  next round of refactors.
+
+[0.14.1]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.14.1
+
 ## [0.14.0] - 2026-04-17
 
 ### Added
