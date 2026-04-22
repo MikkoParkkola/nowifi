@@ -11,24 +11,24 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    # CGO_ENABLED=0 means pure-Go cross-compilation: any single host
+    # can produce all four binaries. Pinning the whole matrix to
+    # ubuntu-latest avoids the Intel-mac runner pool starvation that
+    # had v0.14.1 queued for 7+ hours waiting on a `macos-13` agent.
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - os: macos-latest
-            target: darwin-arm64
+          - target: darwin-arm64
             goos: darwin
             goarch: arm64
-          - os: macos-13   # Intel runner
-            target: darwin-amd64
+          - target: darwin-amd64
             goos: darwin
             goarch: amd64
-          - os: ubuntu-latest
-            target: linux-amd64
+          - target: linux-amd64
             goos: linux
             goarch: amd64
-          - os: ubuntu-latest
-            target: linux-arm64
+          - target: linux-arm64
             goos: linux
             goarch: arm64
 
