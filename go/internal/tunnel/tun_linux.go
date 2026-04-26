@@ -53,7 +53,7 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 	req.flags = _IFF_TUN | _IFF_NO_PI
 
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
-		uintptr(fd),
+		uintptr(fd), // #nosec G115 -- fd is non-negative because syscall.Open succeeded.
 		uintptr(_TUNSETIFF),
 		uintptr(unsafe.Pointer(&req))); errno != 0 {
 		_ = syscall.Close(fd)
@@ -79,7 +79,7 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 		return nil, err
 	}
 
-	file := os.NewFile(uintptr(fd), "tun")
+	file := os.NewFile(uintptr(fd), "tun") // #nosec G115 -- fd is non-negative because syscall.Open succeeded.
 	return &linuxTUN{
 		file: file,
 		name: ifname,
@@ -131,7 +131,7 @@ func setMTU(ifname string, mtu int) error {
 
 	const _SIOCSIFMTU = 0x8922
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
-		uintptr(fd),
+		uintptr(fd), // #nosec G115 -- fd is non-negative because syscall.Socket succeeded.
 		uintptr(_SIOCSIFMTU),
 		uintptr(unsafe.Pointer(&req))); errno != 0 {
 		return fmt.Errorf("tun: set mtu %d on %s: %w", mtu, ifname, errno)
