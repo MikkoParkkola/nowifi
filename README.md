@@ -47,7 +47,7 @@ Download the latest release for your platform from
 and verify checksums against
 [`checksums.sha256`](https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256).
 Release assets also include CycloneDX SBOMs, Sigstore keyless signatures
-(`.sig` + `.pem`), and GitHub provenance attestations.
+(`.sigstore.json` bundles), and GitHub provenance attestations.
 
 ```bash
 # macOS Apple Silicon

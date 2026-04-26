@@ -143,8 +143,7 @@ jobs:
           for artifact in ./*.tar.gz ./*.sbom.cdx.json ./checksums.sha256; do
             cosign sign-blob \
               --yes \
-              --output-signature "${artifact}.sig" \
-              --output-certificate "${artifact}.pem" \
+              --bundle "${artifact}.sigstore.json" \
               "${artifact}"
           done
 
