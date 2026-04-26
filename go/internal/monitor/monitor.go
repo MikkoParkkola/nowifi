@@ -14,12 +14,14 @@ package monitor
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Interface represents a WiFi interface that has been put into monitor mode.
@@ -51,7 +53,9 @@ func checkSupportDarwin(iface string) bool {
 		return false
 	}
 	// Check if interface exists.
-	cmd := exec.Command("ifconfig", iface)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ifconfig", iface)
 	if err := cmd.Run(); err != nil {
 		return false
 	}
@@ -67,7 +71,9 @@ func checkSupportLinux(iface string) bool {
 	}
 
 	{
-		out, err := exec.Command("iw", "phy").Output()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, "iw", "phy").Output()
+		cancel()
 		if err == nil {
 			inPhy := false
 			inModes := false
@@ -122,7 +128,7 @@ func FindInterfaces() []string {
 func findInterfacesDarwin() []string {
 	var interfaces []string
 
-	out, err := exec.Command("ifconfig", "-l").Output()
+	out, err := monitorOutput(5*time.Second, "ifconfig", "-l")
 	if err != nil {
 		return nil
 	}
@@ -159,7 +165,7 @@ func findInterfacesLinux() []string {
 
 	ifaceRE := regexp.MustCompile(`Interface\s+(\S+)`)
 
-	out, err := exec.Command("iw", "dev").Output()
+	out, err := monitorOutput(5*time.Second, "iw", "dev")
 	if err == nil {
 		for _, m := range ifaceRE.FindAllStringSubmatch(string(out), -1) {
 			iface := m[1]
@@ -241,10 +247,10 @@ func enableLinux(iface string) (*Interface, error) {
 	// Try airmon-ng first (handles driver quirks, kills interfering processes).
 	if airmon, err := exec.LookPath("airmon-ng"); err == nil {
 		// Kill interfering processes.
-		_ = exec.Command("sudo", airmon, "check", "kill").Run()
+		_ = monitorRun(10*time.Second, "sudo", airmon, "check", "kill")
 
 		// Start monitor mode.
-		out, _ := exec.Command("sudo", airmon, "start", iface).CombinedOutput()
+		out, _ := monitorCombinedOutput(15*time.Second, "sudo", airmon, "start", iface)
 		output := string(out)
 
 		// Parse output for new interface name (e.g., wlan0mon).
@@ -255,23 +261,23 @@ func enableLinux(iface string) (*Interface, error) {
 
 		// Some versions just append "mon".
 		monName := iface + "mon"
-		if err := exec.Command("ifconfig", monName).Run(); err == nil {
+		if err := monitorRun(5*time.Second, "ifconfig", monName); err == nil {
 			return &Interface{Name: monName, OriginalName: iface, WasManaged: true}, nil
 		}
 	}
 
 	// Fallback: iw.
-	if err := exec.Command("sudo", "ip", "link", "set", iface, "down").Run(); err != nil {
+	if err := monitorRun(10*time.Second, "sudo", "ip", "link", "set", iface, "down"); err != nil {
 		return nil, fmt.Errorf("failed to bring %s down: %w", iface, err)
 	}
 
-	if err := exec.Command("sudo", "iw", "dev", iface, "set", "type", "monitor").Run(); err != nil {
+	if err := monitorRun(10*time.Second, "sudo", "iw", "dev", iface, "set", "type", "monitor"); err != nil {
 		// Try to bring the interface back up before returning error.
-		_ = exec.Command("sudo", "ip", "link", "set", iface, "up").Run()
+		_ = monitorRun(10*time.Second, "sudo", "ip", "link", "set", iface, "up")
 		return nil, fmt.Errorf("failed to enable monitor mode on %s: %w", iface, err)
 	}
 
-	if err := exec.Command("sudo", "ip", "link", "set", iface, "up").Run(); err != nil {
+	if err := monitorRun(10*time.Second, "sudo", "ip", "link", "set", iface, "up"); err != nil {
 		return nil, fmt.Errorf("failed to bring %s up: %w", iface, err)
 	}
 
@@ -286,7 +292,7 @@ func enableDarwin(iface string) (*Interface, error) {
 				"use an external USB Wi-Fi adapter (recommended: Alfa AWUS036ACH with RTL8812AU)")
 	}
 
-	if err := exec.Command("sudo", "ifconfig", iface, "monitor").Run(); err != nil {
+	if err := monitorRun(10*time.Second, "sudo", "ifconfig", iface, "monitor"); err != nil {
 		return nil, fmt.Errorf("failed to enable monitor mode on %s: %w", iface, err)
 	}
 
@@ -297,26 +303,26 @@ func enableDarwin(iface string) (*Interface, error) {
 func disableLinux(mon *Interface) bool {
 	// Try airmon-ng first.
 	if airmon, err := exec.LookPath("airmon-ng"); err == nil {
-		if err := exec.Command("sudo", airmon, "stop", mon.Name).Run(); err == nil {
+		if err := monitorRun(10*time.Second, "sudo", airmon, "stop", mon.Name); err == nil {
 			// Restart NetworkManager if it was killed.
 			if systemctl, err := exec.LookPath("systemctl"); err == nil {
-				_ = exec.Command("sudo", systemctl, "restart", "NetworkManager").Run()
+				_ = monitorRun(15*time.Second, "sudo", systemctl, "restart", "NetworkManager")
 			}
 			return true
 		}
 	}
 
 	// Fallback: iw.
-	_ = exec.Command("sudo", "ip", "link", "set", mon.Name, "down").Run()
-	_ = exec.Command("sudo", "iw", "dev", mon.Name, "set", "type", "managed").Run()
-	_ = exec.Command("sudo", "ip", "link", "set", mon.OriginalName, "up").Run()
+	_ = monitorRun(10*time.Second, "sudo", "ip", "link", "set", mon.Name, "down")
+	_ = monitorRun(10*time.Second, "sudo", "iw", "dev", mon.Name, "set", "type", "managed")
+	_ = monitorRun(10*time.Second, "sudo", "ip", "link", "set", mon.OriginalName, "up")
 
 	return true
 }
 
 // disableDarwin disables monitor mode on macOS.
 func disableDarwin(mon *Interface) bool {
-	err := exec.Command("sudo", "ifconfig", mon.Name, "-monitor").Run()
+	err := monitorRun(10*time.Second, "sudo", "ifconfig", mon.Name, "-monitor")
 	return err == nil
 }
 
@@ -326,7 +332,7 @@ func disableDarwin(mon *Interface) bool {
 
 // getPhyForInterface gets the phy name for a wireless interface on Linux.
 func getPhyForInterface(iface string) string {
-	out, err := exec.Command("iw", "dev", iface, "info").Output()
+	out, err := monitorOutput(5*time.Second, "iw", "dev", iface, "info")
 	if err != nil {
 		return ""
 	}
@@ -337,6 +343,24 @@ func getPhyForInterface(iface string) string {
 		return "phy#" + m[1]
 	}
 	return ""
+}
+
+func monitorRun(timeout time.Duration, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Run()
+}
+
+func monitorOutput(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+func monitorCombinedOutput(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 // ---------------------------------------------------------------------------

@@ -71,16 +71,7 @@ func ValidateMAC(mac string) (string, error) {
 	if !macRE.MatchString(mac) {
 		return "", fmt.Errorf("invalid MAC address format: %q, expected xx:xx:xx:xx:xx:xx", mac)
 	}
-	// Lower-case the MAC for consistency.
-	result := make([]byte, len(mac))
-	for i, c := range mac {
-		if c >= 'A' && c <= 'F' {
-			result[i] = byte(c + 32) // to lowercase
-		} else {
-			result[i] = byte(c)
-		}
-	}
-	return string(result), nil
+	return strings.ToLower(mac), nil
 }
 
 func normalizeMAC(mac string) (string, error) {

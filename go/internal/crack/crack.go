@@ -24,6 +24,7 @@
 package crack
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -180,12 +181,16 @@ func checkMonitorMode(iface string) bool {
 	}
 
 	// Check via ifconfig.
-	out, err := exec.Command("ifconfig", iface).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	out, err := exec.CommandContext(ctx, "ifconfig", iface).CombinedOutput()
+	cancel()
 	if err == nil && strings.Contains(strings.ToLower(string(out)), "monitor") {
 		return true
 	}
 	// Try iwconfig (Linux).
-	out, err = exec.Command("iwconfig", iface).CombinedOutput()
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	out, err = exec.CommandContext(ctx, "iwconfig", iface).CombinedOutput()
+	cancel()
 	if err == nil && strings.Contains(string(out), "Mode:Monitor") {
 		return true
 	}
@@ -237,7 +242,9 @@ func ScanTargets(iface string, duration int) ([]WifiTarget, error) {
 func scanMacOS(_ string) []WifiTarget {
 	var targets []WifiTarget
 
-	out, err := exec.Command("system_profiler", "SPAirPortDataType", "-json").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	out, err := exec.CommandContext(ctx, "system_profiler", "SPAirPortDataType", "-json").Output()
+	cancel()
 	if err == nil {
 		targets = parseMacOSSystemProfiler(out)
 	}
@@ -358,7 +365,9 @@ func scanMacOSAirport() []WifiTarget {
 	var targets []WifiTarget
 	const airportPath = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
 
-	out, err := exec.Command(airportPath, "-s").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	out, err := exec.CommandContext(ctx, airportPath, "-s").Output()
+	cancel()
 	if err != nil {
 		return nil
 	}
@@ -411,12 +420,16 @@ func scanLinux(iface string, duration int) []WifiTarget {
 
 	// Trigger a scan.
 	timeout := time.Duration(duration+10) * time.Second
-	cmd := exec.Command("sudo", "iw", "dev", iface, "scan")
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", "iw", "dev", iface, "scan")
 	cmd.WaitDelay = timeout
 	_ = cmd.Run()
 
 	// Parse scan results.
-	cmd2 := exec.Command("sudo", "iw", "dev", iface, "scan", "dump")
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd2 := exec.CommandContext(ctx, "sudo", "iw", "dev", iface, "scan", "dump")
 	cmd2.WaitDelay = 10 * time.Second
 	out, err := cmd2.Output()
 	if err != nil {
@@ -537,7 +550,8 @@ func CapturePMKID(target WifiTarget, iface string, timeout time.Duration) (*Resu
 
 	captureFile := filepath.Join(outputDir, "capture.pcapng")
 
-	cmd := exec.Command(
+	cmd := exec.CommandContext(
+		context.Background(),
 		hcxdumptool,
 		"-i", iface,
 		"-o", captureFile,
@@ -579,7 +593,7 @@ func CapturePMKID(target WifiTarget, iface string, timeout time.Duration) (*Resu
 
 	// Convert pcapng to hashcat format.
 	hashFile := filepath.Join(outputDir, "hash.22000")
-	convCmd := exec.Command(hcxpcapngtool, "-o", hashFile, captureFile)
+	convCmd := exec.CommandContext(context.Background(), hcxpcapngtool, "-o", hashFile, captureFile)
 	_ = convCmd.Run()
 
 	hInfo, err := os.Stat(hashFile)
@@ -665,7 +679,8 @@ func captureHandshakeHcx(target WifiTarget, iface, outputDir string, timeout tim
 
 	captureFile := filepath.Join(outputDir, "capture.pcapng")
 
-	cmd := exec.Command(
+	cmd := exec.CommandContext(
+		context.Background(),
 		hcxdumptool,
 		"-i", iface,
 		"-o", captureFile,
@@ -704,7 +719,9 @@ func captureHandshakeHcx(target WifiTarget, iface, outputDir string, timeout tim
 
 	// Convert to hashcat format.
 	hashFile := filepath.Join(outputDir, "hash.22000")
-	_ = exec.Command(hcxpcapngtool, "-o", hashFile, captureFile).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_ = exec.CommandContext(ctx, hcxpcapngtool, "-o", hashFile, captureFile).Run()
+	cancel()
 
 	hInfo, err := os.Stat(hashFile)
 	if err != nil || hInfo.Size() == 0 {
@@ -739,7 +756,8 @@ func captureHandshakeAircrack(target WifiTarget, iface, outputDir string, timeou
 	capturePrefix := filepath.Join(outputDir, "capture")
 
 	// Start airodump-ng to capture traffic on the target channel.
-	airodumpCmd := exec.Command(
+	airodumpCmd := exec.CommandContext(
+		context.Background(),
 		airodump,
 		"-c", strconv.Itoa(target.Channel),
 		"--bssid", target.BSSID,
@@ -760,7 +778,9 @@ func captureHandshakeAircrack(target WifiTarget, iface, outputDir string, timeou
 		deauthTarget = target.Clients[0]
 	}
 
-	deauthCmd := exec.Command(
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	deauthCmd := exec.CommandContext(
+		ctx,
 		aireplay,
 		"--deauth", "5",
 		"-a", target.BSSID,
@@ -768,6 +788,7 @@ func captureHandshakeAircrack(target WifiTarget, iface, outputDir string, timeou
 		iface,
 	)
 	_ = deauthCmd.Run()
+	cancel()
 
 	// Wait for handshake.
 	remaining := timeout - time.Since(start)
@@ -809,7 +830,9 @@ func captureHandshakeAircrack(target WifiTarget, iface, outputDir string, timeou
 	// Try to convert to hashcat format if hcxpcapngtool is available.
 	if hcxpcapngtool, err := findHcxpcapngtool(); err == nil {
 		hashFile := filepath.Join(outputDir, "hash.22000")
-		_ = exec.Command(hcxpcapngtool, "-o", hashFile, capFile).Run()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_ = exec.CommandContext(ctx, hcxpcapngtool, "-o", hashFile, capFile).Run()
+		cancel()
 
 		if info, err := os.Stat(hashFile); err == nil && info.Size() > 0 {
 			result.Success = true
@@ -941,7 +964,8 @@ func CrackWPSPixie(target WifiTarget, iface string, timeout time.Duration) (*Res
 		return result, nil
 	}
 
-	cmd := exec.Command(
+	cmd := exec.CommandContext(
+		context.Background(),
 		reaverPath,
 		"-i", iface,
 		"-b", target.BSSID,
@@ -1022,7 +1046,8 @@ func CrackWPSPin(target WifiTarget, iface string, timeout time.Duration) (*Resul
 		return result, nil
 	}
 
-	cmd := exec.Command(
+	cmd := exec.CommandContext(
+		context.Background(),
 		reaverPath,
 		"-i", iface,
 		"-b", target.BSSID,
@@ -1173,7 +1198,7 @@ func crackWithHashcatMode(hashFile, attackMode, wordlist string, timeout time.Du
 		args = append(args, "--backend-devices=1") // Metal backend
 	}
 
-	cmd := exec.Command(hashcatPath, args...)
+	cmd := exec.CommandContext(context.Background(), hashcatPath, args...)
 	out, err := runCmdBytes(cmd, timeout)
 	stdoutText := string(out)
 
@@ -1297,7 +1322,7 @@ func crackWithAircrackTimeout(captureFile, wordlist string, timeout time.Duratio
 		return result, nil
 	}
 
-	cmd := exec.Command(aircrackPath, "-w", wordlist, "-q", captureFile)
+	cmd := exec.CommandContext(context.Background(), aircrackPath, "-w", wordlist, "-q", captureFile)
 	out, err := runCmdBytes(cmd, timeout)
 	stdoutText := string(out)
 
@@ -1796,7 +1821,7 @@ func buildHashcatArgs(hashFile string, extraArgs ...string) []string {
 // runHashcatWithTimeout runs hashcat with the given args and timeout,
 // returning the cracked password or empty string.
 func runHashcatWithTimeout(hashcatPath string, args []string, timeout time.Duration) string {
-	cmd := exec.Command(hashcatPath, args...)
+	cmd := exec.CommandContext(context.Background(), hashcatPath, args...)
 	out, _ := runCmdBytes(cmd, timeout)
 	return parseHashcatOutput(string(out))
 }
@@ -1896,7 +1921,7 @@ func onlineBruteViaCli(target WifiTarget, iface, wpaSupplicant, wpaCli, outputDi
 	}
 
 	// Start wpa_supplicant daemon.
-	supCmd := exec.Command("sudo", wpaSupplicant,
+	supCmd := exec.CommandContext(context.Background(), "sudo", wpaSupplicant,
 		"-i", iface,
 		"-c", confFile,
 		"-B", // Daemonize
@@ -1910,7 +1935,9 @@ func onlineBruteViaCli(target WifiTarget, iface, wpaSupplicant, wpaCli, outputDi
 
 	// Ensure we kill wpa_supplicant when done.
 	defer func() {
-		_ = exec.Command("sudo", "killall", "-9", "wpa_supplicant").Run()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "sudo", "killall", "-9", "wpa_supplicant").Run()
 	}()
 
 	// Give wpa_supplicant time to initialize.
@@ -2014,7 +2041,7 @@ func onlineBruteViaConfig(target WifiTarget, iface, wpaSupplicant, outputDir, lo
 		}
 
 		// Run wpa_supplicant for a brief connection attempt.
-		cmd := exec.Command("sudo", wpaSupplicant,
+		cmd := exec.CommandContext(context.Background(), "sudo", wpaSupplicant,
 			"-i", iface,
 			"-c", confFile,
 			"-D", "nl80211,wext",
@@ -2040,7 +2067,9 @@ func onlineBruteViaConfig(target WifiTarget, iface, wpaSupplicant, outputDir, lo
 		logEntries = append(logEntries, fmt.Sprintf("FAIL: %s", password))
 
 		// Kill any lingering wpa_supplicant.
-		_ = exec.Command("sudo", "killall", "-9", "wpa_supplicant").Run()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = exec.CommandContext(ctx, "sudo", "killall", "-9", "wpa_supplicant").Run()
+		cancel()
 		time.Sleep(500 * time.Millisecond)
 	}
 
@@ -2347,7 +2376,7 @@ func RunCrack(iface, targetSSID, wordlist string, timeout time.Duration) ([]Resu
 
 // runWithTimeout runs a command with a timeout and returns its stdout.
 func runWithTimeout(binary string, args []string, timeout time.Duration) string {
-	cmd := exec.Command(binary, args...)
+	cmd := exec.CommandContext(context.Background(), binary, args...)
 	return runCmdWithTimeout(cmd, timeout)
 }
 

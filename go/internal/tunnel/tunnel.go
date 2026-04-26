@@ -124,7 +124,7 @@ func StartChisel(serverURL string, localPort int, timeout time.Duration) (*Handl
 		localPort = 1080
 	}
 
-	cmd := exec.Command(chiselPath, "client", serverURL, fmt.Sprintf("%d:socks", localPort))
+	cmd := exec.CommandContext(context.Background(), chiselPath, "client", serverURL, fmt.Sprintf("%d:socks", localPort))
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
@@ -181,7 +181,7 @@ func StartDNSTunnel(domain string, serverIP string, timeout time.Duration) (*Han
 	}
 	args = append(args, domain)
 
-	cmd := exec.Command("sudo", args...)
+	cmd := exec.CommandContext(context.Background(), "sudo", args...)
 	cmd.Stdout = nil
 
 	stderrPipe, _ := cmd.StderrPipe()
@@ -223,7 +223,7 @@ func StartICMPTunnel(serverIP string, timeout time.Duration) (*Handle, error) {
 		timeout = 15 * time.Second
 	}
 
-	cmd := exec.Command("sudo", hansPath, "-c", serverIP, "-f")
+	cmd := exec.CommandContext(context.Background(), "sudo", hansPath, "-c", serverIP, "-f")
 	cmd.Stdout = nil
 
 	stderrPipe, _ := cmd.StderrPipe()
@@ -268,7 +268,7 @@ func StartQUICTunnel(server string, localPort int, timeout time.Duration) (*Hand
 		localPort = 1081
 	}
 
-	cmd := exec.Command(hysteriaPath, "client",
+	cmd := exec.CommandContext(context.Background(), hysteriaPath, "client",
 		"--server", server,
 		"--socks5-listen", fmt.Sprintf("127.0.0.1:%d", localPort),
 		"--insecure",
@@ -317,7 +317,7 @@ func StartNTPTunnel(serverIP string, localPort int, timeout time.Duration) (*Han
 		localPort = 1082
 	}
 
-	cmd := exec.Command(ntpPath, "client",
+	cmd := exec.CommandContext(context.Background(), ntpPath, "client",
 		"--server", serverIP,
 		"--socks", fmt.Sprintf("127.0.0.1:%d", localPort),
 	)
@@ -422,14 +422,22 @@ func VerifySOCKS(port int) bool {
 
 			// SOCKS5 connect request.
 			host, portStr, _ := net.SplitHostPort(addr)
+			if len(host) == 0 || len(host) > 255 {
+				socksConn.Close()
+				return nil, fmt.Errorf("socks5 host length out of range")
+			}
 			portNum := 80
 			if portStr != "" {
 				if parsedPort, err := strconv.Atoi(portStr); err == nil {
 					portNum = parsedPort
 				}
 			}
+			if portNum < 0 || portNum > 65535 {
+				socksConn.Close()
+				return nil, fmt.Errorf("socks5 port out of range")
+			}
 
-			req := []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
+			req := []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))} // #nosec G115 -- host length is checked above.
 			req = append(req, []byte(host)...)
 			req = append(req, byte(portNum>>8), byte(portNum&0xff))
 			_, _ = socksConn.Write(req)
@@ -520,7 +528,9 @@ func buildCFWorkerProxyRequest(workerURL, targetURL string) (string, string, boo
 
 // portListening checks if a local TCP port is accepting connections.
 func portListening(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return false
 	}
@@ -579,7 +589,9 @@ func waitForTunInterface(cmd *exec.Cmd, stderrPipe io.Reader, ifaceName string, 
 		}
 
 		// Check if TUN interface has an IP.
-		out, err := exec.Command("ifconfig", ifaceName).CombinedOutput()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		out, err := exec.CommandContext(ctx, "ifconfig", ifaceName).CombinedOutput()
+		cancel()
 		if err == nil && strings.Contains(string(out), "inet") {
 			return nil
 		}
@@ -590,7 +602,7 @@ func waitForTunInterface(cmd *exec.Cmd, stderrPipe io.Reader, ifaceName string, 
 
 // tryCloudflaredDoH attempts to start cloudflared in proxy-dns mode.
 func tryCloudflaredDoH(cfPath string, port int, upstream string, timeout time.Duration) (*Handle, error) {
-	cmd := exec.Command(cfPath, "proxy-dns",
+	cmd := exec.CommandContext(context.Background(), cfPath, "proxy-dns",
 		"--port", fmt.Sprintf("%d", port),
 		"--upstream", upstream,
 	)
@@ -619,7 +631,7 @@ func tryCloudflaredDoH(cfPath string, port int, upstream string, timeout time.Du
 
 // tryDnscryptDoH attempts to start dnscrypt-proxy.
 func tryDnscryptDoH(dnsPath string, port int, timeout time.Duration) (*Handle, error) {
-	cmd := exec.Command(dnsPath, "--listen_addresses", fmt.Sprintf("127.0.0.1:%d", port))
+	cmd := exec.CommandContext(context.Background(), dnsPath, "--listen_addresses", fmt.Sprintf("127.0.0.1:%d", port))
 	cmd.Stdout = nil
 
 	stderrPipe, _ := cmd.StderrPipe()

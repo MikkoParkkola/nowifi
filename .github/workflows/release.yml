@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    timeout-minutes: 15
     # CGO_ENABLED=0 means pure-Go cross-compilation: any single host
     # can produce all four binaries. Pinning the whole matrix to
     # ubuntu-latest avoids the Intel-mac runner pool starvation that
@@ -33,11 +34,14 @@ jobs:
             goarch: arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
+          cache-dependency-path: go/go.sum
 
       - name: Build
         working-directory: go
@@ -59,7 +63,7 @@ jobs:
           tar czf "nowifi-${{ matrix.target }}.tar.gz" "nowifi-${{ matrix.target }}"
           shasum -a 256 "nowifi-${{ matrix.target }}.tar.gz" > "nowifi-${{ matrix.target }}.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nowifi-${{ matrix.target }}
           path: |
@@ -70,10 +74,13 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

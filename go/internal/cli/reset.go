@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"time"
@@ -118,7 +119,9 @@ func runReset(cmd *cobra.Command, args []string) {
 	}
 
 	// 7. Remove WireGuard tunnel if present.
-	_ = exec.Command("wg-quick", "down", "wg-nowifi").Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "wg-quick", "down", "wg-nowifi").Run()
 
 	fmt.Print("\nNetwork reset complete. Try browsing now.\n\n")
 }

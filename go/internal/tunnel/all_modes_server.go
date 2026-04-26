@@ -125,8 +125,9 @@ func (h *grpcHandler) handleBidi(w http.ResponseWriter, r *http.Request) {
 	}
 	target := string(payload)
 
-	// Dial target.
-	upstream, err := net.DialTimeout("tcp", target, 10e9) // 10s
+	dialer := net.Dialer{Timeout: 10 * time.Second}
+	// #nosec G704 -- gRPC tunnel mode intentionally dials the requested target.
+	upstream, err := dialer.DialContext(r.Context(), "tcp", target)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/grpc")
 		w.WriteHeader(http.StatusBadGateway)
@@ -266,7 +267,9 @@ func handleH2Connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream, err := net.DialTimeout("tcp", target, 10e9)
+	dialer := net.Dialer{Timeout: 10 * time.Second}
+	// #nosec G704 -- HTTP/2 CONNECT mode intentionally dials the requested target.
+	upstream, err := dialer.DialContext(r.Context(), "tcp", target)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

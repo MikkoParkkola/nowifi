@@ -98,7 +98,7 @@ func StartGRPCTunnel(serverURL string, localPort int, timeout time.Duration) (*H
 		ForceAttemptHTTP2: true,
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		return nil, fmt.Errorf("grpc tunnel: listen %d: %w", localPort, err)
 	}

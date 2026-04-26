@@ -55,10 +55,10 @@ type Ipv6ProbeResult struct {
 
 // HttpsProbeResult holds the result of an HTTPS reachability test.
 type HttpsProbeResult struct {
-	IsOpen         bool   `json:"is_open"`
-	URL            string `json:"url"`
-	Details        string `json:"details"`
-	HTTP2Negotiated bool  `json:"http2_negotiated,omitempty"` // true when ALPN negotiated "h2"
+	IsOpen          bool   `json:"is_open"`
+	URL             string `json:"url"`
+	Details         string `json:"details"`
+	HTTP2Negotiated bool   `json:"http2_negotiated,omitempty"` // true when ALPN negotiated "h2"
 }
 
 // WhitelistResult holds the result of a single whitelisted domain test.
@@ -231,7 +231,7 @@ func ProbeDNS(stealth bool) DnsProbeResult {
 // tryDNSResolve attempts to resolve a domain using a specific DNS resolver
 // by sending a raw DNS query packet over UDP.
 func tryDNSResolve(resolverIP, domain string) string {
-	conn, err := net.DialTimeout("udp", resolverIP+":53", 5*time.Second)
+	conn, err := dialWithTimeout(context.Background(), "udp", resolverIP+":53", 5*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -242,6 +242,9 @@ func tryDNSResolve(resolverIP, domain string) string {
 
 	// Build a minimal DNS query for A record.
 	query := buildDNSQuery(domain)
+	if len(query) == 0 {
+		return ""
+	}
 	if _, err := conn.Write(query); err != nil {
 		return ""
 	}
@@ -266,10 +269,9 @@ func buildDNSQuery(domain string) []byte {
 	pkt = append(pkt, 0x00, 0x00) // NSCOUNT: 0
 	pkt = append(pkt, 0x00, 0x00) // ARCOUNT: 0
 
-	// QNAME: encode domain labels.
-	for _, label := range strings.Split(domain, ".") {
-		pkt = append(pkt, byte(len(label)))
-		pkt = append(pkt, []byte(label)...)
+	pkt = appendDNSLabels(pkt, domain)
+	if pkt == nil {
+		return nil
 	}
 	pkt = append(pkt, 0x00) // Root label
 
@@ -344,6 +346,24 @@ func parseDNSResponse(data []byte) string {
 	return ""
 }
 
+func appendDNSLabels(pkt []byte, domain string) []byte {
+	for _, label := range strings.Split(domain, ".") {
+		if len(label) == 0 || len(label) > 63 {
+			return nil
+		}
+		pkt = append(pkt, byte(len(label))) // #nosec G115 -- DNS label length is checked above.
+		pkt = append(pkt, label...)
+	}
+	return pkt
+}
+
+func dialWithTimeout(ctx context.Context, network, address string, timeout time.Duration) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	dialer := net.Dialer{Timeout: timeout}
+	return dialer.DialContext(ctx, network, address)
+}
+
 // ProbeICMP tests if ICMP (ping) reaches external hosts.
 func ProbeICMP(stealth bool) IcmpProbeResult {
 	result := IcmpProbeResult{}
@@ -402,7 +422,7 @@ func ProbeIPv6(iface string) Ipv6ProbeResult {
 	}
 
 	for _, t := range ipv6Targets {
-		conn, err := net.DialTimeout("tcp6",
+		conn, err := dialWithTimeout(context.Background(), "tcp6",
 			fmt.Sprintf("[%s]:%d", t.Addr, t.Port), 5*time.Second)
 		if err == nil {
 			conn.Close()
@@ -701,7 +721,7 @@ func probeBatch(ports []int, targetIP string, timeout time.Duration) []PortProbe
 			}
 
 			addr := net.JoinHostPort(targetIP, fmt.Sprintf("%d", p))
-			conn, err := net.DialTimeout("tcp", addr, timeout)
+			conn, err := dialWithTimeout(context.Background(), "tcp", addr, timeout)
 			if err == nil {
 				conn.Close()
 				pr.IsOpen = true
@@ -742,7 +762,9 @@ func ProbeNTP(stealth bool) PortProbeResult {
 	for _, server := range ntpServers {
 		stealthSleep(stealth, 100, 300)
 
-		ips, err := net.LookupHost(server)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ips, err := net.DefaultResolver.LookupHost(ctx, server)
+		cancel()
 		if err != nil || len(ips) == 0 {
 			continue
 		}
@@ -800,7 +822,7 @@ func ProbeDoH(stealth bool) PortProbeResult {
 
 // probeUDPPort sends a protocol-appropriate packet and checks for a response.
 func probeUDPPort(targetIP string, port int, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(targetIP, fmt.Sprintf("%d", port)), timeout)
+	conn, err := dialWithTimeout(context.Background(), "udp", net.JoinHostPort(targetIP, fmt.Sprintf("%d", port)), timeout)
 	if err != nil {
 		return false
 	}
@@ -925,7 +947,7 @@ func tryDNSBeacon(serverIP string) []int {
 		strings.ReplaceAll(serverIP, ".", "-"))
 
 	for _, resolver := range resolvers {
-		conn, err := net.DialTimeout("udp", resolver, 3*time.Second)
+		conn, err := dialWithTimeout(context.Background(), "udp", resolver, 3*time.Second)
 		if err != nil {
 			continue
 		}
@@ -936,6 +958,10 @@ func tryDNSBeacon(serverIP string) []int {
 
 		// Build TXT query.
 		query := buildDNSTXTQuery(domain)
+		if len(query) == 0 {
+			conn.Close()
+			continue
+		}
 		if _, err := conn.Write(query); err != nil {
 			conn.Close()
 			continue
@@ -965,9 +991,9 @@ func buildDNSTXTQuery(domain string) []byte {
 	pkt = append(pkt, 0x00, 0x00) // NSCOUNT: 0
 	pkt = append(pkt, 0x00, 0x00) // ARCOUNT: 0
 
-	for _, label := range strings.Split(domain, ".") {
-		pkt = append(pkt, byte(len(label)))
-		pkt = append(pkt, []byte(label)...)
+	pkt = appendDNSLabels(pkt, domain)
+	if pkt == nil {
+		return nil
 	}
 	pkt = append(pkt, 0x00)       // Root label
 	pkt = append(pkt, 0x00, 0x10) // QTYPE: TXT (16)
@@ -1065,7 +1091,7 @@ func ProbeTopology(iface string, portalIP string) SubnetTopology {
 	result := SubnetTopology{PortalIP: portalIP}
 
 	// Get client IP and subnet.
-	conn, err := net.DialTimeout("udp", "8.8.8.8:53", 3*time.Second)
+	conn, err := dialWithTimeout(context.Background(), "udp", "8.8.8.8:53", 3*time.Second)
 	if err != nil {
 		result.Details = "Cannot determine local IP"
 		return result

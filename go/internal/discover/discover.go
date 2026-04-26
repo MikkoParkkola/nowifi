@@ -6,6 +6,7 @@
 package discover
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -18,7 +19,7 @@ import (
 type AuthorizedDevice struct {
 	MAC       string
 	IP        string
-	Score     float64   // 0-1 authorization likelihood
+	Score     float64 // 0-1 authorization likelihood
 	FirstSeen time.Time
 	LastSeen  time.Time
 	ARPCount  int
@@ -176,6 +177,8 @@ func scoreDevice(d *AuthorizedDevice) float64 {
 }
 
 func isReachable(ip string) bool {
-	cmd := exec.Command("ping", "-c", "1", "-W", "1", ip)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1", ip)
 	return cmd.Run() == nil
 }

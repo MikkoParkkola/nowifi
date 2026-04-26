@@ -278,7 +278,9 @@ func probeLatency(host string) LatencyProbe {
 	var samples []time.Duration
 	for i := 0; i < 3; i++ {
 		start := time.Now()
-		conn, err := net.DialTimeout("tcp", host+":443", 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", host+":443")
+		cancel()
 		if err == nil {
 			samples = append(samples, time.Since(start))
 			_ = conn.Close()

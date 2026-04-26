@@ -6,9 +6,11 @@
 package tunnel
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
+	"time"
 )
 
 // configureTUNAddressPlatform assigns an IP address and brings the
@@ -20,8 +22,10 @@ func configureTUNAddressPlatform(ifname string, ip net.IP) error {
 	peer[3] = 1 // gateway is .1 in the /24
 
 	// ifconfig utunN inet <local> <peer> up
-	out, err := exec.Command("ifconfig", ifname,
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	out, err := exec.CommandContext(ctx, "ifconfig", ifname,
 		"inet", ip.String(), peer.String(), "up").CombinedOutput()
+	cancel()
 	if err != nil {
 		return fmt.Errorf("ifconfig %s: %s: %w", ifname, string(out), err)
 	}
@@ -31,7 +35,9 @@ func configureTUNAddressPlatform(ifname string, ip net.IP) error {
 	// 0.0.0.0/1 via tunnel + 128.0.0.0/1 via tunnel covers all addresses
 	// without touching the existing default route.
 	for _, cidr := range []string{"0.0.0.0/1", "128.0.0.0/1"} {
-		out, err = exec.Command("route", "add", "-net", cidr, "-interface", ifname).CombinedOutput()
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		out, err = exec.CommandContext(ctx, "route", "add", "-net", cidr, "-interface", ifname).CombinedOutput()
+		cancel()
 		if err != nil {
 			return fmt.Errorf("route add %s: %s: %w", cidr, string(out), err)
 		}

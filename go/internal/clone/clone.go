@@ -6,6 +6,7 @@
 package clone
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -31,29 +32,29 @@ var (
 	ProfileMacOS = DeviceProfile{
 		OS: "macos", Hostname: "MacBook-Pro",
 		DHCPOptions55: "subnet-mask,routers,domain-name-servers,domain-name,domain-search,classless-static-routes",
-		TTL: 64,
+		TTL:           64,
 	}
 	ProfileiOS = DeviceProfile{
 		OS: "ios", Hostname: "iPhone",
 		DHCPOptions55: "subnet-mask,routers,domain-name-servers,domain-name,domain-search",
-		TTL: 64,
+		TTL:           64,
 	}
 	ProfileWindows = DeviceProfile{
 		OS: "windows", Hostname: "DESKTOP-NOWIFI",
 		DHCPOptions55: "subnet-mask,routers,domain-name-servers,domain-name,ntp-servers,vendor-encapsulated-options",
 		DHCPOption60:  "MSFT 5.0",
-		TTL: 128,
+		TTL:           128,
 	}
 	ProfileAndroid = DeviceProfile{
 		OS: "android", Hostname: "android-nowifi",
 		DHCPOptions55: "subnet-mask,routers,domain-name-servers,domain-name,broadcast-address",
 		DHCPOption60:  "android-dhcp-14",
-		TTL: 64,
+		TTL:           64,
 	}
 	ProfileLinux = DeviceProfile{
 		OS: "linux", Hostname: "localhost",
 		DHCPOptions55: "subnet-mask,routers,domain-name-servers,domain-name,host-name",
-		TTL: 64,
+		TTL:           64,
 	}
 )
 
@@ -176,18 +177,32 @@ interface "%s" {
 	}
 	conf += "}\n"
 
-	// Write temp config using os.WriteFile (no shell needed).
-	confPath := "/tmp/nowifi-dhclient.conf"
-	if err := writeFile(confPath, conf); err != nil {
+	// Write a unique temp config. FullClone often runs with elevated
+	// privileges, so avoid predictable /tmp paths and symlink following.
+	confFile, err := os.CreateTemp("", "nowifi-dhclient-*.conf")
+	if err != nil {
+		return fmt.Errorf("failed to create dhclient config: %w", err)
+	}
+	confPath := confFile.Name()
+	defer os.Remove(confPath)
+	if _, err := confFile.WriteString(conf); err != nil {
+		_ = confFile.Close()
 		return fmt.Errorf("failed to write dhclient config: %w", err)
+	}
+	if err := confFile.Close(); err != nil {
+		return fmt.Errorf("failed to close dhclient config: %w", err)
 	}
 
 	// Release existing lease
-	_ = exec.Command("sudo", "dhclient", "-r", iface).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	_ = exec.CommandContext(ctx, "sudo", "dhclient", "-r", iface).Run()
+	cancel()
 	time.Sleep(500 * time.Millisecond)
 
 	// Request with spoofed fingerprint
-	cmd := exec.Command("sudo", "dhclient", "-cf", confPath, "-1", iface)
+	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", "dhclient", "-cf", confPath, "-1", iface)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("dhclient failed: %s: %w", string(out), err)
@@ -230,8 +245,4 @@ func sanitizeVendorClass(vc string) string {
 		}
 	}
 	return b.String()
-}
-
-func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0600)
 }

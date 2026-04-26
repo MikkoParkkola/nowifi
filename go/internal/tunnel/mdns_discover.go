@@ -97,7 +97,7 @@ type mdnsResult struct {
 // Uses multicast DNS on 224.0.0.251:5353.
 func queryMDNSService(ctx context.Context, serviceType string) []mdnsResult {
 	// Simplified mDNS query: send a PTR question, parse responses.
-	conn, err := net.ListenPacket("udp4", "0.0.0.0:0")
+	conn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp4", "0.0.0.0:0")
 	if err != nil {
 		return nil
 	}
@@ -146,7 +146,10 @@ func buildDNSQuery(name string) []byte {
 	}
 	// Encode the name as DNS labels.
 	for _, part := range strings.Split(strings.TrimSuffix(name, "."), ".") {
-		buf = append(buf, byte(len(part)))
+		if len(part) == 0 || len(part) > 63 {
+			return nil
+		}
+		buf = append(buf, byte(len(part))) // #nosec G115 -- DNS label length is checked above.
 		buf = append(buf, part...)
 	}
 	buf = append(buf, 0x00)       // null terminator
@@ -182,13 +185,12 @@ func parseMDNSResponse(data []byte, serviceType string) []mdnsResult {
 	}
 
 	// Extract IP addresses from the packet (A records: type 1, 4 bytes).
-	for i := 12; i < len(data)-10; i++ {
+	for i := 12; i+14 <= len(data); i++ {
 		// Look for A record pattern: type=0x0001, class=0x0001, TTL(4), rdlen=4
 		if data[i] == 0x00 && data[i+1] == 0x01 && // type A
-			data[i+2] == 0x80 && data[i+3] == 0x01 && // class IN + cache flush
-			i+14 <= len(data) {
+			data[i+2] == 0x80 && data[i+3] == 0x01 { // class IN + cache flush
 			rdlen := int(data[i+8])<<8 | int(data[i+9])
-			if rdlen == 4 && i+14 <= len(data) {
+			if rdlen == 4 {
 				ip := net.IPv4(data[i+10], data[i+11], data[i+12], data[i+13])
 				results = append(results, mdnsResult{
 					host:     ip.String(),

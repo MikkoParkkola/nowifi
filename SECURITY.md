@@ -30,6 +30,8 @@ In scope:
 - State restoration failures (MAC, proxy, DNS not cleaned up)
 - Credential leakage in logs, captures, or config files
 - Dependencies with known CVEs
+- Regressions in privileged temp-file handling, authenticated proxy behavior,
+  test isolation, checked downloads, or release integrity
 
 Out of scope:
 - The bypass techniques themselves (they are the intended functionality)
@@ -44,6 +46,12 @@ Security researchers who report valid vulnerabilities will be credited in the re
 
 | Version | Supported |
 |---------|-----------|
-| 0.5.x   | Yes       |
-| 0.4.x   | Security fixes only |
-| < 0.4   | No        |
+| 0.14.x  | Yes       |
+| 0.13.x  | Security fixes only |
+| < 0.13  | No        |
+
+## Maintainer Regression Checklist
+
+Security-sensitive pull requests should be checked against
+[`docs/SECURITY-REGRESSION-CHECKLIST.md`](docs/SECURITY-REGRESSION-CHECKLIST.md)
+before merge.

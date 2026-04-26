@@ -65,7 +65,7 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 	var info ctlInfo
 	copy(info.name[:], _UTUN_CONTROL_NAME)
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
-		uintptr(fd),
+		uintptr(fd), // #nosec G115 -- fd is a non-negative descriptor from syscall.Socket.
 		uintptr(_CTLIOCGINFO),
 		uintptr(unsafe.Pointer(&info))); errno != 0 {
 		_ = syscall.Close(fd)
@@ -81,7 +81,7 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 		scUnit:    0, // 0 = auto-assign
 	}
 	if _, _, errno := syscall.Syscall(syscall.SYS_CONNECT,
-		uintptr(fd),
+		uintptr(fd), // #nosec G115 -- fd is a non-negative descriptor from syscall.Socket.
 		uintptr(unsafe.Pointer(&addr)),
 		unsafe.Sizeof(addr)); errno != 0 {
 		_ = syscall.Close(fd)
@@ -93,7 +93,7 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 	ifnameBuf := make([]byte, ifnameBufLen)
 	var ifnameLen uint32 = ifnameBufLen
 	if _, _, errno := syscall.Syscall6(syscall.SYS_GETSOCKOPT,
-		uintptr(fd),
+		uintptr(fd), // #nosec G115 -- fd is a non-negative descriptor from syscall.Socket.
 		uintptr(_SYSPROTO_CONTROL),
 		uintptr(_UTUN_OPT_IFNAME),
 		uintptr(unsafe.Pointer(&ifnameBuf[0])),
@@ -119,7 +119,7 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 		return nil, err
 	}
 
-	file := os.NewFile(uintptr(fd), "utun")
+	file := os.NewFile(uintptr(fd), "utun") // #nosec G115 -- fd is a non-negative descriptor from syscall.Socket.
 	return &darwinTUN{
 		fd:   fd,
 		file: file,
@@ -217,7 +217,7 @@ func setMTU(ifname string, mtu int) error {
 
 	const _SIOCSIFMTU = 0x80206934
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
-		uintptr(fd),
+		uintptr(fd), // #nosec G115 -- fd is a non-negative descriptor from syscall.Socket.
 		uintptr(_SIOCSIFMTU),
 		uintptr(unsafe.Pointer(&req))); errno != 0 {
 		return fmt.Errorf("tun: set mtu %d on %s: %w", mtu, ifname, errno)

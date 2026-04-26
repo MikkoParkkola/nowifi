@@ -88,7 +88,7 @@ func StartHTTP3Tunnel(serverURL string, localPort int, timeout time.Duration) (*
 		return nil, fmt.Errorf("http3 dial %s: %w", addr, err)
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		_ = qconn.CloseWithError(0, "listener-failed")
 		return nil, fmt.Errorf("listen %d: %w", localPort, err)

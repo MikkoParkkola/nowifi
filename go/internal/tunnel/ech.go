@@ -87,9 +87,9 @@ func StartECHProxy(cfg ECHServerConfig, localPort int) (*Handle, error) {
 	}
 
 	tlsConf := &tls.Config{
-		ServerName:                      sni,
-		MinVersion:                      tls.VersionTLS13,
-		EncryptedClientHelloConfigList:  configList,
+		ServerName:                          sni,
+		MinVersion:                          tls.VersionTLS13,
+		EncryptedClientHelloConfigList:      configList,
 		EncryptedClientHelloRejectionVerify: nil,
 	}
 	if clientInsecureTLSForTest {
@@ -110,7 +110,7 @@ func StartECHProxy(cfg ECHServerConfig, localPort int) (*Handle, error) {
 		return nil, errors.New("ech tunnel: server did not accept ECH (check ConfigList freshness)")
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		return nil, fmt.Errorf("ech tunnel: listen %d: %w", localPort, err)
 	}

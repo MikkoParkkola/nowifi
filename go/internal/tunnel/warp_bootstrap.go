@@ -103,7 +103,7 @@ func StartWARPTunnel(localPort int, timeout time.Duration) (*Handle, error) {
 		ForceAttemptHTTP2: true,
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		return nil, fmt.Errorf("warp: listen %d: %w", localPort, err)
 	}
@@ -237,6 +237,7 @@ func saveWARPCache(reg *WARPRegistration) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
+	// #nosec G117 -- private key is persisted to a 0600 user cache for reuse.
 	data, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return err

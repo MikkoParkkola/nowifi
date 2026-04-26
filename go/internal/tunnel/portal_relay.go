@@ -169,7 +169,7 @@ func StartPortalRelayTunnel(whitelistedDomains []string, localPort int, timeout 
 	}
 
 	// Start local SOCKS5 proxy that tunnels through the whitelisted domain.
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		return nil, fmt.Errorf("portal relay: listen %d: %w", localPort, err)
 	}

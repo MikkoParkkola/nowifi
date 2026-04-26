@@ -4,6 +4,50 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.3] - 2026-04-26
+
+### Changed
+- CI now uses Node 24-capable GitHub Actions (`actions/checkout@v6`,
+  `actions/setup-go@v6`, and `golangci/golangci-lint-action@v9` with
+  `golangci-lint` pinned to `v2.11.4`) and points Go cache keys at
+  `go/go.sum`, removing the non-fatal workflow warnings from the 0.14.2
+  release.
+- Release artifact upload/download now use Node 24-capable artifact actions.
+- Migrated the golangci-lint config to the v2 schema used by the upgraded
+  action.
+- Release jobs now create the GitHub Release before uploading assets, so fresh
+  tags publish archives without manual recovery.
+
+### Security
+- Added a security regression checklist covering privileged temp files, cleanup
+  ordering, authenticated Cloudflare Workers, test isolation, MAC restore
+  preconditions, IPv6 hop-limit restoration, checked VPS downloads, token
+  redaction, and release integrity.
+- Added Dependabot coverage for GitHub Actions and the Go module to keep CI and
+  dependency updates visible.
+
+[0.14.3]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.14.3
+
+## [0.14.2] - 2026-04-26
+
+### Security
+- Fixed stealth PF rule loading to use unique temporary files instead of a fixed
+  `/tmp` path when running with elevated privileges.
+- Fixed TUI cleanup ordering so audit exit waits for the mutating pipeline and
+  restore guard before reporting that network state is restored.
+- Hardened the deployed Cloudflare Worker with a generated token and client-side
+  URL validation, preventing accidental open-proxy deployment.
+- Isolated CF Worker bypass tests from real user config and real Cloudflare
+  deployment state by injecting config/deploy/verify dependencies.
+- Abort mutating bypass work when guard setup cannot capture the original MAC
+  restore target.
+- Store and restore the original IPv6 hop limit alongside IPv4 TTL during
+  stealth mode.
+- Verify the pinned chisel download checksum in VPS cloud-init before executing
+  it as root.
+
+[0.14.2]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.14.2
+
 ## [0.14.1] - 2026-04-22
 
 ### Fixed

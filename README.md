@@ -327,6 +327,9 @@ Hands-on guides for specific scenarios:
 - [VPN over Cloudflare Quick Tunnel](docs/recipes/vpn-over-quick-tunnel.md) — carry a VPN through a TCP-only captive portal using zero-config UDP (`nowifi server create -p cloudflare-quick --udp`), plus four alternative strategies (chisel-legacy, OpenVPN TCP, wstunnel, Tailscale/ZeroTier).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
+Security-sensitive changes should also use the
+[`SECURITY.md`](SECURITY.md) policy and
+[`docs/SECURITY-REGRESSION-CHECKLIST.md`](docs/SECURITY-REGRESSION-CHECKLIST.md).
 
 ---
 

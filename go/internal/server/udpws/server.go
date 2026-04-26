@@ -18,6 +18,7 @@
 package udpws
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -78,7 +79,7 @@ func (s *Server) logf(format string, args ...any) {
 // occurs.  It returns the actual listen address (useful when HTTPAddr is ":0")
 // and a stop function.
 func (s *Server) Serve() (listenAddr string, stop func(), err error) {
-	ln, err := net.Listen("tcp", s.HTTPAddr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", s.HTTPAddr)
 	if err != nil {
 		return "", nil, fmt.Errorf("udpws server listen %s: %w", s.HTTPAddr, err)
 	}

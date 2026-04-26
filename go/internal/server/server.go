@@ -348,7 +348,9 @@ func SetupCloudflareWorker() (*Info, error) {
 					"Then: npm install -g wrangler")
 		}
 
-		out, err := exec.Command(npm, "install", "-g", "wrangler").CombinedOutput()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		out, err := exec.CommandContext(ctx, npm, "install", "-g", "wrangler").CombinedOutput()
+		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("failed to install wrangler: %s", truncate(string(out), 500))
 		}
@@ -360,7 +362,9 @@ func SetupCloudflareWorker() (*Info, error) {
 	}
 
 	// 2. Check login status.
-	out, err := exec.Command(wrangler, "whoami").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	out, err := exec.CommandContext(ctx, wrangler, "whoami").CombinedOutput()
+	cancel()
 	if err != nil || strings.Contains(strings.ToLower(string(out)), "not authenticated") {
 		return nil, fmt.Errorf(
 			"not logged in to Cloudflare. Run:\n" +
@@ -393,7 +397,9 @@ func SetupCloudflareWorker() (*Info, error) {
 	}
 
 	// 4. Deploy.
-	deployCmd := exec.Command(wrangler, "deploy")
+	ctx, cancel = context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	deployCmd := exec.CommandContext(ctx, wrangler, "deploy")
 	deployCmd.Dir = tmpDir
 	deployOut, err := deployCmd.CombinedOutput()
 	if err != nil {
@@ -781,7 +787,9 @@ func destroyCloudflareWorker(workerName string) error {
 		return fmt.Errorf("wrangler not found; cannot delete Cloudflare Worker")
 	}
 
-	out, err := exec.Command(wrangler, "delete", "--name", workerName, "--force").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, wrangler, "delete", "--name", workerName, "--force").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("wrangler delete failed: %s", truncate(string(out), 500))
 	}

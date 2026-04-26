@@ -4,6 +4,7 @@
 package tunnel
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // STUN/TURN uses SHA1 per RFC 5389
 	"encoding/binary"
@@ -140,7 +141,7 @@ func StartTURNRelayTunnel(localPort int, timeout time.Duration) (*Handle, error)
 	}
 
 	// Start local SOCKS5 proxy.
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		_ = turnConn.Close()
 		return nil, fmt.Errorf("turn relay: listen %d: %w", localPort, err)
@@ -285,7 +286,9 @@ func handleTURNRelaySocks(client net.Conn, turnConn net.Conn, srv *TURNServerCon
 
 	// Resolve target to IP for TURN peer address.
 	host, portStr, _ := net.SplitHostPort(target)
-	ips, err := net.LookupHost(host)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ips, err := net.DefaultResolver.LookupHost(ctx, host)
+	cancel()
 	if err != nil || len(ips) == 0 {
 		socks5SendFail(client)
 		return

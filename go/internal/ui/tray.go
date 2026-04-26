@@ -6,6 +6,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 
@@ -77,7 +78,7 @@ func RunTray(dashboardPort int) {
 				case <-mDashboard.ClickedCh:
 					url := fmt.Sprintf("http://127.0.0.1:%d", dashboardPort)
 					AppendLog(fmt.Sprintf("Menubar: Opening %s", url))
-					_ = exec.Command("open", url).Start()
+					_ = exec.CommandContext(context.Background(), "open", url).Start()
 
 				case <-mReset.ClickedCh:
 					go func() {

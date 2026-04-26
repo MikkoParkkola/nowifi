@@ -63,7 +63,10 @@ func tryChisel(config *Config, probes *ProbeResults) Result {
 
 		var serverIP string
 		if serverHost != "" {
-			if addrs, err := net.LookupHost(serverHost); err == nil && len(addrs) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			addrs, err := net.DefaultResolver.LookupHost(ctx, serverHost)
+			cancel()
+			if err == nil && len(addrs) > 0 {
 				serverIP = addrs[0]
 			}
 		}

@@ -81,7 +81,7 @@ func StartSSETunnel(serverURL string, localPort int, timeout time.Duration) (*Ha
 		return nil, fmt.Errorf("sse tunnel: probe got HTTP %d content-type %q (want text/event-stream)", resp.StatusCode, ct)
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		return nil, fmt.Errorf("sse tunnel: listen %d: %w", localPort, err)
 	}

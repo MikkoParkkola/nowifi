@@ -154,7 +154,9 @@ func collectDoctorChecks() []doctorCheck {
 
 	// DNS resolution.
 	dnsOK := false
-	addrs, dnsErr := net.LookupHost("cloudflare.com")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	addrs, dnsErr := net.DefaultResolver.LookupHost(ctx, "cloudflare.com")
+	cancel()
 	if dnsErr == nil && len(addrs) > 0 {
 		dnsOK = true
 	}

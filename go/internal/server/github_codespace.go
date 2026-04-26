@@ -73,6 +73,7 @@ func realGhRunner(ctx context.Context, args ...string) ([]byte, error) {
 	if ghPath == "" {
 		return nil, ErrGhNotInstalled
 	}
+	// #nosec G702 -- ghPath comes from PATH lookup for the fixed gh binary.
 	return exec.CommandContext(ctx, ghPath, args...).CombinedOutput()
 }
 

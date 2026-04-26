@@ -343,7 +343,9 @@ func resolvePortalIP(rawURL string) string {
 	if hostname == "" {
 		return ""
 	}
-	ips, err := net.LookupHost(hostname)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ips, err := net.DefaultResolver.LookupHost(ctx, hostname)
+	cancel()
 	if err != nil || len(ips) == 0 {
 		return ""
 	}
@@ -357,7 +359,9 @@ func checkDNSHijack() string {
 	seen := make(map[string]struct{})
 
 	for _, domain := range testDomains {
-		ips, err := net.LookupHost(domain)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ips, err := net.DefaultResolver.LookupHost(ctx, domain)
+		cancel()
 		if err != nil || len(ips) == 0 {
 			continue
 		}

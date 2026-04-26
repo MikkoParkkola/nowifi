@@ -91,7 +91,7 @@ func StartWebTransportTunnel(serverURL string, localPort int, timeout time.Durat
 	}
 	_ = probeStr.Close()
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		_ = session.CloseWithError(0, "")
 		_ = d.Close()

@@ -111,7 +111,7 @@ func StartMASQUETunnel(serverURL string, localPort int, timeout time.Duration) (
 	}
 
 	// Start local SOCKS5 listener.
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
 		_ = qconn.CloseWithError(0, "")
 		return nil, fmt.Errorf("masque tunnel: listen %d: %w", localPort, err)
