@@ -4,9 +4,21 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to rebuild and publish, for example v0.14.3'
+        required: true
+        type: string
 
 permissions:
+  attestations: write
+  artifact-metadata: write
   contents: write
+  id-token: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -36,6 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - uses: actions/setup-go@v6
@@ -50,18 +63,35 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           go build \
             -trimpath \
             -ldflags "-s -w -X main.version=${VERSION}" \
             -o "bin/nowifi-${{ matrix.target }}" \
             ./cmd/nowifi
 
+      - name: Generate SBOM
+        working-directory: go
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0 \
+            app \
+            -json \
+            -licenses \
+            -packages \
+            -main cmd/nowifi \
+            -output "bin/nowifi-${{ matrix.target }}.sbom.cdx.json" \
+            .
+
       - name: Package
         working-directory: go/bin
         run: |
           tar czf "nowifi-${{ matrix.target }}.tar.gz" "nowifi-${{ matrix.target }}"
           shasum -a 256 "nowifi-${{ matrix.target }}.tar.gz" > "nowifi-${{ matrix.target }}.tar.gz.sha256"
+          shasum -a 256 "nowifi-${{ matrix.target }}.sbom.cdx.json" > "nowifi-${{ matrix.target }}.sbom.cdx.json.sha256"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -69,6 +99,8 @@ jobs:
           path: |
             go/bin/nowifi-${{ matrix.target }}.tar.gz
             go/bin/nowifi-${{ matrix.target }}.tar.gz.sha256
+            go/bin/nowifi-${{ matrix.target }}.sbom.cdx.json
+            go/bin/nowifi-${{ matrix.target }}.sbom.cdx.json.sha256
 
   release:
     name: Publish release
@@ -78,6 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v8
@@ -89,17 +122,41 @@ jobs:
         working-directory: dist
         run: |
           ls -la
-          cat *.sha256 > /tmp/checksums.sha256
-          rm -f *.sha256
+          cat ./*.sha256 | sort -k2 > /tmp/checksums.sha256
+          rm -f ./*.sha256
           mv /tmp/checksums.sha256 checksums.sha256
           ls -la
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.1
+        with:
+          cosign-release: 'v3.0.6'
+
+      - name: Sign release files
+        working-directory: dist
+        run: |
+          for artifact in ./*.tar.gz ./*.sbom.cdx.json ./checksums.sha256; do
+            cosign sign-blob \
+              --yes \
+              --output-signature "${artifact}.sig" \
+              --output-certificate "${artifact}.pem" \
+              "${artifact}"
+          done
+
+      - name: Attest release files
+        uses: actions/attest-build-provenance@v4.1.0
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.sbom.cdx.json
+            dist/checksums.sha256
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes "Release ${GITHUB_REF_NAME}"
-          gh release upload "${GITHUB_REF_NAME}" dist/*.tar.gz dist/checksums.sha256 --clobber
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || \
+            gh release create "${RELEASE_TAG}" \
+              --title "${RELEASE_TAG}" \
+              --notes "Release ${RELEASE_TAG}"
+          gh release upload "${RELEASE_TAG}" dist/* --clobber

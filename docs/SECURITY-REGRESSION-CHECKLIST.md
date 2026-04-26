@@ -15,8 +15,9 @@ cd go && go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 cd go && go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 ```
 
-For release changes, also verify the tag workflow publishes all four archives
-and `checksums.sha256`.
+For release changes, also verify the tag workflow publishes all four archives,
+target-specific CycloneDX SBOMs, `checksums.sha256`, Sigstore keyless
+signatures, and GitHub provenance attestations.
 
 ## Review Matrix
 
@@ -31,6 +32,7 @@ and `checksums.sha256`.
 | Bootstrap downloads | Cloud-init executes unchecked remote binaries as root | Pin version and verify SHA-256 before install |
 | Generated URLs and logs | Secrets leak through config display, logs, or result details | Redact `nowifi_token` and provider tokens in every user-visible path |
 | GitHub Actions | CI warnings hide real failures or cache the wrong module | Use Node 24-capable actions and point Go caches at `go/go.sum` |
+| Release artifacts | Users cannot verify binary origin or contents | Publish checksums, SBOMs, keyless signatures, and provenance attestations for every archive |
 
 ## Existing Regression Coverage
 
@@ -51,5 +53,8 @@ and `checksums.sha256`.
   as secret and rotate it with `nowifi server rotate-token` if exposed.
 - VPS bootstrap currently pins chisel `v1.10.1` and verifies its SHA-256 before
   root installation. Update the version and checksum together.
+- Manual release reruns use `.github/workflows/release.yml` with the `tag`
+  input. The workflow checks out that tag, rebuilds all target archives, and
+  uploads assets with `--clobber`.
 - Probe-only and `diagnose` modes must remain read-only: no network mutation,
   audit-record writes, Worker deploys, or tunnel startup.

@@ -46,22 +46,36 @@ Download the latest release for your platform from
 [GitHub Releases](https://github.com/MikkoParkkola/nowifi/releases/latest)
 and verify checksums against
 [`checksums.sha256`](https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256).
+Release assets also include CycloneDX SBOMs, Sigstore keyless signatures
+(`.sig` + `.pem`), and GitHub provenance attestations.
 
 ```bash
 # macOS Apple Silicon
-curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-arm64.tar.gz | tar xz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-arm64.tar.gz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256
+shasum -a 256 -c checksums.sha256 --ignore-missing
+tar xzf nowifi-darwin-arm64.tar.gz
 sudo install -m 0755 nowifi-darwin-arm64 /usr/local/bin/nowifi
 
 # macOS Intel
-curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-amd64.tar.gz | tar xz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-darwin-amd64.tar.gz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256
+shasum -a 256 -c checksums.sha256 --ignore-missing
+tar xzf nowifi-darwin-amd64.tar.gz
 sudo install -m 0755 nowifi-darwin-amd64 /usr/local/bin/nowifi
 
 # Linux x86_64
-curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-amd64.tar.gz | tar xz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-amd64.tar.gz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256
+sha256sum -c checksums.sha256 --ignore-missing
+tar xzf nowifi-linux-amd64.tar.gz
 sudo install -m 0755 nowifi-linux-amd64 /usr/local/bin/nowifi
 
 # Linux ARM64
-curl -L https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-arm64.tar.gz | tar xz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/nowifi-linux-arm64.tar.gz
+curl -LO https://github.com/MikkoParkkola/nowifi/releases/latest/download/checksums.sha256
+sha256sum -c checksums.sha256 --ignore-missing
+tar xzf nowifi-linux-arm64.tar.gz
 sudo install -m 0755 nowifi-linux-arm64 /usr/local/bin/nowifi
 ```
 
