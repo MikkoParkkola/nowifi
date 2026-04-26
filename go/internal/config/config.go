@@ -22,6 +22,7 @@ type Config struct {
 	DNSDomain    string `json:"dns_domain,omitempty"`
 	ICMPServer   string `json:"icmp_server,omitempty"`
 	CFWorkers    string `json:"cf_workers,omitempty"`
+	CFWorkersURL string `json:"cf_workers_url,omitempty"`
 	QUICServer   string `json:"quic_server,omitempty"`
 	NTPServer    string `json:"ntp_server,omitempty"`
 	VPNServer    string `json:"vpn_server,omitempty"`
@@ -43,8 +44,8 @@ type Config struct {
 }
 
 var (
-	cached   *Config
-	cacheMu  sync.Mutex
+	cached  *Config
+	cacheMu sync.Mutex
 )
 
 // Dir returns the nowifi configuration directory (~/.nowifi).
@@ -94,6 +95,12 @@ func Load() (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return Defaults(), err
 	}
+	if cfg.CFWorkers == "" && cfg.CFWorkersURL != "" {
+		cfg.CFWorkers = cfg.CFWorkersURL
+	}
+	if cfg.CFWorkersURL == "" && cfg.CFWorkers != "" {
+		cfg.CFWorkersURL = cfg.CFWorkers
+	}
 
 	cached = cfg
 	return cfg, nil
@@ -107,7 +114,28 @@ func Save(c *Config) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	existing := make(map[string]json.RawMessage)
+	if data, err := os.ReadFile(Path()); err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+
+	for key := range knownConfigKeys() {
+		delete(existing, key)
+	}
+
+	freshData, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	var fresh map[string]json.RawMessage
+	if err := json.Unmarshal(freshData, &fresh); err != nil {
+		return err
+	}
+	for key, value := range fresh {
+		existing[key] = value
+	}
+
+	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -127,6 +155,33 @@ func Save(c *Config) error {
 	cacheMu.Unlock()
 
 	return nil
+}
+
+func knownConfigKeys() map[string]struct{} {
+	return map[string]struct{}{
+		"interface":        {},
+		"tunnel_server":    {},
+		"dns_domain":       {},
+		"icmp_server":      {},
+		"cf_workers":       {},
+		"cf_workers_url":   {},
+		"quic_server":      {},
+		"ntp_server":       {},
+		"vpn_server":       {},
+		"doq_server":       {},
+		"http3_server":     {},
+		"stealth":          {},
+		"auto_login":       {},
+		"ws_server":        {},
+		"ech_server":       {},
+		"ech_config_list":  {},
+		"masque_server":    {},
+		"wt_server":        {},
+		"h2_proxy":         {},
+		"sse_server":       {},
+		"grpc_server":      {},
+		"connectip_server": {},
+	}
 }
 
 // InvalidateCache clears the cached config so the next Load reads from disk.

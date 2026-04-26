@@ -26,7 +26,7 @@ var diagnoseCmd = &cobra.Command{
 	Short: "Read-only network security assessment",
 	Long: `Diagnose network security without exploiting anything.
 
-Scans all protocols, detects portal, checks which of the 19 portal bypass
+Scans protocols, detects portal, checks which portal bypass
 methods WOULD work — without changing any network settings.
 No MAC changes. No tunnels. No proxy. Pure read-only assessment.`,
 	Run: runDiagnose,
@@ -75,8 +75,9 @@ func runDiagnose(cmd *cobra.Command, args []string) {
 
 	// --- Assess bypass methods ---
 	fmt.Print("  Assessing bypass methods... ")
-	feasible := assessMethods(probes, portalInfo)
-	fmt.Printf("%d of 19 portal bypass techniques feasible\n", feasible)
+	bpConfig := buildBypassConfig(portalInfo, flagStealth)
+	feasible := assessMethodsForConfig(probes, portalInfo, bpConfig)
+	fmt.Printf("%d of %d portal bypass techniques feasible\n", feasible, techniques.BypassTechniqueCount())
 
 	// --- Build report data ---
 	rPortal := mapPortalInfo(portalInfo, wifi)
@@ -107,10 +108,18 @@ func runDiagnose(cmd *cobra.Command, args []string) {
 // assessMethods counts how many bypass techniques would be feasible
 // based on probe results. This is a read-only assessment.
 func assessMethods(probes *probe.ProbeResults, portal *detect.PortalInfo) int {
-	return techniques.CountFeasibleBypassTechniques(diagnoseSignals(probes, portal))
+	return assessMethodsForConfig(probes, portal, nil)
+}
+
+func assessMethodsForConfig(probes *probe.ProbeResults, portal *detect.PortalInfo, config *bypass.Config) int {
+	return techniques.CountFeasibleBypassTechniques(diagnoseSignalsForConfig(probes, portal, config))
 }
 
 func diagnoseSignals(probes *probe.ProbeResults, portal *detect.PortalInfo) techniques.BypassTechniqueSignals {
+	return diagnoseSignalsForConfig(probes, portal, nil)
+}
+
+func diagnoseSignalsForConfig(probes *probe.ProbeResults, portal *detect.PortalInfo, config *bypass.Config) techniques.BypassTechniqueSignals {
 	whitelistReachable := false
 	for _, wl := range probes.Whitelists {
 		if wl.IsOpen {
@@ -119,7 +128,7 @@ func diagnoseSignals(probes *probe.ProbeResults, portal *detect.PortalInfo) tech
 		}
 	}
 
-	return techniques.BypassTechniqueSignals{
+	signals := techniques.BypassTechniqueSignals{
 		PortalDetected:     portal != nil && portal.IsCaptive,
 		IPv6Open:           probes.IPv6.IsOpen,
 		DNSOpen:            probes.DNS.IsOpen,
@@ -132,6 +141,21 @@ func diagnoseSignals(probes *probe.ProbeResults, portal *detect.PortalInfo) tech
 		HTTP443Open:        portOpen(probes, 443),
 		HTTP8080Open:       portOpen(probes, 8080),
 	}
+	signals.DoQOpen = probes.QUIC.IsOpen
+	if config != nil {
+		signals.CAPPORTAvailable = config.CAPPORTURL != ""
+		signals.DHCPClasslessRoutesAvailable = len(config.DHCPClasslessRoutes) > 0
+		signals.ECHServerConfigured = config.ECHServerURL != "" && config.ECHConfigListBase64 != ""
+		signals.WSServerConfigured = config.WSServerURL != ""
+		signals.MASQUEServerConfigured = config.MASQUEServerURL != ""
+		signals.WTServerConfigured = config.WTServerURL != ""
+		signals.H2ProxyConfigured = config.H2ProxyURL != ""
+		signals.SSEServerConfigured = config.SSEServerURL != ""
+		signals.GRPCServerConfigured = config.GRPCServerURL != ""
+		signals.ConnectIPServerConfigured = config.ConnectIPServerURL != ""
+		signals.HTTP3Open = probes.QUIC.IsOpen && (config.HTTP3Server != "" || config.TunnelServer != "")
+	}
+	return signals
 }
 
 // portOpen checks if a specific TCP port was found open in probe results.

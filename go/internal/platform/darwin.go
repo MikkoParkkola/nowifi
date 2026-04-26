@@ -633,15 +633,34 @@ func EnableStealth(iface string) (*StealthState, error) {
 		return state, fmt.Errorf("failed to set TTL: %w", err)
 	}
 
+	out6, err := exec.CommandContext(ctx, "sysctl", "-n", "net.inet6.ip6.hlim").Output()
+	if err == nil {
+		if hlim, parseErr := strconv.Atoi(strings.TrimSpace(string(out6))); parseErr == nil {
+			state.OriginalIPv6HopLimit = hlim
+		} else {
+			state.OriginalIPv6HopLimit = 64
+		}
+	} else {
+		state.OriginalIPv6HopLimit = 64
+	}
+
 	// 2. Enable PF rules for traffic normalization.
 	// Scrub normalizes fragmented packets and randomizes IP ID,
 	// preventing OS fingerprinting via IP ID sequencing.
 	pfRules := fmt.Sprintf("scrub out on %s all random-id min-ttl 64 max-mss 1460\n", iface)
 
-	// Write to a temporary anchor file.
-	pfFile := "/tmp/nowifi-stealth.conf"
-	if err := os.WriteFile(pfFile, []byte(pfRules), 0600); err != nil {
+	pfFile, err := os.CreateTemp("", "nowifi-stealth-*.conf")
+	if err != nil {
+		return state, fmt.Errorf("failed to create PF rules file: %w", err)
+	}
+	pfPath := pfFile.Name()
+	defer os.Remove(pfPath)
+	if _, err := pfFile.WriteString(pfRules); err != nil {
+		_ = pfFile.Close()
 		return state, fmt.Errorf("failed to write PF rules: %w", err)
+	}
+	if err := pfFile.Close(); err != nil {
+		return state, fmt.Errorf("failed to close PF rules file: %w", err)
 	}
 
 	// Check if PF is currently enabled.
@@ -653,7 +672,7 @@ func EnableStealth(iface string) (*StealthState, error) {
 	// Load the anchor.
 	ctx4, cancel4 := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel4()
-	if err := exec.CommandContext(ctx4, "pfctl", "-a", "nowifi-stealth", "-f", pfFile).Run(); err != nil {
+	if err := exec.CommandContext(ctx4, "pfctl", "-a", "nowifi-stealth", "-f", pfPath).Run(); err != nil {
 		return state, fmt.Errorf("failed to load PF rules: %w", err)
 	}
 	state.PFRulesAdded = true
@@ -669,9 +688,6 @@ func EnableStealth(iface string) (*StealthState, error) {
 	ctx6, cancel6 := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel6()
 	_ = exec.CommandContext(ctx6, "sysctl", "-w", "net.inet6.ip6.hlim=65").Run()
-
-	// Cleanup temp file.
-	os.Remove(pfFile)
 
 	return state, nil
 }
@@ -691,9 +707,13 @@ func DisableStealth(state *StealthState) {
 	}
 
 	// Restore IPv6 hop limit.
+	ipv6HopLimit := state.OriginalIPv6HopLimit
+	if ipv6HopLimit <= 0 {
+		ipv6HopLimit = 64
+	}
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel2()
-	_ = exec.CommandContext(ctx2, "sysctl", "-w", "net.inet6.ip6.hlim=64").Run()
+	_ = exec.CommandContext(ctx2, "sysctl", "-w", fmt.Sprintf("net.inet6.ip6.hlim=%d", ipv6HopLimit)).Run()
 
 	// Remove PF anchor.
 	if state.PFRulesAdded {

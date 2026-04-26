@@ -4,7 +4,7 @@ GO_RUN := GOTOOLCHAIN=go$(GO_VERSION) go
 GO_TESTFLAGS ?=
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build clean test test-coverage vet lint all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
+.PHONY: build clean test test-short test-coverage vet lint ci all release-archives darwin-arm64 darwin-amd64 linux-arm64 linux-amd64
 
 # Native build (CGO enabled on darwin → menubar included)
 build:
@@ -37,6 +37,9 @@ release-archives: all
 test:
 	$(GO_RUN) test $(GO_TESTFLAGS) ./...
 
+test-short:
+	$(GO_RUN) test -short $(GO_TESTFLAGS) ./...
+
 test-coverage:
 	$(GO_RUN) test -coverprofile=coverage.out ./...
 	$(GO_RUN) tool cover -func=coverage.out
@@ -55,6 +58,8 @@ lint: vet
 	else \
 		echo "govulncheck not installed, skipping"; \
 	fi
+
+ci: build vet test
 
 clean:
 	rm -rf bin/

@@ -71,6 +71,8 @@ sudo install -m 0755 nowifi-linux-arm64 /usr/local/bin/nowifi
 git clone https://github.com/MikkoParkkola/nowifi.git
 cd nowifi/go
 make build
+make test-short
+make ci
 sudo install -m 0755 bin/nowifi /usr/local/bin/nowifi  # optional
 ```
 
@@ -116,6 +118,7 @@ nowifi doctor
 |---------|-------------|
 | `sudo nowifi` | Full audit: detect, probe, bypass, maintain access, restore on exit |
 | `sudo nowifi -p` | Probe only -- find leaks without exploiting them |
+| `sudo nowifi --dry-run` | Read-only audit plan: detect, probe, and show feasible bypasses without mutating state |
 | `sudo nowifi --fast` | Skip stealth timing (faster but more detectable) |
 | `sudo nowifi -t URL` | Use a specific chisel tunnel server |
 | `sudo nowifi --http3-server https://vps:443` | HTTP/3-ALPN tunnel to nowifi server (#22) |
@@ -140,12 +143,15 @@ nowifi doctor
 | `nowifi tools -d` | Checksum-verified auto-download of missing tools (chisel, hysteria, cloudflared) |
 | `nowifi server create` | Create a tunnel server (CF Worker or VPS) |
 | `nowifi server list` | List active tunnel servers |
+| `nowifi server rotate-token` | Redeploy the managed Worker with a fresh `nowifi_token` |
 | `nowifi server destroy` | Destroy a tunnel server |
 | `nowifi server info` | Show which techniques need a server |
+| `nowifi config list` | Show saved defaults such as tunnel endpoints and interface |
 | `sudo nowifi server listen` | Run the HTTP/3-ALPN tunnel server (peer for `--http3-server`) |
 | `nowifi ecosystem` | Show complementary tools (bettercap, wifiphisher, etc.) |
 | `nowifi setup` | Interactive first-time setup wizard |
 | `nowifi doctor` | System health check |
+| `nowifi doctor --json` | Machine-readable health check output |
 | `nowifi ui` | Launch the web dashboard |
 | `nowifi menubar` | Launch the macOS menubar app |
 | `nowifi score` | Grade nearby WiFi networks (A-F) |
@@ -271,8 +277,12 @@ Many techniques work without any server (MAC clone, IPv6, CNA spoof, etc.). Tunn
 
 ```bash
 nowifi server create
-# Deploys a free Cloudflare Worker as HTTPS proxy (100K req/day)
+# Deploys a free authenticated Cloudflare Worker proxy (100K req/day)
 ```
+
+The generated Worker URL includes a `nowifi_token` query parameter. Keep that
+full URL in your nowifi config; tokenless Worker URLs are rejected to avoid
+leaving an open public proxy on your Cloudflare account.
 
 ### VPS (DigitalOcean / Hetzner)
 
@@ -328,7 +338,7 @@ internal/
   cli/                     Cobra commands (audit, diagnose, crack, tools, ...)
   detect/                  Portal detection: canary URLs, DNS hijack, vendor fingerprinting
   probe/                   Leak enumeration: DNS, ICMP, IPv6, HTTPS, QUIC, NTP, DoH, ports
-  bypass/                  22 bypass techniques, ordered most-powerful-first
+  bypass/                  35 portal bypass techniques, ordered most-powerful-first
   crack/                   WPA cracking: PMKID, handshake, hashcat, WPS, smart crack
   tunnel/                  Tunnel management: chisel, iodine, hans, hysteria
   platform/                OS abstraction: macOS (darwin.go) / Linux (linux.go)

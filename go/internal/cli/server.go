@@ -56,6 +56,18 @@ var serverListCmd = &cobra.Command{
 	Run:   runServerList,
 }
 
+// --- server rotate-token ---
+
+var serverRotateTokenCmd = &cobra.Command{
+	Use:   "rotate-token",
+	Short: "Rotate the Cloudflare Worker authentication token",
+	Long: `Rotate the Cloudflare Worker authentication token.
+
+This redeploys the managed Worker with a new nowifi_token and persists the new
+token-bearing URL in ~/.nowifi/config.json.`,
+	Run: runServerRotateToken,
+}
+
 // --- server destroy ---
 
 var (
@@ -188,6 +200,7 @@ func init() {
 	// Register subcommands under server.
 	serverCmd.AddCommand(serverCreateCmd)
 	serverCmd.AddCommand(serverListCmd)
+	serverCmd.AddCommand(serverRotateTokenCmd)
 	serverCmd.AddCommand(serverDestroyCmd)
 	serverCmd.AddCommand(serverInfoCmd)
 	serverCmd.AddCommand(serverClientCmd)
@@ -328,7 +341,7 @@ func runServerList(cmd *cobra.Command, args []string) {
 			created = created[:19]
 		}
 		fmt.Printf("  %-20s  %-16s  %-20s  %-8s  %s\n",
-			s.Provider, ip, s.URL, ttl, dim(created))
+			s.Provider, ip, server.RedactURLSecrets(s.URL), ttl, dim(created))
 	}
 
 	// Check for expired servers.
@@ -339,6 +352,20 @@ func runServerList(cmd *cobra.Command, args []string) {
 			yellow("WARN"), len(expired))
 	}
 
+	fmt.Println()
+}
+
+func runServerRotateToken(cmd *cobra.Command, args []string) {
+	fmt.Println("\nnowifi — Rotating Cloudflare Worker Token")
+	fmt.Println()
+	info, err := server.SetupCloudflareWorker()
+	if err != nil {
+		fmt.Printf("  %s %v\n", red("ERROR"), err)
+		fmt.Println()
+		os.Exit(1)
+	}
+	fmt.Printf("  %s Worker token rotated: %s\n", green("OK"), info.URL)
+	fmt.Printf("  Use: sudo nowifi --cf-workers %s\n", info.URL)
 	fmt.Println()
 }
 

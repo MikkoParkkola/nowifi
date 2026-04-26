@@ -6,6 +6,7 @@ package bypass
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,6 +19,18 @@ var (
 	startDoHTunnelFn  = tunnel.StartDoHTunnel
 	doHTunnelVerifyFn = tunnel.VerifyDirect
 )
+
+type cfWorkersDeps struct {
+	loadConfig   func() map[string]string
+	setupWorker  func() (*server.Info, error)
+	verifyWorker func(string) bool
+}
+
+var defaultCFWorkersDeps = cfWorkersDeps{
+	loadConfig:   server.LoadConfig,
+	setupWorker:  server.SetupCloudflareWorker,
+	verifyWorker: tunnel.VerifyCFWorkersProxy,
+}
 
 // ---------------------------------------------------------------------------
 // Technique 8: DNS tunnel
@@ -116,28 +129,50 @@ func tryQUICTunnel(config *Config, probes *ProbeResults) Result {
 // ---------------------------------------------------------------------------
 
 func tryCFWorkers(config *Config, probes *ProbeResults) Result {
+	return tryCFWorkersWithDeps(config, probes, defaultCFWorkersDeps)
+}
+
+func tryCFWorkersWithDeps(config *Config, probes *ProbeResults, deps cfWorkersDeps) Result {
+	if deps.loadConfig == nil {
+		deps.loadConfig = server.LoadConfig
+	}
+	if deps.setupWorker == nil {
+		deps.setupWorker = server.SetupCloudflareWorker
+	}
+	if deps.verifyWorker == nil {
+		deps.verifyWorker = tunnel.VerifyCFWorkersProxy
+	}
+
 	workerURL := config.CFWorkersURL
 
 	// Auto-discover: if no URL configured, check saved server config.
 	if workerURL == "" {
-		cfg := server.LoadConfig()
+		cfg := deps.loadConfig()
 		if url, ok := cfg["cf_workers_url"]; ok && url != "" {
 			workerURL = url
-			logStatus("Found saved CF Workers URL: %s", workerURL)
+			logStatus("Found saved CF Workers URL: %s", server.RedactURLSecrets(workerURL))
+		} else if url, ok := cfg["cf_workers"]; ok && url != "" {
+			workerURL = url
+			logStatus("Found saved CF Workers URL: %s", server.RedactURLSecrets(workerURL))
 		}
 	}
 
 	// Auto-deploy: if still no URL, try to deploy a free CF Worker.
 	if workerURL == "" {
 		logStatus("No CF Workers URL — attempting auto-deploy (free, ~30s)...")
-		info, err := server.SetupCloudflareWorker()
+		info, err := deps.setupWorker()
 		if err != nil {
 			// Not an error — user just doesn't have wrangler/CF account set up.
 			return Result{Method: CFWorkers, Success: false,
 				Details: fmt.Sprintf("No CF Workers URL and auto-deploy unavailable: %v. Run `nowifi server create` to set up.", err)}
 		}
 		workerURL = info.URL
-		logStatus("Auto-deployed CF Worker: %s", workerURL)
+		logStatus("Auto-deployed CF Worker: %s", server.RedactURLSecrets(workerURL))
+	}
+
+	if !hasNowifiToken(workerURL) {
+		return Result{Method: CFWorkers, Success: false,
+			Details: "CF Workers URL missing nowifi_token; recreate it with `nowifi server create` or `nowifi server create -p cloudflare`."}
 	}
 
 	// Check if Cloudflare is reachable.
@@ -152,11 +187,19 @@ func tryCFWorkers(config *Config, probes *ProbeResults) Result {
 		return Result{Method: CFWorkers, Success: false, Details: "Cloudflare not reachable pre-auth"}
 	}
 
-	if tunnel.VerifyCFWorkersProxy(workerURL) {
-		return successResult(CFWorkers, fmt.Sprintf("CF Worker at %s proxies requests. Traffic goes to trusted Cloudflare IPs.", workerURL))
+	if deps.verifyWorker(workerURL) {
+		return successResult(CFWorkers, fmt.Sprintf("CF Worker at %s proxies requests. Traffic goes to trusted Cloudflare IPs.", server.RedactURLSecrets(workerURL)))
 	}
 
 	return Result{Method: CFWorkers, Success: false, Details: "CF Workers proxy not functional"}
+}
+
+func hasNowifiToken(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.Query().Get("nowifi_token") != ""
 }
 
 // ---------------------------------------------------------------------------

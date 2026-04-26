@@ -23,6 +23,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
 	"github.com/MikkoParkkola/nowifi/internal/report"
+	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +33,11 @@ var tuiBypassMu sync.Mutex
 
 // tuiBypassResults stores bypass results from the pipeline for the exit report.
 var tuiBypassResults []bypass.Result
+
+var (
+	tuiRestoreMu     sync.Mutex
+	tuiRestoreReport *guard.RestoreReport
+)
 
 // realPlatformOps delegates PlatformOps to the platform package.
 type realPlatformOps struct{}
@@ -72,6 +78,36 @@ func anySuccess(results []bypass.Result) bool {
 	return false
 }
 
+func buildBypassConfig(portalInfo *detect.PortalInfo, stealth bool) *bypass.Config {
+	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
+	dhcpRoutes, _ := platform.GetDHCPClasslessRoutes(flagInterface)
+	return &bypass.Config{
+		Interface:           flagInterface,
+		TunnelServer:        flagTunnelServer,
+		DNSDomain:           flagDNSDomain,
+		ICMPServer:          flagICMPServer,
+		QUICServer:          flagQUICServer,
+		NTPServer:           flagNTPServer,
+		VPNServer:           flagVPNServer,
+		CFWorkersURL:        flagCFWorkers,
+		CAPPORTURL:          capportURL,
+		HTTP3Server:         flagHTTP3Server,
+		DoQServer:           flagDoQServer,
+		DHCPClasslessRoutes: dhcpRoutes,
+		WSServerURL:         flagWSServer,
+		ECHServerURL:        flagECHServer,
+		ECHConfigListBase64: flagECHConfigB64,
+		MASQUEServerURL:     flagMASQUEServer,
+		WTServerURL:         flagWTServer,
+		H2ProxyURL:          flagH2Proxy,
+		SSEServerURL:        flagSSEServer,
+		GRPCServerURL:       flagGRPCServer,
+		ConnectIPServerURL:  flagConnectIPServer,
+		InflightProvider:    detectInflightProvider(portalInfo),
+		Stealth:             stealth,
+	}
+}
+
 // runAudit is the default command -- the full audit pipeline.
 // Flow: WiFi info -> portal detection -> leak probing -> interactive choice -> bypass -> report.
 func runAudit(cmd *cobra.Command, args []string) {
@@ -81,6 +117,11 @@ func runAudit(cmd *cobra.Command, args []string) {
 	stealth := flagStealth
 	if flagFast {
 		stealth = false
+	}
+
+	if flagDryRun {
+		runAuditDryRun(startTime, stealth)
+		return
 	}
 
 	// --probe-only and diagnose use the plain scrolling output.
@@ -123,19 +164,33 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 
 	// done is closed when p.Run() returns, signalling the pipeline to stop.
 	done := make(chan struct{})
+	pipelineDone := make(chan struct{})
+	tuiRestoreMu.Lock()
+	tuiRestoreReport = nil
+	tuiRestoreMu.Unlock()
 
 	// Run the full audit pipeline in a background goroutine,
 	// communicating state changes to the TUI via p.Send().
-	go runAuditPipeline(p, startTime, stealth, wifi, wifiErr, portalInfo, done)
+	go func() {
+		defer close(pipelineDone)
+		runAuditPipeline(p, startTime, stealth, wifi, wifiErr, portalInfo, done)
+	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 	}
 	close(done)
+	<-pipelineDone
 
 	// After TUI exits, print summary report.
 	fmt.Println()
 	fmt.Println("  All changes restored. Network is back to original state.")
+	tuiRestoreMu.Lock()
+	report := tuiRestoreReport
+	tuiRestoreMu.Unlock()
+	if report != nil {
+		printRestoreReport(*report)
+	}
 	fmt.Println()
 	// Print concise findings summary.
 	tuiBypassMu.Lock()
@@ -175,9 +230,17 @@ func runAuditTUI(startTime time.Time, stealth bool) {
 func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *platform.WifiInfo, wifiErr error, portalInfo *detect.PortalInfo, done <-chan struct{}) {
 	g, err := guard.New(flagInterface)
 	if err != nil {
-		p.Send(statusMsg{text: fmt.Sprintf("Warning: %v", err)})
+		p.Send(statusMsg{text: fmt.Sprintf("Cannot safely run bypass: %v", err)})
+		time.Sleep(3 * time.Second)
+		p.Send(doneMsg{})
+		return
 	}
-	defer g.Restore()
+	defer func() {
+		report := g.RestoreWithReport()
+		tuiRestoreMu.Lock()
+		tuiRestoreReport = &report
+		tuiRestoreMu.Unlock()
+	}()
 
 	// Check for root.
 	if os.Geteuid() != 0 {
@@ -231,38 +294,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	p.Send(networkMsg{gateway: portalInfo.Gateway, clients: clientCount, rttMs: gwRTT})
 
 	// --- Phase 4: Bypass ---
-	// Discover RFC 8908 CAPPORT URL from DHCP option 114 (non-fatal if absent).
-	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
-	// Discover RFC 3442 option 121 routes (non-fatal if absent) for Wave 21 #23.
-	dhcpRoutes, _ := platform.GetDHCPClasslessRoutes(flagInterface)
-	// Detect inflight provider for technique ordering (Wave 23).
-	inflightProvider := detectInflightProvider(portalInfo)
-
-	bpConfig := &bypass.Config{
-		Interface:           flagInterface,
-		TunnelServer:        flagTunnelServer,
-		DNSDomain:           flagDNSDomain,
-		ICMPServer:          flagICMPServer,
-		QUICServer:          flagQUICServer,
-		NTPServer:           flagNTPServer,
-		VPNServer:           flagVPNServer,
-		CFWorkersURL:        flagCFWorkers,
-		CAPPORTURL:          capportURL,
-		HTTP3Server:         flagHTTP3Server,
-		DoQServer:           flagDoQServer,
-		DHCPClasslessRoutes: dhcpRoutes,
-		WSServerURL:         flagWSServer,
-		ECHServerURL:        flagECHServer,
-		ECHConfigListBase64: flagECHConfigB64,
-		MASQUEServerURL:    flagMASQUEServer,
-		WTServerURL:        flagWTServer,
-		H2ProxyURL:         flagH2Proxy,
-		SSEServerURL:       flagSSEServer,
-		GRPCServerURL:        flagGRPCServer,
-		ConnectIPServerURL:  flagConnectIPServer,
-		InflightProvider:   inflightProvider,
-		Stealth:             stealth,
-	}
+	bpConfig := buildBypassConfig(portalInfo, stealth)
 
 	p.Send(statusMsg{text: "Running bypass techniques..."})
 	bpProbes := mapProbeResults(probes)
@@ -275,7 +307,7 @@ func runAuditPipeline(p *tea.Program, startTime time.Time, stealth bool, wifi *p
 	tuiBypassMu.Unlock()
 
 	// Emit opt-in telemetry for each attempted technique (non-blocking).
-	submitBypassTelemetry(bypassResults, inflightProvider, bypassElapsed)
+	submitBypassTelemetry(bypassResults, bpConfig.InflightProvider, bypassElapsed)
 
 	for _, r := range bypassResults {
 		detail := r.Details
@@ -494,6 +526,89 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 	}
 }
 
+func runAuditDryRun(startTime time.Time, stealth bool) {
+	_ = startTime
+	printBanner("Dry Run (read-only)")
+	fmt.Printf("  Interface: %s\n", flagInterface)
+
+	fmt.Print("1. WiFi  ")
+	wifi, wifiErr := platform.GetWifiInfo(flagInterface)
+	if wifiErr != nil {
+		fmt.Printf("(interface: %s -- %v)\n", flagInterface, wifiErr)
+	} else {
+		fmt.Printf("%s on %s (ch %s, %ddBm)\n", wifi.SSID, flagInterface, wifi.Channel, wifi.RSSI)
+	}
+
+	fmt.Print("2. Portal  ")
+	portalInfo := detect.DetectPortal(flagInterface)
+	if portalInfo.IsCaptive {
+		fmt.Printf("%s portal detected", string(portalInfo.Type))
+		if portalInfo.Vendor != "" {
+			fmt.Printf(" (%s)", portalInfo.Vendor)
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("no captive portal detected")
+	}
+
+	fmt.Print("3. Probing  ")
+	tunnelIP := extractHost(flagTunnelServer)
+	probes := probe.ProbeAll(flagInterface, stealth, tunnelIP)
+	openCount := countOpenPorts(probes)
+	fmt.Printf("done (%d open ports)\n", openCount)
+
+	bpConfig := buildBypassConfig(portalInfo, stealth)
+	signals := diagnoseSignalsForConfig(probes, portalInfo, bpConfig)
+	assessments := techniques.AssessBypassTechniques(signals)
+
+	fmt.Println("4. Plan  no network changes will be made")
+	feasible := 0
+	for _, assessment := range assessments {
+		if !assessment.Feasible {
+			continue
+		}
+		feasible++
+		serverNote := ""
+		if assessment.RequiresServer {
+			serverNote = " (needs server)"
+		}
+		fmt.Printf("  %2d. %s%s — %s\n", assessment.Number, assessment.Name, serverNote, assessment.Reason)
+	}
+	if feasible == 0 {
+		fmt.Println("  No feasible bypass techniques from the current read-only probes.")
+	}
+	fmt.Printf("\n  Would attempt %d of %d portal bypass techniques in canonical order.\n", feasible, techniques.BypassTechniqueCount())
+	fmt.Println("  Dry run did not create a guard, change MAC/proxy/DNS/routes, enable stealth, or start tunnels.")
+	fmt.Println()
+}
+
+func printRestoreReport(report guard.RestoreReport) {
+	status := func(ok bool) string {
+		if ok {
+			return "ok"
+		}
+		return "warning"
+	}
+
+	parts := []string{fmt.Sprintf("tunnels stopped: %d", report.TunnelsStopped)}
+	if report.StealthAttempted {
+		parts = append(parts, "stealth: "+status(report.StealthRestored))
+	}
+	if report.ProxyAttempted {
+		parts = append(parts, "proxy: "+status(report.ProxyCleared))
+	}
+	if report.MACAttempted {
+		parts = append(parts, "MAC: "+status(report.MACRestored))
+	}
+	if report.DNSAttempted {
+		parts = append(parts, "DNS: "+status(report.DNSFlushed))
+	}
+	fmt.Println("  Restore verification: " + strings.Join(parts, ", "))
+	for _, warning := range report.Warnings {
+		fmt.Printf("  %s restore warning: %s\n", yellow("WARN"), warning)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Plain (non-dashboard) audit -- used for --probe-only, no-color, and
 // non-terminal environments. Preserves the original printf-based output.
@@ -570,43 +685,24 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 	// --- Phase 4: Bypass ---
 	var bypassResults []bypass.Result
 	var g *guard.Guard
-	// Discover RFC 8908 CAPPORT URL from DHCP option 114 (non-fatal if absent).
-	capportURL, _ := platform.GetCAPPORTURL(flagInterface)
-	// Discover RFC 3442 option 121 routes (non-fatal if absent) for Wave 21 #23.
-	dhcpRoutes, _ := platform.GetDHCPClasslessRoutes(flagInterface)
-
-	bpConfig := &bypass.Config{
-		Interface:           flagInterface,
-		TunnelServer:        flagTunnelServer,
-		DNSDomain:           flagDNSDomain,
-		ICMPServer:          flagICMPServer,
-		QUICServer:          flagQUICServer,
-		NTPServer:           flagNTPServer,
-		VPNServer:           flagVPNServer,
-		CFWorkersURL:        flagCFWorkers,
-		CAPPORTURL:          capportURL,
-		HTTP3Server:         flagHTTP3Server,
-		DoQServer:           flagDoQServer,
-		DHCPClasslessRoutes: dhcpRoutes,
-		WSServerURL:         flagWSServer,
-		ECHServerURL:        flagECHServer,
-		ECHConfigListBase64: flagECHConfigB64,
-		MASQUEServerURL:     flagMASQUEServer,
-		WTServerURL:         flagWTServer,
-		H2ProxyURL:          flagH2Proxy,
-		SSEServerURL:        flagSSEServer,
-		GRPCServerURL:       flagGRPCServer,
-		ConnectIPServerURL:  flagConnectIPServer,
-		InflightProvider:    detectInflightProvider(portalInfo),
-		Stealth:             stealth,
-	}
+	bpConfig := buildBypassConfig(portalInfo, stealth)
 	if !flagProbeOnly {
 		var guardErr error
 		g, guardErr = guard.New(flagInterface)
 		if guardErr != nil {
-			fmt.Printf("  (warning: %v)\n", guardErr)
+			fmt.Printf("4. Bypass  skipped (cannot capture restore state: %v)\n", guardErr)
+			fmt.Println()
+			rPortal := mapPortalInfo(portalInfo, wifi)
+			rProbes := mapReportProbes(probes)
+			report.PrintTerminal(rPortal, rProbes, nil)
+			fmt.Println()
+			return
 		}
-		defer g.Restore()
+		defer func() {
+			if g != nil {
+				g.Restore()
+			}
+		}()
 
 		if !portalInfo.IsCaptive || flagAutoBypass {
 			fmt.Printf("4. Bypass  ")
@@ -698,7 +794,10 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 
 		maintainSession(ctx, flagInterface, bypassResults, bpConfig, probes, stealth)
 
+		restoreReport := g.RestoreWithReport()
+		g = nil
 		fmt.Println("  All changes restored. Network is back to original state.")
+		printRestoreReport(restoreReport)
 		fmt.Println()
 		return
 	}

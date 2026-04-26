@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -482,8 +483,12 @@ func VerifyCFWorkersProxy(workerURL string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	testURL := workerURL + "/https://connectivitycheck.gstatic.com/generate_204"
+	testURL, token, ok := buildCFWorkerProxyRequest(workerURL, "https://connectivitycheck.gstatic.com/generate_204")
+	if !ok {
+		return false
+	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", testURL, nil)
+	req.Header.Set("X-Nowifi-Token", token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return false
@@ -491,6 +496,22 @@ func VerifyCFWorkersProxy(workerURL string) bool {
 	defer resp.Body.Close()
 
 	return resp.StatusCode == 204
+}
+
+func buildCFWorkerProxyRequest(workerURL, targetURL string) (string, string, bool) {
+	u, err := url.Parse(strings.TrimSpace(workerURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", "", false
+	}
+	q := u.Query()
+	token := q.Get("nowifi_token")
+	if token == "" {
+		return "", "", false
+	}
+	u.RawQuery = ""
+	u.Path = "/" + targetURL
+	u.RawPath = ""
+	return u.String(), token, true
 }
 
 // ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import (
 var getCurrentMAC = platform.GetCurrentMAC
 var flushDNS = platform.FlushDNS
 var geteuid = os.Geteuid
+var clearSystemProxy = platform.ClearSystemProxy
 
 // Guard saves and restores network state. Create with New(), register
 // tunnels with RegisterTunnel(), and call Restore() on exit (or use defer).
@@ -42,8 +43,24 @@ type Guard struct {
 	tunnels      []io.Closer
 	stealthState *platform.StealthState
 	restored     bool
+	report       RestoreReport
 	mu           sync.Mutex
 	sigCh        chan os.Signal
+}
+
+// RestoreReport captures best-effort cleanup verification for operator output
+// and tests. A false Attempted field means that subsystem was not touched.
+type RestoreReport struct {
+	TunnelsStopped   int
+	StealthAttempted bool
+	StealthRestored  bool
+	ProxyAttempted   bool
+	ProxyCleared     bool
+	MACAttempted     bool
+	MACRestored      bool
+	DNSAttempted     bool
+	DNSFlushed       bool
+	Warnings         []string
 }
 
 // New creates a new Guard for the given interface.
@@ -101,10 +118,17 @@ func (g *Guard) StartSignalHandler() {
 //  4. Restore original MAC address (+ DHCP renewal if changed)
 //  5. Flush DNS cache
 func (g *Guard) Restore() {
+	_ = g.RestoreWithReport()
+}
+
+// RestoreWithReport performs Restore and returns cleanup verification details.
+// It is safe to call multiple times; later calls return the first report.
+func (g *Guard) RestoreWithReport() RestoreReport {
 	g.mu.Lock()
 	if g.restored {
+		report := g.report
 		g.mu.Unlock()
-		return
+		return report
 	}
 	g.restored = true
 	// Copy tunnels under lock, then release.
@@ -112,48 +136,78 @@ func (g *Guard) Restore() {
 	copy(tunnels, g.tunnels)
 	g.mu.Unlock()
 
+	report := RestoreReport{}
+	warn := func(format string, args ...interface{}) {
+		msg := fmt.Sprintf(format, args...)
+		report.Warnings = append(report.Warnings, msg)
+		fmt.Fprintf(os.Stderr, "nowifi: warning: %s\n", msg)
+	}
+
 	// Stop signal forwarding.
-	signal.Stop(g.sigCh)
+	if g.sigCh != nil {
+		signal.Stop(g.sigCh)
+	}
 
 	// 1. Stop all tunnel processes.
 	for _, t := range tunnels {
 		if err := t.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "nowifi: warning: failed to stop tunnel: %v\n", err)
+			warn("failed to stop tunnel: %v", err)
+		} else {
+			report.TunnelsStopped++
 		}
 	}
 
 	// 2. Disable traffic stealth (restore TTL, remove PF rules).
 	if g.stealthState != nil {
+		report.StealthAttempted = true
 		platform.DisableStealth(g.stealthState)
+		report.StealthRestored = true
 	}
 
 	// 3. Clear system SOCKS proxy (only if tunnels were registered — they set the proxy).
 	if len(tunnels) > 0 {
-		if err := platform.ClearSystemProxy(g.iface); err != nil {
-			fmt.Fprintf(os.Stderr, "nowifi: warning: failed to clear SOCKS proxy: %v\n", err)
+		report.ProxyAttempted = true
+		if err := clearSystemProxy(g.iface); err != nil {
+			warn("failed to clear SOCKS proxy: %v", err)
+		} else {
+			report.ProxyCleared = true
 		}
 	}
 
 	// 4. Restore original MAC address if it was changed (requires root).
 	if g.originalMAC != "" && geteuid() == 0 {
-		current, err := platform.GetCurrentMAC(g.iface)
+		report.MACAttempted = true
+		current, err := getCurrentMAC(g.iface)
 		if err == nil && current != g.originalMAC {
 			if err := platform.SetMAC(g.iface, g.originalMAC); err != nil {
-				fmt.Fprintf(os.Stderr, "nowifi: warning: failed to restore MAC address: %v\n", err)
+				warn("failed to restore MAC address: %v", err)
 			} else {
+				report.MACRestored = true
 				if err := platform.RenewDHCP(g.iface); err != nil {
-					fmt.Fprintf(os.Stderr, "nowifi: warning: failed to renew DHCP: %v\n", err)
+					warn("failed to renew DHCP: %v", err)
 				}
 			}
+		} else if err != nil {
+			warn("failed to verify MAC address before restore: %v", err)
+		} else {
+			report.MACRestored = true
 		}
 	}
 
 	// 5. Flush DNS cache (best-effort, may need root).
 	if geteuid() == 0 {
+		report.DNSAttempted = true
 		if err := flushDNS(); err != nil {
-			fmt.Fprintf(os.Stderr, "nowifi: warning: failed to flush DNS cache: %v\n", err)
+			warn("failed to flush DNS cache: %v", err)
+		} else {
+			report.DNSFlushed = true
 		}
 	}
+
+	g.mu.Lock()
+	g.report = report
+	g.mu.Unlock()
+	return report
 }
 
 // OriginalMAC returns the MAC address captured when the Guard was created.

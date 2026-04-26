@@ -69,7 +69,8 @@ func runWatch(cmd *cobra.Command, args []string) {
 	// Create state guard to restore on exit.
 	g, err := guard.New(iface)
 	if err != nil {
-		fmt.Printf("  Warning: %v\n\n", err)
+		fmt.Printf("  %s Cannot safely run watch mode: %v\n\n", red("ERROR"), err)
+		return
 	}
 	defer g.Restore()
 

@@ -14,10 +14,13 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,9 +161,16 @@ func LoadConfig() map[string]string {
 	if err != nil {
 		return make(map[string]string)
 	}
-	var cfg map[string]string
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return make(map[string]string)
+	}
+	cfg := make(map[string]string, len(raw))
+	for key, value := range raw {
+		var s string
+		if err := json.Unmarshal(value, &s); err == nil {
+			cfg[key] = s
+		}
 	}
 	return cfg
 }
@@ -168,7 +178,18 @@ func LoadConfig() map[string]string {
 // SaveConfig saves ~/.nowifi/config.json.
 func SaveConfig(cfg map[string]string) error {
 	ensureDir()
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	existing := make(map[string]json.RawMessage)
+	if data, err := os.ReadFile(configFile()); err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+	for key, value := range cfg {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		existing[key] = encoded
+	}
+	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -182,6 +203,21 @@ func persistConfigValue(key, value string) error {
 		return fmt.Errorf("save config %q: %w", key, err)
 	}
 	return nil
+}
+
+// RedactURLSecrets removes nowifi authentication tokens before values are
+// printed in status output, logs, or long-lived reports.
+func RedactURLSecrets(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Has("nowifi_token") {
+		q.Set("nowifi_token", "REDACTED")
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
 }
 
 // getToken gets an API token: explicit arg > config file > error.
@@ -224,8 +260,14 @@ var findWranglerFn = func() string {
 // CloudflareWorkerJS is the Cloudflare Worker JavaScript that acts as
 // a transparent HTTPS proxy for nowifi.
 const CloudflareWorkerJS = `// Cloudflare Worker -- transparent HTTPS proxy for nowifi
+const AUTH_TOKEN = "__NOWIFI_AUTH_TOKEN__";
+
 export default {
   async fetch(request) {
+    if (request.headers.get("X-Nowifi-Token") !== AUTH_TOKEN) {
+      return new Response("unauthorized", { status: 401 });
+    }
+
     const url = new URL(request.url);
     // Path format: /https://target.com/path
     const targetUrl = url.pathname.slice(1) + url.search;
@@ -233,9 +275,11 @@ export default {
       return new Response('nowifi tunnel proxy active', { status: 200 });
     }
     try {
+      const headers = new Headers(request.headers);
+      headers.delete("X-Nowifi-Token");
       const resp = await fetch(targetUrl, {
         method: request.method,
-        headers: request.headers,
+        headers,
         body: request.body,
       });
       return new Response(resp.body, {
@@ -255,7 +299,12 @@ const CloudInitScript = `#!/bin/bash
 set -e
 
 # Install chisel
-curl -sL https://github.com/jpillora/chisel/releases/download/v1.10.1/chisel_1.10.1_linux_amd64.gz | gunzip > /usr/local/bin/chisel
+CHISEL_URL="https://github.com/jpillora/chisel/releases/download/v1.10.1/chisel_1.10.1_linux_amd64.gz"
+CHISEL_SHA256="0525aa3c5d457f2a4075e66221d5125d434bedf15006d3271c213f5cd6ff2230"
+curl -fsSL "$CHISEL_URL" -o /tmp/chisel.gz
+echo "$CHISEL_SHA256  /tmp/chisel.gz" | sha256sum -c -
+gunzip -c /tmp/chisel.gz > /usr/local/bin/chisel
+rm -f /tmp/chisel.gz
 chmod +x /usr/local/bin/chisel
 
 # Start chisel on multiple ports
@@ -319,6 +368,11 @@ func SetupCloudflareWorker() (*Info, error) {
 				"Then retry: nowifi server create -p cloudflare")
 	}
 
+	workerToken, err := generateWorkerToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate worker token: %w", err)
+	}
+
 	// 3. Create temp project directory with worker code.
 	tmpDir, err := os.MkdirTemp("", "nowifi-cf-")
 	if err != nil {
@@ -327,7 +381,7 @@ func SetupCloudflareWorker() (*Info, error) {
 	defer os.RemoveAll(tmpDir)
 
 	workerPath := filepath.Join(tmpDir, "worker.js")
-	if err := os.WriteFile(workerPath, []byte(CloudflareWorkerJS), 0o600); err != nil {
+	if err := os.WriteFile(workerPath, []byte(renderCloudflareWorkerJS(workerToken)), 0o600); err != nil {
 		return nil, fmt.Errorf("write worker.js: %w", err)
 	}
 
@@ -353,7 +407,7 @@ func SetupCloudflareWorker() (*Info, error) {
 	if len(m) < 2 {
 		return nil, fmt.Errorf("deploy succeeded but could not parse worker URL from output:\n%s", truncate(output, 500))
 	}
-	workerURL := strings.TrimRight(m[1], "/")
+	workerURL := withWorkerToken(strings.TrimRight(m[1], "/"), workerToken)
 
 	// Save server info.
 	info := &Info{
@@ -374,6 +428,29 @@ func SetupCloudflareWorker() (*Info, error) {
 	}
 
 	return info, nil
+}
+
+func generateWorkerToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+func renderCloudflareWorkerJS(token string) string {
+	return strings.ReplaceAll(CloudflareWorkerJS, "__NOWIFI_AUTH_TOKEN__", token)
+}
+
+func withWorkerToken(workerURL, token string) string {
+	if token == "" {
+		return workerURL
+	}
+	sep := "?"
+	if strings.Contains(workerURL, "?") {
+		sep = "&"
+	}
+	return workerURL + sep + "nowifi_token=" + token
 }
 
 // findWrangler delegates to the package-level findWranglerFn (overridable for tests).

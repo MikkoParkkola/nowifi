@@ -201,6 +201,33 @@ func TestRestore_StopsAllTunnels(t *testing.T) {
 	}
 }
 
+func TestRestoreWithReport_IdempotentReport(t *testing.T) {
+	origClearProxy := clearSystemProxy
+	clearSystemProxy = func(string) error { return nil }
+	t.Cleanup(func() { clearSystemProxy = origClearProxy })
+
+	g := &Guard{
+		iface:       "en0",
+		originalMAC: "",
+		sigCh:       make(chan os.Signal, 1),
+	}
+	tunnel := &mockCloser{}
+	g.RegisterTunnel(tunnel)
+
+	report := g.RestoreWithReport()
+	if report.TunnelsStopped != 1 {
+		t.Fatalf("TunnelsStopped = %d, want 1", report.TunnelsStopped)
+	}
+	if len(report.Warnings) != 0 {
+		t.Fatalf("Warnings = %v, want none", report.Warnings)
+	}
+
+	second := g.RestoreWithReport()
+	if second.TunnelsStopped != report.TunnelsStopped {
+		t.Fatalf("second report = %+v, want first report %+v", second, report)
+	}
+}
+
 func TestRestore_TunnelCloseError(t *testing.T) {
 	g := &Guard{
 		iface:       "en0",

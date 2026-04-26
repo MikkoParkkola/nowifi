@@ -194,7 +194,7 @@ func TestValidateFlags_ValidCFWorkers(t *testing.T) {
 	flagQUICServer = ""
 	flagNTPServer = ""
 
-	flagCFWorkers = "https://my-worker.example.workers.dev"
+	flagCFWorkers = "https://my-worker.example.workers.dev?nowifi_token=test"
 	if err := validateFlags(rootCmd, nil); err != nil {
 		t.Errorf("validateFlags with valid CF workers: %v", err)
 	}
@@ -378,6 +378,28 @@ func TestValidateFlags_InvalidCFWorkers(t *testing.T) {
 	}
 }
 
+func TestValidateFlags_CFWorkersRequiresToken(t *testing.T) {
+	orig := flagInterface
+	origCF := flagCFWorkers
+	defer func() { flagInterface = orig; flagCFWorkers = origCF }()
+
+	flagInterface = "en0"
+	flagTunnelServer = ""
+	flagDNSDomain = ""
+	flagICMPServer = ""
+	flagQUICServer = ""
+	flagNTPServer = ""
+
+	flagCFWorkers = "https://worker.example.workers.dev"
+	err := validateFlags(rootCmd, nil)
+	if err == nil {
+		t.Error("validateFlags should reject tokenless CF workers URL")
+	}
+	if !strings.Contains(err.Error(), "nowifi_token") {
+		t.Errorf("error should mention nowifi_token: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // validateFlags — all flags set with valid values
 // ---------------------------------------------------------------------------
@@ -406,7 +428,7 @@ func TestValidateFlags_AllFlagsValid(t *testing.T) {
 	flagTunnelServer = "https://tunnel.example.com:8443"
 	flagDNSDomain = "tunnel.example.com"
 	flagICMPServer = "10.0.0.1"
-	flagCFWorkers = "https://worker.example.workers.dev"
+	flagCFWorkers = "https://worker.example.workers.dev?nowifi_token=test"
 	flagQUICServer = "quic.example.com:443"
 	flagNTPServer = "192.168.1.100"
 	flagVPNServer = "vpn.example.com:51820"

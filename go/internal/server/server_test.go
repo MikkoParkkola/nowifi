@@ -48,6 +48,20 @@ func TestNoOverlapBetweenServerlessAndRequired(t *testing.T) {
 	}
 }
 
+func TestRedactURLSecrets(t *testing.T) {
+	raw := "https://worker.example.dev/proxy?nowifi_token=secret-token&x=1"
+	redacted := RedactURLSecrets(raw)
+	if strings.Contains(redacted, "secret-token") {
+		t.Fatalf("RedactURLSecrets leaked token: %q", redacted)
+	}
+	if !strings.Contains(redacted, "nowifi_token=REDACTED") {
+		t.Fatalf("RedactURLSecrets = %q, want REDACTED token", redacted)
+	}
+	if !strings.Contains(redacted, "x=1") {
+		t.Fatalf("RedactURLSecrets dropped unrelated query: %q", redacted)
+	}
+}
+
 func TestServerlessTechniquesNonEmpty(t *testing.T) {
 	for i, tech := range ServerlessTechniques {
 		if tech == "" {
@@ -424,6 +438,19 @@ func TestCloudflareWorkerJS_ContainsFetch(t *testing.T) {
 	}
 }
 
+func TestCloudflareWorkerJS_RequiresToken(t *testing.T) {
+	if !contains(CloudflareWorkerJS, "X-Nowifi-Token") {
+		t.Error("CloudflareWorkerJS should require X-Nowifi-Token")
+	}
+	rendered := renderCloudflareWorkerJS("secret-token")
+	if contains(rendered, "__NOWIFI_AUTH_TOKEN__") {
+		t.Error("rendered worker should not contain token placeholder")
+	}
+	if !contains(rendered, "secret-token") {
+		t.Error("rendered worker should contain generated token")
+	}
+}
+
 func TestCloudInitScript_NonEmpty(t *testing.T) {
 	if CloudInitScript == "" {
 		t.Error("CloudInitScript is empty")
@@ -442,6 +469,9 @@ func TestCloudInitScript_StartsWithShebang(t *testing.T) {
 func TestCloudInitScript_ContainsChisel(t *testing.T) {
 	if !contains(CloudInitScript, "chisel") {
 		t.Error("CloudInitScript should contain 'chisel'")
+	}
+	if !contains(CloudInitScript, "sha256sum -c -") {
+		t.Error("CloudInitScript should verify chisel checksum before install")
 	}
 }
 
@@ -860,7 +890,7 @@ func TestLoadConfig_CorruptFile(t *testing.T) {
 	}
 }
 
-func TestSaveConfig_OverwritesPrevious(t *testing.T) {
+func TestSaveConfig_MergesPrevious(t *testing.T) {
 	_, cleanup := setupTestDir(t)
 	defer cleanup()
 
@@ -868,11 +898,30 @@ func TestSaveConfig_OverwritesPrevious(t *testing.T) {
 	SaveConfig(map[string]string{"key2": "val2"})
 
 	loaded := LoadConfig()
-	if _, ok := loaded["key1"]; ok {
-		t.Error("key1 should not exist after overwrite")
+	if loaded["key1"] != "val1" {
+		t.Errorf("key1 = %q, want val1", loaded["key1"])
 	}
 	if loaded["key2"] != "val2" {
 		t.Errorf("key2 = %q, want val2", loaded["key2"])
+	}
+}
+
+func TestLoadConfig_IgnoresNonStringValues(t *testing.T) {
+	_, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	ensureDir()
+	body := []byte(`{"stealth":true,"tunnel_server":"https://1.2.3.4:443"}`)
+	if err := os.WriteFile(configFile(), body, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loaded := LoadConfig()
+	if loaded["tunnel_server"] != "https://1.2.3.4:443" {
+		t.Fatalf("tunnel_server = %q, want string value", loaded["tunnel_server"])
+	}
+	if _, ok := loaded["stealth"]; ok {
+		t.Fatal("LoadConfig should ignore non-string stealth value")
 	}
 }
 

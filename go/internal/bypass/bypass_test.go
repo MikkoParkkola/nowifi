@@ -16,6 +16,7 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/crack"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
+	"github.com/MikkoParkkola/nowifi/internal/server"
 	"github.com/MikkoParkkola/nowifi/internal/techniques"
 	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 )
@@ -1112,12 +1113,58 @@ func TestTryVPNPort53_Port53InOpenPorts(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTryCFWorkers_NoURL(t *testing.T) {
+	deps := cfWorkersDeps{
+		loadConfig: func() map[string]string { return nil },
+		setupWorker: func() (*server.Info, error) {
+			return nil, fmt.Errorf("disabled in test")
+		},
+		verifyWorker: func(string) bool { return false },
+	}
+
 	probes := &ProbeResults{Cloudflare: ProbeResult{IsOpen: true}}
 	config := &Config{}
 
-	r := tryCFWorkers(config, probes)
+	r := tryCFWorkersWithDeps(config, probes, deps)
 	if r.Success {
 		t.Error("should fail without CF Workers URL")
+	}
+}
+
+func TestTryCFWorkers_RequiresToken(t *testing.T) {
+	probes := &ProbeResults{Cloudflare: ProbeResult{IsOpen: true}}
+	config := &Config{CFWorkersURL: "https://my-worker.workers.dev"}
+
+	r := tryCFWorkersWithDeps(config, probes, cfWorkersDeps{
+		loadConfig:   func() map[string]string { return nil },
+		setupWorker:  func() (*server.Info, error) { return nil, fmt.Errorf("should not deploy") },
+		verifyWorker: func(string) bool { return true },
+	})
+	if r.Success {
+		t.Error("should fail for tokenless CF Workers URL")
+	}
+	if !strings.Contains(r.Details, "missing nowifi_token") {
+		t.Errorf("Details = %q, want missing nowifi_token", r.Details)
+	}
+}
+
+func TestTryCFWorkers_LoadsSavedAliasAndRedactsDetails(t *testing.T) {
+	rawURL := "https://my-worker.workers.dev?nowifi_token=secret"
+	probes := &ProbeResults{Cloudflare: ProbeResult{IsOpen: true}}
+	config := &Config{}
+
+	r := tryCFWorkersWithDeps(config, probes, cfWorkersDeps{
+		loadConfig:   func() map[string]string { return map[string]string{"cf_workers": rawURL} },
+		setupWorker:  func() (*server.Info, error) { return nil, fmt.Errorf("should not deploy") },
+		verifyWorker: func(got string) bool { return got == rawURL },
+	})
+	if !r.Success {
+		t.Fatalf("should succeed with saved cf_workers alias: %+v", r)
+	}
+	if strings.Contains(r.Details, "secret") {
+		t.Fatalf("success details leaked token: %q", r.Details)
+	}
+	if !strings.Contains(r.Details, "nowifi_token=REDACTED") {
+		t.Fatalf("success details should include redacted token: %q", r.Details)
 	}
 }
 
@@ -1127,7 +1174,7 @@ func TestTryCFWorkers_NoURL(t *testing.T) {
 
 func TestTryCFWorkers_CloudflareNotReachable(t *testing.T) {
 	probes := &ProbeResults{Cloudflare: ProbeResult{IsOpen: false}}
-	config := &Config{CFWorkersURL: "https://my-worker.workers.dev"}
+	config := &Config{CFWorkersURL: "https://my-worker.workers.dev?nowifi_token=test"}
 
 	r := tryCFWorkers(config, probes)
 	if r.Success {
@@ -1149,9 +1196,13 @@ func TestTryCFWorkers_CloudflareViaWhitelist(t *testing.T) {
 			{Domain: "cloudflare.com", IsOpen: true},
 		},
 	}
-	config := &Config{CFWorkersURL: "https://my-worker.workers.dev"}
+	config := &Config{CFWorkersURL: "https://my-worker.workers.dev?nowifi_token=test"}
 
-	r := tryCFWorkers(config, probes)
+	r := tryCFWorkersWithDeps(config, probes, cfWorkersDeps{
+		loadConfig:   func() map[string]string { return nil },
+		setupWorker:  func() (*server.Info, error) { return nil, fmt.Errorf("should not deploy") },
+		verifyWorker: func(string) bool { return false },
+	})
 	// Should pass the CF reachability check (via whitelist with "cloudflare").
 	// Will still fail because VerifyCFWorkersProxy requires real connectivity.
 	if strings.Contains(r.Details, "Cloudflare not reachable") {

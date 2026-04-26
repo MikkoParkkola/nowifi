@@ -1,5 +1,9 @@
 # nowifi Go Rewrite -- Architecture Design Document
 
+> Historical design note: this document captures the original Go rewrite plan.
+> Current command behavior and technique counts are maintained in
+> [README.md](../README.md) and `internal/techniques`.
+
 **Status:** Draft
 **Date:** 2026-03-29
 **Author:** Mikko Parkkola

@@ -52,9 +52,10 @@ func (r DHCPRoute) IsDefault() bool {
 
 // StealthState holds the original system settings for stealth restoration.
 type StealthState struct {
-	OriginalTTL  int
-	PFRulesAdded bool // On Linux, reused for iptables rules.
-	PFWasEnabled bool
+	OriginalTTL          int
+	OriginalIPv6HopLimit int
+	PFRulesAdded         bool // On Linux, reused for iptables rules.
+	PFWasEnabled         bool
 }
 
 var (

@@ -10,6 +10,7 @@ package cli
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -17,9 +18,9 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/config"
 	"github.com/MikkoParkkola/nowifi/internal/crack"
-	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/techniques"
+	"github.com/MikkoParkkola/nowifi/internal/tunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -64,29 +65,30 @@ func buildRootLongDescription() string {
 
 // Flags shared across commands or used by the root audit command.
 var (
-	flagInterface    string
-	flagTunnelServer string
-	flagDNSDomain    string
-	flagICMPServer   string
-	flagCFWorkers    string
-	flagQUICServer   string
-	flagNTPServer    string
-	flagVPNServer    string
-	flagHTTP3Server  string
-	flagDoQServer    string
-	flagWSServer     string
-	flagMASQUEServer string
-	flagWTServer     string
-	flagH2Proxy      string
-	flagSSEServer    string
+	flagInterface       string
+	flagTunnelServer    string
+	flagDNSDomain       string
+	flagICMPServer      string
+	flagCFWorkers       string
+	flagQUICServer      string
+	flagNTPServer       string
+	flagVPNServer       string
+	flagHTTP3Server     string
+	flagDoQServer       string
+	flagWSServer        string
+	flagMASQUEServer    string
+	flagWTServer        string
+	flagH2Proxy         string
+	flagSSEServer       string
 	flagGRPCServer      string
 	flagConnectIPServer string
 	flagECHServer       string
-	flagECHConfigB64 string
-	flagStealth      bool
-	flagFast         bool
-	flagProbeOnly    bool
-	flagAutoBypass   bool
+	flagECHConfigB64    string
+	flagStealth         bool
+	flagFast            bool
+	flagProbeOnly       bool
+	flagDryRun          bool
+	flagAutoBypass      bool
 )
 
 func init() {
@@ -97,7 +99,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&flagTunnelServer, "tunnel-server", "t", "", "Chisel tunnel endpoint URL")
 	rootCmd.Flags().StringVarP(&flagDNSDomain, "dns-domain", "d", "", "DNS tunnel domain")
 	rootCmd.Flags().StringVar(&flagICMPServer, "icmp-server", "", "ICMP tunnel server IP")
-	rootCmd.Flags().StringVar(&flagCFWorkers, "cf-workers", "", "Cloudflare Workers proxy URL")
+	rootCmd.Flags().StringVar(&flagCFWorkers, "cf-workers", "", "Authenticated Cloudflare Workers proxy URL")
 	rootCmd.Flags().StringVar(&flagQUICServer, "quic-server", "", "QUIC/Hysteria2 server address")
 	rootCmd.Flags().StringVar(&flagNTPServer, "ntp-server", "", "NTP tunnel server IP")
 	rootCmd.Flags().StringVar(&flagVPNServer, "vpn-server", "", "VPN server (host:port) for VPN-on-port-53 technique")
@@ -115,6 +117,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagStealth, "stealth", true, "Randomized probe timing (default)")
 	rootCmd.Flags().BoolVar(&flagFast, "fast", false, "Skip stealth delays")
 	rootCmd.Flags().BoolVarP(&flagProbeOnly, "probe-only", "p", false, "Probe only, don't exploit")
+	rootCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Read-only audit plan: detect, probe, and show feasible bypasses")
 	rootCmd.Flags().BoolVarP(&flagAutoBypass, "auto", "y", false, "Skip interactive prompt, auto-bypass immediately")
 
 	// Register subcommands.
@@ -125,6 +128,7 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(ecosystemCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(reconCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(uiCmd)
@@ -146,7 +150,8 @@ func loadConfigDefaults(cmd *cobra.Command) {
 
 	// Helper: set flag value from config if the flag wasn't explicitly provided.
 	fill := func(name, val string) {
-		if val != "" && !cmd.Flags().Changed(name) {
+		flag := cmd.Flags().Lookup(name)
+		if flag != nil && val != "" && !cmd.Flags().Changed(name) && flag.Value.String() == "" {
 			_ = cmd.Flags().Set(name, val)
 		}
 	}
@@ -154,7 +159,11 @@ func loadConfigDefaults(cmd *cobra.Command) {
 	fill("tunnel-server", cfg.TunnelServer)
 	fill("dns-domain", cfg.DNSDomain)
 	fill("icmp-server", cfg.ICMPServer)
-	fill("cf-workers", cfg.CFWorkers)
+	cfWorkers := cfg.CFWorkers
+	if cfWorkers == "" {
+		cfWorkers = cfg.CFWorkersURL
+	}
+	fill("cf-workers", cfWorkers)
 	fill("quic-server", cfg.QUICServer)
 	fill("ntp-server", cfg.NTPServer)
 	fill("vpn-server", cfg.VPNServer)
@@ -191,6 +200,10 @@ func saveConfigFromFlags(cmd *cobra.Command) {
 	save("dns-domain", &cfg.DNSDomain, flagDNSDomain)
 	save("icmp-server", &cfg.ICMPServer, flagICMPServer)
 	save("cf-workers", &cfg.CFWorkers, flagCFWorkers)
+	if cmd.Flags().Changed("cf-workers") && flagCFWorkers != "" && flagCFWorkers != cfg.CFWorkersURL {
+		cfg.CFWorkersURL = flagCFWorkers
+		changed = true
+	}
 	save("quic-server", &cfg.QUICServer, flagQUICServer)
 	save("ntp-server", &cfg.NTPServer, flagNTPServer)
 	save("vpn-server", &cfg.VPNServer, flagVPNServer)
@@ -254,6 +267,13 @@ func autoDiscoverServers(cmd *cobra.Command) {
 // validateFlags validates all user-provided CLI flags at the boundary
 // before they can reach any exec.Command call. Rejects invalid input early.
 func validateFlags(cmd *cobra.Command, args []string) error {
+	if cmd.Parent() != nil {
+		if _, err := platform.ValidateInterface(flagInterface); err != nil {
+			return fmt.Errorf("--interface: %w", err)
+		}
+		return nil
+	}
+
 	// Load saved config as defaults for unset flags.
 	loadConfigDefaults(cmd)
 	// Save any new flag values for future runs.
@@ -290,6 +310,9 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	if flagCFWorkers != "" {
 		if _, err := platform.ValidateURL(flagCFWorkers); err != nil {
 			return fmt.Errorf("--cf-workers: %w", err)
+		}
+		if !cfWorkersURLHasToken(flagCFWorkers) {
+			return fmt.Errorf("--cf-workers: missing nowifi_token query parameter; recreate the Worker with `nowifi server create -p cloudflare`")
 		}
 	}
 
@@ -383,6 +406,14 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	// decoding happens at dial time.
 
 	return nil
+}
+
+func cfWorkersURLHasToken(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.Query().Get("nowifi_token") != ""
 }
 
 // Execute runs the root command. Called from main.

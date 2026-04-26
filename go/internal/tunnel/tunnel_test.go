@@ -265,16 +265,21 @@ func TestVerifyDirect_MockSuccess(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestVerifyCFWorkersProxy_Success(t *testing.T) {
+	var gotToken string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The function appends /https://connectivitycheck.gstatic.com/generate_204
 		// to the worker URL, then checks for status 204.
+		gotToken = r.Header.Get("X-Nowifi-Token")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer ts.Close()
 
-	result := VerifyCFWorkersProxy(ts.URL)
+	result := VerifyCFWorkersProxy(ts.URL + "?nowifi_token=test-token")
 	if !result {
 		t.Error("VerifyCFWorkersProxy should return true when mock returns 204")
+	}
+	if gotToken != "test-token" {
+		t.Errorf("X-Nowifi-Token = %q, want test-token", gotToken)
 	}
 }
 
@@ -284,7 +289,7 @@ func TestVerifyCFWorkersProxy_Failure(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	result := VerifyCFWorkersProxy(ts.URL)
+	result := VerifyCFWorkersProxy(ts.URL + "?nowifi_token=test-token")
 	if result {
 		t.Error("VerifyCFWorkersProxy should return false when mock returns 403")
 	}
@@ -303,7 +308,7 @@ func TestVerifyCFWorkersProxy_ServerError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	if VerifyCFWorkersProxy(ts.URL) {
+	if VerifyCFWorkersProxy(ts.URL + "?nowifi_token=test-token") {
 		t.Error("VerifyCFWorkersProxy should return false on 500")
 	}
 }
@@ -315,7 +320,7 @@ func TestVerifyCFWorkersProxy_200NotEnough(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	if VerifyCFWorkersProxy(ts.URL) {
+	if VerifyCFWorkersProxy(ts.URL + "?nowifi_token=test-token") {
 		t.Error("VerifyCFWorkersProxy should return false on 200 (expects 204)")
 	}
 }
@@ -329,11 +334,22 @@ func TestVerifyCFWorkersProxy_URLPath(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	VerifyCFWorkersProxy(ts.URL)
+	VerifyCFWorkersProxy(ts.URL + "?nowifi_token=test-token")
 
 	expected := "/https://connectivitycheck.gstatic.com/generate_204"
 	if gotPath != expected {
 		t.Errorf("path = %q, want %q", gotPath, expected)
+	}
+}
+
+func TestVerifyCFWorkersProxy_RequiresToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	if VerifyCFWorkersProxy(ts.URL) {
+		t.Error("VerifyCFWorkersProxy should reject authless worker URLs")
 	}
 }
 

@@ -42,6 +42,7 @@ func TestSubcommandsRegistered(t *testing.T) {
 		"server",
 		"ecosystem",
 		"doctor",
+		"config",
 		"setup",
 		"ui",
 		"menubar",
@@ -66,10 +67,10 @@ func TestSubcommandsRegistered(t *testing.T) {
 }
 
 func TestSubcommandCount(t *testing.T) {
-	// At minimum, the 13 expected subcommands should be present.
+	// At minimum, the expected subcommands should be present.
 	count := len(rootCmd.Commands())
-	if count < 13 {
-		t.Errorf("rootCmd has %d subcommands, want >= 13", count)
+	if count < 14 {
+		t.Errorf("rootCmd has %d subcommands, want >= 14", count)
 	}
 }
 

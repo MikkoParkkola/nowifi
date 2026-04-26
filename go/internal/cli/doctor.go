@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/toolchain"
 	"github.com/spf13/cobra"
 )
+
+var doctorJSON bool
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -33,31 +36,77 @@ Quick non-interactive health check. Shows OK/FAIL for each item:
 	Run: runDoctor,
 }
 
+type doctorReport struct {
+	OK     bool          `json:"ok"`
+	Checks []doctorCheck `json:"checks"`
+}
+
+type doctorCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func init() {
+	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output machine-readable JSON")
+}
+
 func runDoctor(cmd *cobra.Command, args []string) {
+	checks := collectDoctorChecks()
+	allOK := true
+	for _, c := range checks {
+		if !c.OK {
+			allOK = false
+			break
+		}
+	}
+
+	if doctorJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(doctorReport{OK: allOK, Checks: checks}); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "doctor json: %v\n", err)
+		}
+		return
+	}
+
 	fmt.Println("\nnowifi — Doctor")
 	fmt.Println()
 
-	allOK := true
-
-	check := func(label string, ok bool, detail string) {
+	for _, c := range checks {
 		statusStr := green("OK")
-		if !ok {
+		if !c.OK {
 			statusStr = red("FAIL")
-			allOK = false
 		}
-		msg := fmt.Sprintf("  %-6s %s", statusStr, label)
-		if detail != "" {
-			msg += "  " + detail
+		msg := fmt.Sprintf("  %-6s %s", statusStr, c.Name)
+		if c.Detail != "" {
+			msg += "  " + c.Detail
 		}
 		fmt.Println(msg)
 	}
 
+	// Summary.
+	fmt.Println()
+	if allOK {
+		fmt.Println("  All checks passed.")
+	} else {
+		fmt.Println("  Some checks failed. See above for details.")
+	}
+	fmt.Println()
+}
+
+func collectDoctorChecks() []doctorCheck {
+	checks := make([]doctorCheck, 0, 12)
+	add := func(label string, ok bool, detail string) {
+		checks = append(checks, doctorCheck{Name: label, OK: ok, Detail: detail})
+	}
+
 	// Go runtime.
-	check("Go runtime", true, fmt.Sprintf("Go %s, %s/%s", runtime.Version(), runtime.GOOS, runtime.GOARCH))
+	add("Go runtime", true, fmt.Sprintf("Go %s, %s/%s", runtime.Version(), runtime.GOOS, runtime.GOARCH))
 
 	// OS.
 	osOK := runtime.GOOS == "darwin" || runtime.GOOS == "linux"
-	check("Operating system", osOK, fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
+	add("Operating system", osOK, fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 
 	// WiFi connected.
 	iface := flagInterface
@@ -69,7 +118,7 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	} else if wifiErr != nil {
 		wifiDetail = fmt.Sprintf("%s: %v", iface, wifiErr)
 	}
-	check("WiFi interface", wifiOK, wifiDetail)
+	add("WiFi interface", wifiOK, wifiDetail)
 
 	// Sudo access.
 	sudoOK := os.Geteuid() == 0
@@ -77,7 +126,7 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	if !sudoOK {
 		sudoDetail = "run with sudo for full functionality"
 	}
-	check("Sudo access", sudoOK, sudoDetail)
+	add("Sudo access", sudoOK, sudoDetail)
 
 	// Core tools (use toolchain.FindTool for comprehensive lookup).
 	coreTools := []string{"chisel", "hysteria", "cloudflared"}
@@ -88,7 +137,7 @@ func runDoctor(cmd *cobra.Command, args []string) {
 		if !ok {
 			detail = "missing (nowifi tools -d)"
 		}
-		check(fmt.Sprintf("Tool: %s", t), ok, detail)
+		add(fmt.Sprintf("Tool: %s", t), ok, detail)
 	}
 
 	// Optional tools.
@@ -98,9 +147,9 @@ func runDoctor(cmd *cobra.Command, args []string) {
 		ok := lookErr == nil
 		detail := path
 		if !ok {
-			detail = dim("optional, not installed")
+			detail = "optional, not installed"
 		}
-		check(fmt.Sprintf("Tool: %s", t), ok, detail)
+		add(fmt.Sprintf("Tool: %s", t), ok, detail)
 	}
 
 	// DNS resolution.
@@ -113,7 +162,7 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	if !dnsOK {
 		dnsDetail = "cannot resolve cloudflare.com"
 	}
-	check("DNS resolution", dnsOK, dnsDetail)
+	add("DNS resolution", dnsOK, dnsDetail)
 
 	// Internet reachability.
 	inetOK := false
@@ -132,14 +181,7 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	if !inetOK {
 		inetDetail = "connectivity check failed (expected behind captive portal)"
 	}
-	check("Internet reachable", inetOK, inetDetail)
+	add("Internet reachable", inetOK, inetDetail)
 
-	// Summary.
-	fmt.Println()
-	if allOK {
-		fmt.Println("  All checks passed.")
-	} else {
-		fmt.Println("  Some checks failed. See above for details.")
-	}
-	fmt.Println()
+	return checks
 }

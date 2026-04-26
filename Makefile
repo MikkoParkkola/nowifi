@@ -3,15 +3,20 @@ GO ?= go
 GO_RUN = GOTOOLCHAIN=$(GOTOOLCHAIN) $(GO)
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION)"
+VERSION := $(patsubst v%,%,$(VERSION))
+LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build install safe-clean clean force-clean
+.PHONY: build install ci safe-clean clean force-clean
 
 build:
 	cd go && $(GO_RUN) build $(LDFLAGS) -o ../bin/nowifi ./cmd/nowifi
 
 install:
 	cd go && $(GO_RUN) build $(LDFLAGS) -o ~/.local/bin/nowifi ./cmd/nowifi
+
+ci:
+	cd go && $(MAKE) ci
+	git diff --check
 
 safe-clean: install
 	rm -rf bin/

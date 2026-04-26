@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -67,23 +68,23 @@ type TURNServerConfig struct {
 
 // STUN/TURN message types (RFC 5389, RFC 5766).
 const (
-	stunBindingRequest     = 0x0001
-	stunBindingResponse    = 0x0101
-	turnAllocateRequest    = 0x0003
-	turnAllocateResponse   = 0x0103
-	turnAllocateError      = 0x0113
-	turnChannelBind        = 0x0009
-	turnChannelBindResp    = 0x0109
-	turnChannelData        = 0x4000 // Channel numbers 0x4000-0x7FFF
+	stunBindingRequest   = 0x0001
+	stunBindingResponse  = 0x0101
+	turnAllocateRequest  = 0x0003
+	turnAllocateResponse = 0x0103
+	turnAllocateError    = 0x0113
+	turnChannelBind      = 0x0009
+	turnChannelBindResp  = 0x0109
+	turnChannelData      = 0x4000 // Channel numbers 0x4000-0x7FFF
 )
 
 // STUN attribute types.
 const (
-	attrMappedAddress    = 0x0001
-	attrUsername          = 0x0006
-	attrMessageIntegrity = 0x0008
-	attrXORMappedAddress = 0x0020
-	attrLifetime         = 0x000D
+	attrMappedAddress      = 0x0001
+	attrUsername           = 0x0006
+	attrMessageIntegrity   = 0x0008
+	attrXORMappedAddress   = 0x0020
+	attrLifetime           = 0x000D
 	attrRequestedTransport = 0x0019
 	attrXORRelayedAddress  = 0x0016
 	attrXORPeerAddress     = 0x0012
@@ -160,7 +161,7 @@ func StartTURNRelayTunnel(localPort int, timeout time.Duration) (*Handle, error)
 }
 
 func dialTURN(srv *TURNServerConfig, timeout time.Duration) (net.Conn, error) {
-	addr := fmt.Sprintf("%s:%d", srv.Host, srv.Port)
+	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
 	dialer := &net.Dialer{Timeout: timeout}
 
 	if srv.UseTLS {

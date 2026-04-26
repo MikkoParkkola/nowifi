@@ -114,6 +114,71 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestSavePreservesUnknownKeys(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	dir := filepath.Join(tmp, ".nowifi")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	initial := []byte(`{"digitalocean_token":"do_secret","cf_workers_url":"https://worker.example.dev?nowifi_token=abc"}`)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), initial, 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := Save(&Config{Interface: "wlan0", Stealth: true}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var loaded map[string]json.RawMessage
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("Unmarshal map: %v", err)
+	}
+	if string(loaded["digitalocean_token"]) != `"do_secret"` {
+		t.Fatalf("digitalocean_token was not preserved: %#v", loaded)
+	}
+	if _, ok := loaded["cf_workers_url"]; ok {
+		t.Fatalf("known cf_workers_url should be unset by the typed config save: %#v", loaded)
+	}
+}
+
+func TestLoadCFWorkersURLAlias(t *testing.T) {
+	InvalidateCache()
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", origHome)
+	defer InvalidateCache()
+
+	dir := filepath.Join(tmp, ".nowifi")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	url := "https://worker.example.dev?nowifi_token=abc"
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"cf_workers_url":"`+url+`"}`), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.CFWorkers != url || cfg.CFWorkersURL != url {
+		t.Fatalf("CFWorkers alias load = %q/%q, want %q", cfg.CFWorkers, cfg.CFWorkersURL, url)
+	}
+}
+
 func TestSaveCreatesDirectory(t *testing.T) {
 	InvalidateCache()
 
