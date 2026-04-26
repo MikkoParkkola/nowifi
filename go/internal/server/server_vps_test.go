@@ -8,6 +8,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -925,7 +926,7 @@ func TestCFWorkerProvider_Create_CallsSetupCloudflareWorker(t *testing.T) {
 	setFindWrangler(t, func() string { return wPath })
 
 	p := cfWorkerProvider{}
-	info, err := p.Create(nil, CreateOpts{}) //nolint:staticcheck
+	info, err := p.Create(context.TODO(), CreateOpts{})
 	if err != nil {
 		t.Fatalf("cfWorkerProvider.Create: %v", err)
 	}
@@ -943,7 +944,7 @@ func TestCFWorkerProvider_Destroy_CallsDestroyCloudflareWorker(t *testing.T) {
 	SaveServer(&Info{Provider: "cloudflare_worker", ServerID: "p", Status: "active"})
 
 	p := cfWorkerProvider{}
-	if err := p.Destroy(nil, &Info{ServerID: "p"}, ""); err != nil { //nolint:staticcheck
+	if err := p.Destroy(context.TODO(), &Info{ServerID: "p"}, ""); err != nil {
 		t.Fatalf("cfWorkerProvider.Destroy: %v", err)
 	}
 }
@@ -955,7 +956,7 @@ func TestCFQuickProvider_Destroy_CallsDestroyCloudflareQuick(t *testing.T) {
 	SaveServer(info)
 
 	p := cfQuickProvider{}
-	if err := p.Destroy(nil, info, ""); err != nil { //nolint:staticcheck
+	if err := p.Destroy(context.TODO(), info, ""); err != nil {
 		t.Fatalf("cfQuickProvider.Destroy: %v", err)
 	}
 }
