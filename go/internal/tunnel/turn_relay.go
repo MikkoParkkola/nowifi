@@ -94,7 +94,10 @@ const (
 	attrSoftware           = 0x8022
 )
 
-const stunMagicCookie = 0x2112A442
+const (
+	stunMagicCookie = 0x2112A442
+	maxUint16Len    = 1<<16 - 1
+)
 
 // StartTURNRelayTunnel connects to a public TURN server and creates a local
 // SOCKS5 proxy that relays traffic through the TURN allocation. Zero-config.
@@ -335,10 +338,13 @@ func handleTURNRelaySocks(client net.Conn, turnConn net.Conn, srv *TURNServerCon
 				done <- struct{}{}
 				return
 			}
+			if n > maxUint16Len {
+				n = maxUint16Len
+			}
 			// Wrap in ChannelData header.
 			hdr := make([]byte, 4)
 			binary.BigEndian.PutUint16(hdr[0:2], channelNum)
-			binary.BigEndian.PutUint16(hdr[2:4], uint16(n))
+			binary.BigEndian.PutUint16(hdr[2:4], uint16(n)) //nolint:gosec // n clamped to maxUint16Len above
 			_, _ = relayConn.Write(append(hdr, buf[:n]...))
 		}
 	}()
@@ -422,9 +428,14 @@ func makeTransactionID() [12]byte {
 }
 
 func buildSTUNMessage(msgType uint16, txID [12]byte, attrs []byte) []byte {
+	attrLen := len(attrs)
+	if attrLen > maxUint16Len {
+		attrLen = maxUint16Len
+		attrs = attrs[:attrLen]
+	}
 	msg := make([]byte, 20+len(attrs))
 	binary.BigEndian.PutUint16(msg[0:2], msgType)
-	binary.BigEndian.PutUint16(msg[2:4], uint16(len(attrs)))
+	binary.BigEndian.PutUint16(msg[2:4], uint16(attrLen)) //nolint:gosec // attrLen clamped to maxUint16Len above
 	binary.BigEndian.PutUint32(msg[4:8], stunMagicCookie)
 	copy(msg[8:20], txID[:])
 	copy(msg[20:], attrs)
@@ -432,9 +443,14 @@ func buildSTUNMessage(msgType uint16, txID [12]byte, attrs []byte) []byte {
 }
 
 func appendSTUNAttr(buf []byte, attrType uint16, value []byte) []byte {
+	valueLen := len(value)
+	if valueLen > maxUint16Len {
+		valueLen = maxUint16Len
+		value = value[:valueLen]
+	}
 	hdr := make([]byte, 4)
 	binary.BigEndian.PutUint16(hdr[0:2], attrType)
-	binary.BigEndian.PutUint16(hdr[2:4], uint16(len(value)))
+	binary.BigEndian.PutUint16(hdr[2:4], uint16(valueLen)) //nolint:gosec // valueLen clamped to maxUint16Len above
 	buf = append(buf, hdr...)
 	buf = append(buf, value...)
 	// Pad to 4-byte boundary.
@@ -445,12 +461,16 @@ func appendSTUNAttr(buf []byte, attrType uint16, value []byte) []byte {
 }
 
 func encodeXORAddress(ip net.IP, port int, txID [12]byte) []byte {
+	if port < 0 || port > maxUint16Len {
+		return nil
+	}
+	port16 := uint16(port) //nolint:gosec // port range checked above
 	ip4 := ip.To4()
 	if ip4 == nil {
 		// IPv6 XOR-Mapped-Address.
 		buf := make([]byte, 20)
 		buf[1] = 0x02 // IPv6
-		binary.BigEndian.PutUint16(buf[2:4], uint16(port)^uint16(stunMagicCookie>>16))
+		binary.BigEndian.PutUint16(buf[2:4], port16^uint16(stunMagicCookie>>16))
 		cookie := make([]byte, 4)
 		binary.BigEndian.PutUint32(cookie, stunMagicCookie)
 		xorKey := append(cookie, txID[:]...)
@@ -462,7 +482,7 @@ func encodeXORAddress(ip net.IP, port int, txID [12]byte) []byte {
 
 	buf := make([]byte, 8)
 	buf[1] = 0x01 // IPv4
-	binary.BigEndian.PutUint16(buf[2:4], uint16(port)^uint16(stunMagicCookie>>16))
+	binary.BigEndian.PutUint16(buf[2:4], port16^uint16(stunMagicCookie>>16))
 	cookieBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(cookieBytes, stunMagicCookie)
 	for i := 0; i < 4; i++ {

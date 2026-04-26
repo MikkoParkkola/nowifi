@@ -77,7 +77,10 @@ func ListenSSERelay(cfg HTTP3ServerConfig) (*SSERelayServer, error) {
 	mux.HandleFunc("/stream", srv.handleStream)
 	mux.HandleFunc("/send", srv.handleSend)
 
-	srv.server = &http.Server{Handler: mux}
+	srv.server = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	go func() {
 		if err := srv.server.Serve(ln); err != nil && err != http.ErrServerClosed {

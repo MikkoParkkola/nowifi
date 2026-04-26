@@ -17,6 +17,8 @@ import (
 	"time"
 )
 
+const maxGRPCPayloadSize = 4 * 1024 * 1024
+
 // ----------------------------------------------------------------------------
 // Wave 22 technique #31 — gRPC bidirectional streaming tunnel.
 //
@@ -92,7 +94,7 @@ func StartGRPCTunnel(serverURL string, localPort int, timeout time.Duration) (*H
 
 	// HTTP/2 transport for gRPC requests.
 	grpcTransport := &http.Transport{
-		TLSClientConfig:  tlsConf,
+		TLSClientConfig:   tlsConf,
 		ForceAttemptHTTP2: true,
 	}
 
@@ -204,6 +206,7 @@ func handleGRPCSocks(client net.Conn, transport *http.Transport, serverBase stri
 		socks5SendFail(client)
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	// SOCKS5 success.
 	if err := socks5SendSuccess(client); err != nil {
@@ -255,9 +258,12 @@ func handleGRPCSocks(client net.Conn, transport *http.Transport, serverBase stri
 
 // grpcWriteFrame writes a gRPC 5-byte framed message: [compressed(1)][length(4)][payload].
 func grpcWriteFrame(w io.Writer, payload []byte) error {
+	if len(payload) > maxGRPCPayloadSize {
+		return errors.New("grpc payload too large")
+	}
 	hdr := make([]byte, 5)
-	hdr[0] = 0 // not compressed
-	binary.BigEndian.PutUint32(hdr[1:], uint32(len(payload)))
+	hdr[0] = 0                                                // not compressed
+	binary.BigEndian.PutUint32(hdr[1:], uint32(len(payload))) //nolint:gosec // len checked against maxGRPCPayloadSize above
 	if _, err := w.Write(hdr); err != nil {
 		return err
 	}
@@ -272,7 +278,7 @@ func grpcReadFrame(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(hdr[1:])
-	if length > 4*1024*1024 { // 4MB safety limit
+	if length > maxGRPCPayloadSize {
 		return nil, errors.New("grpc frame too large")
 	}
 	data := make([]byte, length)

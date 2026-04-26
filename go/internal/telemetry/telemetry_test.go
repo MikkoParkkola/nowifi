@@ -220,7 +220,6 @@ func TestTelemetry_EmptyEventRejected(t *testing.T) {
 	cfg := Config{Enabled: true, Endpoint: srv.URL}
 	_ = SaveConfig(cfg)
 
-	// Synchronous path does not reject empty; only async Submit() does.
 	// Verify the async fire-and-forget Submit skips empty techniques.
 	Submit(Event{}, "v0")
 	time.Sleep(200 * time.Millisecond) // Let any goroutine finish.

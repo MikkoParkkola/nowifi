@@ -4,9 +4,10 @@
 package tunnel
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -28,12 +29,20 @@ func TestSSERelayProbe(t *testing.T) {
 	defer func() { _ = srv.Close() }()
 
 	// Probe endpoint should return text/event-stream.
-	resp, err := http.Get(fmt.Sprintf("https://127.0.0.1:%s/stream?probe=1", portFromAddr(srv.Addr())))
+	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("https://127.0.0.1:%s/stream?probe=1", portFromAddr(srv.Addr())), nil)
+	if reqErr != nil {
+		t.Fatalf("probe request: %v", reqErr)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		// Expected: TLS error since we're using HTTP not HTTPS.
 		// Use the insecure client.
 		client := insecureHTTPClient()
-		resp, err = client.Get(fmt.Sprintf("https://%s/stream?probe=1", srv.Addr()))
+		req, reqErr = http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("https://%s/stream?probe=1", srv.Addr()), nil)
+		if reqErr != nil {
+			t.Fatalf("fallback probe request: %v", reqErr)
+		}
+		resp, err = client.Do(req)
 		if err != nil {
 			t.Fatalf("probe: %v", err)
 		}
@@ -95,12 +104,16 @@ func TestSSERelayE2E(t *testing.T) {
 	target := echoLn.Addr().String()
 	streamURL := fmt.Sprintf("https://%s/stream?target=%s", srv.Addr(), target)
 
-	req, _ := http.NewRequest("GET", streamURL, nil)
+	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, streamURL, nil)
+	if reqErr != nil {
+		t.Fatalf("stream request build: %v", reqErr)
+	}
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	sessionID := resp.Header.Get("X-Session-Id")
 	if sessionID == "" {
@@ -112,7 +125,13 @@ func TestSSERelayE2E(t *testing.T) {
 	testData := "hello from SSE tunnel"
 	encoded := base64.StdEncoding.EncodeToString([]byte(testData))
 	sendURL := fmt.Sprintf("https://%s/send?session=%s", srv.Addr(), sessionID)
-	postResp, err := client.Post(sendURL, "text/plain", strings.NewReader(encoded))
+	postReq, reqErr := http.NewRequestWithContext(context.Background(), http.MethodPost, sendURL, strings.NewReader(encoded))
+	if reqErr != nil {
+		_ = resp.Body.Close()
+		t.Fatalf("send request build: %v", reqErr)
+	}
+	postReq.Header.Set("Content-Type", "text/plain")
+	postResp, err := client.Do(postReq)
 	if err != nil {
 		_ = resp.Body.Close()
 		t.Fatalf("send: %v", err)

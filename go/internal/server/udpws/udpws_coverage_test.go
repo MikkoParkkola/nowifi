@@ -1373,22 +1373,6 @@ func TestPump_Direct_NonTimeoutReadError(t *testing.T) {
 // Direct white-box handleWS tests
 // ---------------------------------------------------------------------------
 
-// handleWSTestServer starts an HTTP/WS listener, calls handleWS for each
-// incoming connection using the provided Server config, and returns the
-// listen address and a stop function.
-func handleWSTestServer(t *testing.T, srv *Server) (addr string, stop func()) {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.Handle("/udp", websocket.Handler(srv.handleWS))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("handleWSTestServer listen: %v", err)
-	}
-	hs := &http.Server{Handler: mux}
-	go hs.Serve(ln)
-	return ln.Addr().String(), func() { hs.Close() }
-}
-
 // TestHandleWS_Direct_UDPWriteError triggers the `break` in the WS→UDP loop.
 // handleWS.Write to the UDP target must fail.  We use a special-purpose UDP
 // "server" that the test owns: after handleWS dials it, we close the listening

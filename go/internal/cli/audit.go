@@ -759,8 +759,10 @@ func runAuditPlain(startTime time.Time, stealth bool) {
 			break
 		}
 	}
-	if err := capture.SaveAudit(record); err != nil {
-		fmt.Printf("  (warning: failed to save audit record: %v)\n", err)
+	if !flagProbeOnly {
+		if err := capture.SaveAudit(record); err != nil {
+			fmt.Printf("  (warning: failed to save audit record: %v)\n", err)
+		}
 	}
 
 	// --- Phase 7: Session persistence ---

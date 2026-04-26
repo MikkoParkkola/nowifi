@@ -319,6 +319,20 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
+func TestRenderTerminalOutput_ColorDisabled(t *testing.T) {
+	orig := colorEnabled
+	t.Cleanup(func() { colorEnabled = orig })
+	colorEnabled = false
+
+	got := renderTerminalOutput(red + "HIGH" + reset)
+	if got != "HIGH" {
+		t.Fatalf("renderTerminalOutput() = %q, want HIGH", got)
+	}
+	if strings.Contains(got, "\033") {
+		t.Fatalf("renderTerminalOutput() retained ANSI escape: %q", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test: nvl helper
 // ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
-
+	"time"
 )
 
 // ----------------------------------------------------------------------------
@@ -90,7 +90,8 @@ func ListenAllModes(cfg HTTP3ServerConfig) (*AllModesServer, error) {
 	}
 
 	srv.server = &http.Server{
-		Handler: mux,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() { _ = srv.server.Serve(listener) }()

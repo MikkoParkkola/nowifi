@@ -43,8 +43,8 @@ func TestTURN_PublicTURNServersHaveValidPorts(t *testing.T) {
 
 func TestTURN_MakeTransactionID_ReturnsTwelveBytes(t *testing.T) {
 	txID := makeTransactionID()
-	if len(txID) != 12 {
-		t.Fatalf("makeTransactionID returned %d bytes, want 12", len(txID))
+	if len(txID[:]) != 12 {
+		t.Fatalf("makeTransactionID returned %d bytes, want 12", len(txID[:]))
 	}
 }
 

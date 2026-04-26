@@ -96,7 +96,7 @@ func StartH2ConnectTunnel(serverURL string, localPort int, timeout time.Duration
 
 	// Create HTTP/2 transport to the proxy.
 	h2Transport := &http.Transport{
-		TLSClientConfig:  tlsConf,
+		TLSClientConfig:   tlsConf,
 		ForceAttemptHTTP2: true,
 	}
 
@@ -212,6 +212,7 @@ func handleH2Socks(client net.Conn, transport *http.Transport, proxyBase string)
 		socks5SendFail(client)
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	// SOCKS5 success.
 	if err := socks5SendSuccess(client); err != nil {

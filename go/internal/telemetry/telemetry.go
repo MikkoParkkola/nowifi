@@ -14,10 +14,12 @@
 //   - Endpoint is a single public Cloudflare Worker (free tier).
 //
 // CONFIG:
-//   ~/.nowifi/telemetry.json  — stores the opt-in flag only
+//
+//	~/.nowifi/telemetry.json  — stores the opt-in flag only
 //
 // USAGE (internal):
-//   telemetry.Submit(Event{Technique: "warp_tunnel", Success: true, ...})
+//
+//	telemetry.Submit(Event{Technique: "warp_tunnel", Success: true, ...})
 package telemetry
 
 import (
@@ -157,9 +159,10 @@ func Submit(e Event, version string) {
 	if e.OSArch == "" {
 		e.OSArch = runtime.GOOS + "/" + runtime.GOARCH
 	}
+	endpoint := Endpoint()
 
 	go func() {
-		sendEvent(e) //nolint:errcheck // fire-and-forget
+		sendEvent(endpoint, e) //nolint:errcheck // fire-and-forget
 	}()
 }
 
@@ -168,16 +171,19 @@ func SubmitSync(e Event, version string) error {
 	if !IsEnabled() {
 		return nil
 	}
+	if e.Technique == "" {
+		return nil
+	}
 	if e.Version == "" {
 		e.Version = version
 	}
 	if e.OSArch == "" {
 		e.OSArch = runtime.GOOS + "/" + runtime.GOARCH
 	}
-	return sendEvent(e)
+	return sendEvent(Endpoint(), e)
 }
 
-func sendEvent(e Event) error {
+func sendEvent(endpoint string, e Event) error {
 	body, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -186,7 +192,7 @@ func sendEvent(e Event) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, Endpoint()+"/event", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/event", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

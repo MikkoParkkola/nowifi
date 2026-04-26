@@ -72,9 +72,12 @@ func StartWebTransportTunnel(serverURL string, localPort int, timeout time.Durat
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	_, session, err := d.Dial(ctx, serverURL, nil)
+	resp, session, err := d.Dial(ctx, serverURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("wt tunnel: dial %s: %w", serverURL, err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	// Probe: open one stream to verify the server responds, then close it.

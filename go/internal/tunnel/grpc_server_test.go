@@ -4,6 +4,7 @@
 package tunnel
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -32,11 +33,17 @@ func TestGRPCTunnelHealthCheck(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	resp, err := client.Post(
+	req, reqErr := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
 		fmt.Sprintf("https://%s/grpc.health.v1.Health/Check", srv.Addr()),
-		"application/grpc",
 		nil,
 	)
+	if reqErr != nil {
+		t.Fatalf("health request: %v", reqErr)
+	}
+	req.Header.Set("Content-Type", "application/grpc")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("health check: %v", err)
 	}
@@ -116,8 +123,11 @@ func TestGRPCTunnelE2E(t *testing.T) {
 		t.Fatalf("write data frame: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost,
+	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodPost,
 		fmt.Sprintf("https://%s%s", srv.Addr(), grpcServicePath), pr)
+	if reqErr != nil {
+		t.Fatalf("grpc request build: %v", reqErr)
+	}
 	req.Header.Set("Content-Type", "application/grpc")
 	req.Header.Set("TE", "trailers")
 

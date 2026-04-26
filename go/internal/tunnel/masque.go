@@ -231,6 +231,9 @@ func handleMASQUESocks(client net.Conn, cc *http3.ClientConn) {
 		socks5SendFail(client)
 		return
 	}
+	if resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		rstr.CancelWrite(0)
 		socks5SendFail(client)

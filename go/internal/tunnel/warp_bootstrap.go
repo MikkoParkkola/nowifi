@@ -49,13 +49,13 @@ const (
 
 // WARPRegistration holds the cached WARP device registration.
 type WARPRegistration struct {
-	DeviceID    string `json:"device_id"`
-	Token       string `json:"token"`
-	PrivateKey  string `json:"private_key"`  // hex-encoded
-	PublicKey   string `json:"public_key"`   // hex-encoded
-	Endpoint    string `json:"endpoint"`
-	AssignedV4  string `json:"assigned_v4"`
-	AssignedV6  string `json:"assigned_v6"`
+	DeviceID     string `json:"device_id"`
+	Token        string `json:"token"`
+	PrivateKey   string `json:"private_key"` // hex-encoded
+	PublicKey    string `json:"public_key"`  // hex-encoded
+	Endpoint     string `json:"endpoint"`
+	AssignedV4   string `json:"assigned_v4"`
+	AssignedV6   string `json:"assigned_v6"`
 	RegisteredAt string `json:"registered_at"`
 }
 
@@ -78,9 +78,9 @@ func StartWARPTunnel(localPort int, timeout time.Duration) (*Handle, error) {
 
 	// Connect via HTTP/2 CONNECT to WARP's proxy endpoint.
 	tlsConf := &tls.Config{
-		ServerName:    "engage.cloudflareclient.com",
-		NextProtos:    []string{"h2"},
-		MinVersion:    tls.VersionTLS12,
+		ServerName: "engage.cloudflareclient.com",
+		NextProtos: []string{"h2"},
+		MinVersion: tls.VersionTLS12,
 	}
 
 	// Probe: verify HTTP/2 negotiation.
@@ -99,7 +99,7 @@ func StartWARPTunnel(localPort int, timeout time.Duration) (*Handle, error) {
 
 	// Create HTTP/2 transport with WARP auth header.
 	warpTransport := &http.Transport{
-		TLSClientConfig:  tlsConf,
+		TLSClientConfig:   tlsConf,
 		ForceAttemptHTTP2: true,
 	}
 
@@ -181,6 +181,7 @@ func handleWARPSocks(client net.Conn, transport *http.Transport, token string) {
 		socks5SendFail(client)
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	if err := socks5SendSuccess(client); err != nil {
 		_ = resp.Body.Close()

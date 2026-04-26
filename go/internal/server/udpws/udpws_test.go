@@ -5,10 +5,10 @@ package udpws
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"strings"
 	"testing"
@@ -360,7 +360,9 @@ func TestSizeEdge_65507Truncated(t *testing.T) {
 
 	// Build a large payload and send it.
 	payload := make([]byte, 4096)
-	rand.Read(payload)
+	if _, err := crand.Read(payload); err != nil {
+		t.Fatalf("random payload: %v", err)
+	}
 
 	got, err := sendRecv(t, cliAddr, payload, 3*time.Second)
 	if err != nil {

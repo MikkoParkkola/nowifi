@@ -73,7 +73,10 @@ func ListenGRPCTunnel(cfg HTTP3ServerConfig) (*GRPCTunnelServer, error) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	srv.server = &http.Server{Handler: mux}
+	srv.server = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	go func() {
 		if err := srv.server.Serve(ln); err != nil && err != http.ErrServerClosed {

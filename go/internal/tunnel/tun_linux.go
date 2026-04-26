@@ -7,6 +7,7 @@ package tunnel
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"syscall"
@@ -123,7 +124,10 @@ func setMTU(ifname string, mtu int) error {
 	}
 	var req ifreqMTU
 	copy(req.name[:], ifname)
-	req.mtu = int32(mtu)
+	if mtu < 0 || mtu > math.MaxInt32 {
+		return fmt.Errorf("tun: invalid mtu %d on %s", mtu, ifname)
+	}
+	req.mtu = int32(mtu) //nolint:gosec // mtu range checked above
 
 	const _SIOCSIFMTU = 0x8922
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL,

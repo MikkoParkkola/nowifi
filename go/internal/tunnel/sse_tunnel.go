@@ -142,7 +142,7 @@ func handleSSESocks(client net.Conn, baseURL string) {
 	// reserved characters cannot split the query string or inject extra
 	// parameters.
 	streamURL := fmt.Sprintf("%s/stream?target=%s", baseURL, url.QueryEscape(target))
-	req, err := http.NewRequest("GET", streamURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, streamURL, nil)
 	if err != nil {
 		socks5SendFail(client)
 		return
@@ -157,6 +157,7 @@ func handleSSESocks(client net.Conn, baseURL string) {
 		socks5SendFail(client)
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	// Extract session ID from response header for uplink correlation.
 	sessionID := resp.Header.Get("X-Session-Id")
@@ -242,7 +243,10 @@ func sseWriteLoop(client net.Conn, baseURL, sessionID string) {
 		n, err := client.Read(buf)
 		if n > 0 {
 			encoded := base64.StdEncoding.EncodeToString(buf[:n])
-			postReq, _ := http.NewRequest("POST", sendURL, strings.NewReader(encoded))
+			postReq, reqErr := http.NewRequestWithContext(context.Background(), http.MethodPost, sendURL, strings.NewReader(encoded))
+			if reqErr != nil {
+				return
+			}
 			postReq.Header.Set("Content-Type", "text/plain")
 			resp, postErr := http.DefaultClient.Do(postReq)
 			if postErr != nil {

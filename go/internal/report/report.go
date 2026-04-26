@@ -12,10 +12,12 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
+	"golang.org/x/term"
 )
 
 // ---------------------------------------------------------------------------
@@ -85,6 +87,15 @@ const (
 	boldGreen = "\033[1;32m"
 	boldCyan  = "\033[1;36m"
 )
+
+var colorEnabled = os.Getenv("NO_COLOR") == "" && term.IsTerminal(int(os.Stdout.Fd()))
+
+func renderTerminalOutput(s string) string {
+	if colorEnabled {
+		return s
+	}
+	return stripANSI(s)
+}
 
 func severityColor(sev string) string {
 	switch sev {
@@ -175,7 +186,7 @@ func drawBox(title string, borderColor string, content string) string {
 	}
 
 	sb.WriteString(borderColor + "+" + strings.Repeat("-", maxWidth+2) + "+" + reset + "\n")
-	return sb.String()
+	return renderTerminalOutput(sb.String())
 }
 
 // stripANSI removes ANSI escape sequences for length calculation.
@@ -262,7 +273,7 @@ func simpleTable(title string, borderColor string, headers []string, rows [][]st
 	}
 
 	sb.WriteString(sep + "\n")
-	return sb.String()
+	return renderTerminalOutput(sb.String())
 }
 
 // ---------------------------------------------------------------------------

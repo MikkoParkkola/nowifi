@@ -7,6 +7,7 @@ package tunnel
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"syscall"
@@ -15,12 +16,12 @@ import (
 
 // macOS utun constants. These match <sys/kern_control.h> and <net/if_utun.h>.
 const (
-	_SYSPROTO_CONTROL = 2           // AF_SYSTEM, SYSPROTO_CONTROL
-	_AF_SYSTEM        = 32          // AF_SYSTEM
-	_PF_SYSTEM        = _AF_SYSTEM  // PF_SYSTEM
+	_SYSPROTO_CONTROL  = 2          // AF_SYSTEM, SYSPROTO_CONTROL
+	_AF_SYSTEM         = 32         // AF_SYSTEM
+	_PF_SYSTEM         = _AF_SYSTEM // PF_SYSTEM
 	_UTUN_CONTROL_NAME = "com.apple.net.utun_control"
-	_CTLIOCGINFO      = 0xc0644e03 // _IOWR('N', 3, struct ctl_info)
-	_UTUN_OPT_IFNAME  = 2
+	_CTLIOCGINFO       = 0xc0644e03 // _IOWR('N', 3, struct ctl_info)
+	_UTUN_OPT_IFNAME   = 2
 )
 
 // ctlInfo matches struct ctl_info from <sys/kern_control.h>.
@@ -73,11 +74,11 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 
 	// Connect with unit=0 for auto-assignment.
 	addr := sockaddrCtl{
-		scLen:    uint8(unsafe.Sizeof(sockaddrCtl{})),
-		scFamily: _AF_SYSTEM,
+		scLen:     uint8(unsafe.Sizeof(sockaddrCtl{})),
+		scFamily:  _AF_SYSTEM,
 		ssSysaddr: 2, // AF_SYS_CONTROL
-		scID:     info.id,
-		scUnit:   0, // 0 = auto-assign
+		scID:      info.id,
+		scUnit:    0, // 0 = auto-assign
 	}
 	if _, _, errno := syscall.Syscall(syscall.SYS_CONNECT,
 		uintptr(fd),
@@ -88,8 +89,9 @@ func OpenTUN(mtu int) (TUNDevice, error) {
 	}
 
 	// Get the assigned interface name.
-	ifnameBuf := make([]byte, 64)
-	ifnameLen := uint32(len(ifnameBuf))
+	const ifnameBufLen = 64
+	ifnameBuf := make([]byte, ifnameBufLen)
+	var ifnameLen uint32 = ifnameBufLen
 	if _, _, errno := syscall.Syscall6(syscall.SYS_GETSOCKOPT,
 		uintptr(fd),
 		uintptr(_SYSPROTO_CONTROL),
@@ -208,7 +210,10 @@ func setMTU(ifname string, mtu int) error {
 	}
 	var req ifreqMTU
 	copy(req.name[:], ifname)
-	req.mtu = int32(mtu)
+	if mtu < 0 || mtu > math.MaxInt32 {
+		return fmt.Errorf("tun: invalid mtu %d on %s", mtu, ifname)
+	}
+	req.mtu = int32(mtu) //nolint:gosec // mtu range checked above
 
 	const _SIOCSIFMTU = 0x80206934
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL,

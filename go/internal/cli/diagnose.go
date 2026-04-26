@@ -115,10 +115,6 @@ func assessMethodsForConfig(probes *probe.ProbeResults, portal *detect.PortalInf
 	return techniques.CountFeasibleBypassTechniques(diagnoseSignalsForConfig(probes, portal, config))
 }
 
-func diagnoseSignals(probes *probe.ProbeResults, portal *detect.PortalInfo) techniques.BypassTechniqueSignals {
-	return diagnoseSignalsForConfig(probes, portal, nil)
-}
-
 func diagnoseSignalsForConfig(probes *probe.ProbeResults, portal *detect.PortalInfo, config *bypass.Config) techniques.BypassTechniqueSignals {
 	whitelistReachable := false
 	for _, wl := range probes.Whitelists {

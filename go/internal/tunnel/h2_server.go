@@ -59,7 +59,8 @@ func ListenH2Proxy(cfg HTTP3ServerConfig) (*H2ProxyServer, error) {
 	}
 
 	srv.server = &http.Server{
-		Handler: http.HandlerFunc(srv.handleProxy),
+		Handler:           http.HandlerFunc(srv.handleProxy),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {

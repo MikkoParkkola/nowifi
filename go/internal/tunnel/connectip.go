@@ -6,7 +6,6 @@ package tunnel
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -140,6 +139,9 @@ func StartConnectIPTunnel(cfg ConnectIPConfig) (*Handle, error) {
 	if err != nil {
 		_ = qconn.CloseWithError(0, "")
 		return nil, fmt.Errorf("connect-ip: read response: %w", err)
+	}
+	if resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_ = qconn.CloseWithError(0, "")
@@ -285,24 +287,4 @@ func quicToTUN(tun TUNDevice, rstr *http3.RequestStream, stop chan struct{}, wg 
 // brings it up. Uses platform-appropriate methods.
 func configureTUNAddress(ifname string, ip net.IP) error {
 	return configureTUNAddressPlatform(ifname, ip)
-}
-
-// sendAddressCapsule creates the simplified address assignment datagram.
-// Format: [0x01] [4 bytes IPv4 address].
-func sendAddressCapsule(conn *quic.Conn, ip net.IP) error {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return errors.New("only IPv4 address assignment supported")
-	}
-	dgram := make([]byte, 5)
-	dgram[0] = 0x01 // address assign marker
-	copy(dgram[1:], ip4)
-	return conn.SendDatagram(dgram)
-}
-
-// Helper: encode uint16 for capsule fields.
-func encodeUint16(v uint16) []byte {
-	b := make([]byte, 2)
-	binary.BigEndian.PutUint16(b, v)
-	return b
 }

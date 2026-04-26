@@ -181,7 +181,7 @@ func StartPortalRelayTunnel(whitelistedDomains []string, localPort int, timeout 
 	}
 
 	transport := &http.Transport{
-		TLSClientConfig:  tlsConf,
+		TLSClientConfig:   tlsConf,
 		ForceAttemptHTTP2: true,
 	}
 
@@ -229,7 +229,7 @@ func probeHTTP2Connect(domain string, timeout time.Duration) bool {
 
 	// Try an actual CONNECT request.
 	transport := &http.Transport{
-		TLSClientConfig:  tlsConf,
+		TLSClientConfig:   tlsConf,
 		ForceAttemptHTTP2: true,
 	}
 	defer transport.CloseIdleConnections()
@@ -303,6 +303,7 @@ func handlePortalRelaySocks(client net.Conn, transport *http.Transport, domain s
 		socks5SendFail(client)
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	if err := socks5SendSuccess(client); err != nil {
 		_ = resp.Body.Close()

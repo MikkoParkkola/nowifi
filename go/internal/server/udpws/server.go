@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"golang.org/x/net/websocket"
 )
@@ -93,7 +94,10 @@ func (s *Server) serveOn(ln net.Listener) (stop func(), hs *http.Server) {
 	mux := http.NewServeMux()
 	mux.Handle("/udp", websocket.Handler(s.handleWS))
 
-	hs = &http.Server{Handler: mux}
+	hs = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	s.mu.Lock()
 	s.httpServer = hs
 	s.mu.Unlock()
