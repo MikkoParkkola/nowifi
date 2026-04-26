@@ -56,6 +56,11 @@ jobs:
           go-version: 'stable'
           cache-dependency-path: go/go.sum
 
+      - name: Install SBOM generator
+        working-directory: go
+        run: |
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+
       - name: Build
         working-directory: go
         env:
@@ -77,7 +82,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: |
-          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0 \
+          "${HOME}/go/bin/cyclonedx-gomod" \
             app \
             -json \
             -licenses \
