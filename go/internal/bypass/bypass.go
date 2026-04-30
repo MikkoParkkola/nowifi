@@ -621,24 +621,49 @@ func finalizeSuccessfulTunnelResult(iface string, result Result) Result {
 // Internet connectivity check
 // ---------------------------------------------------------------------------
 
-// internetCheckURL is the URL used by HasInternet(). Tests override this
-// to point at httptest servers so no real network call is made.
-var internetCheckURL = "http://connectivitycheck.gstatic.com/generate_204"
+// internetCheckURL is the legacy single-URL probe target. It is kept as a
+// test-mode escape hatch only: when non-empty, HasInternet falls back to a
+// single-URL check against this URL instead of the quorum verifier. Tests
+// that mock httptest servers via this variable continue to work unchanged.
+//
+// Production code MUST NOT set this variable. The quorum verifier in
+// bypass_internet_verify.go is the authoritative reachability check; the
+// single-URL path was the source of issue #31's false-positive on
+// Panasonic Avionics whitelists.
+var internetCheckURL = ""
 var internetCheckClient = &http.Client{Timeout: 10 * time.Second}
 
-// HasInternet checks if we have real internet connectivity by hitting
-// Google's connectivity check URL (HTTP 204 = connected).
+// HasInternet reports whether the host can reach the public internet.
+//
+// Implementation: delegates to verifyInternetReachable, which runs a quorum
+// of TLS- and content-validated probes specifically designed to reject
+// captive-portal whitelists. See bypass_internet_verify.go and issue #31
+// for the rationale — the original single-URL gstatic probe returned 204
+// even on closed Panasonic Avionics firewalls and lied to the user.
+//
+// The legacy single-URL path is preserved only as a test escape hatch; it
+// is NEVER taken in production where internetCheckURL is the empty string.
 func HasInternet() bool {
-	// Use 10s timeout to accommodate satellite links (RTT 500-2500ms).
+	if internetCheckURL != "" {
+		return hasInternetLegacySingleURL()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), internetVerifyTimeout)
+	defer cancel()
+	return verifyInternetReachable(ctx, nil)
+}
+
+// hasInternetLegacySingleURL is the pre-issue-#31 single-URL probe. It
+// remains reachable only via tests that override internetCheckURL — see
+// the comment on internetCheckURL above.
+func hasInternetLegacySingleURL() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	req, _ := http.NewRequestWithContext(ctx, "GET", internetCheckURL, nil)
 	resp, err := internetCheckClient.Do(req)
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode == 204
 }
 

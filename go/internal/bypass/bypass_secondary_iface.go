@@ -180,7 +180,20 @@ func probeInterfaceInternet(ifaceName string) bool {
 		return false
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode == 204
+	if resp.StatusCode != 204 {
+		return false
+	}
+	// Per issue #31: a 204 from gstatic alone is whitelisted on every
+	// major captive network. Confirm via the quorum verifier, binding the
+	// probes to this interface's local IP so we test THIS NIC's path to
+	// the public internet, not the system default route.
+	if internetCheckURL != "" || !internetVerifyEnabled {
+		// Legacy test mode — see confirmInternetAfterTechnique.
+		return true
+	}
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), internetVerifyTimeout)
+	defer verifyCancel()
+	return verifyInternetReachable(verifyCtx, dialer)
 }
 
 // isVirtualInterface returns true for names that indicate a virtual adapter

@@ -143,7 +143,11 @@ func prefixLen(r platform.DHCPRoute) int {
 }
 
 // dhcpRouteInternetReachable hits the Google captive-portal check URL and
-// reports whether it returns HTTP 204 within a short deadline.
+// reports whether it returns HTTP 204 within a short deadline. After a 204
+// hit it confirms via the captive-resistant quorum verifier (issue #31),
+// rejecting whitelist false positives where the gateway answers 204
+// without actually opening the firewall to the rest of the public
+// internet.
 func dhcpRouteInternetReachable() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
@@ -156,5 +160,14 @@ func dhcpRouteInternetReachable() bool {
 		return false
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode == 204
+	if resp.StatusCode != 204 {
+		return false
+	}
+	if internetCheckURL != "" || !internetVerifyEnabled {
+		// Legacy test mode — see confirmInternetAfterTechnique.
+		return true
+	}
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), internetVerifyTimeout)
+	defer verifyCancel()
+	return verifyInternetReachable(verifyCtx, nil)
 }

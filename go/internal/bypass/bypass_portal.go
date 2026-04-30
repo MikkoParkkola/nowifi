@@ -60,6 +60,14 @@ func tryCNASpoof() Result {
 		resp.Body.Close()
 
 		if resp.StatusCode == 204 {
+			// A bare 204 from the gstatic check URL is satisfied by every
+			// captive-detection whitelist on the planet (see issue #31).
+			// Before declaring the spoof a success, confirm with the
+			// quorum internet verifier — this rejects "the portal accepted
+			// the UA but didn't actually open the firewall" cases.
+			if !confirmInternetAfterTechnique() {
+				continue
+			}
 			return successResult(
 				CNASpoof,
 				fmt.Sprintf("Portal auto-approved UA: %s", a.ua),
@@ -69,6 +77,24 @@ func tryCNASpoof() Result {
 	}
 
 	return Result{Method: CNASpoof, Success: false, Details: "No UA bypass found"}
+}
+
+// confirmInternetAfterTechnique re-checks reachability with the captive-
+// resistant quorum verifier after a technique-internal 204 hit. Callers
+// must invoke this before promoting a 204 into Success=true; see issue #31.
+//
+// Test escape hatch: when internetVerifyEnabled is false (set by saveHooks
+// in unit tests) or internetCheckURL is non-empty (legacy single-URL test
+// mode), the function trusts the prior 204 and returns true — preserving
+// the dozens of technique unit tests that rely on httptest servers
+// without forcing every test to also mock TLS targets.
+func confirmInternetAfterTechnique() bool {
+	if !internetVerifyEnabled || internetCheckURL != "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), internetVerifyTimeout)
+	defer cancel()
+	return verifyInternetReachable(ctx, nil)
 }
 
 // ---------------------------------------------------------------------------
