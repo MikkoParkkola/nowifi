@@ -38,13 +38,14 @@ var (
 
 var serverCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a tunnel server (CF Worker or VPS)",
-	Long: `Create a tunnel server (CF Worker or VPS).
+	Short: "Create a tunnel server (CF Worker, VPS, or libp2p peer)",
+	Long: `Create a tunnel server (CF Worker, VPS, or libp2p P2P peer).
 
 Examples:
   nowifi server create                                  # Free CF Worker
   nowifi server create -p digitalocean -t do_xxx        # DO droplet
-  nowifi server create -p hetzner -t htz_xxx --ttl 6    # Hetzner, 6h TTL`,
+  nowifi server create -p hetzner -t htz_xxx --ttl 6    # Hetzner, 6h TTL
+  nowifi server create -p libp2p                        # P2P peer (prints pairing code)`,
 	Run: runServerCreate,
 }
 
