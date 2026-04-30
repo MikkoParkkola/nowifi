@@ -1756,6 +1756,14 @@ func saveHooks(t *testing.T) func() {
 	origPortalSchemes := portalSchemes
 	origDefaultCredsBase := defaultCredsBaseURL
 	origSessionReplayURL := sessionReplayURLFunc
+	origInternetVerifyEnabled := internetVerifyEnabled
+	// Disable the captive-resistant verifier in tests by default. Technique
+	// unit tests use httptest servers for the technique-internal *CheckURL
+	// vars; without this flip, every such test would also need to mock the
+	// TLS probes to 1.1.1.1 / 9.9.9.9 used by the production verifier (see
+	// issue #31). Tests that exercise the verifier itself flip this back
+	// to true via saveVerifierHooks (in bypass_internet_verify_test.go).
+	internetVerifyEnabled = false
 	return func() {
 		internetCheckURL = origInternetCheckURL
 		cnaCheckURL = origCNACheckURL
@@ -1763,6 +1771,7 @@ func saveHooks(t *testing.T) func() {
 		portalSchemes = origPortalSchemes
 		defaultCredsBaseURL = origDefaultCredsBase
 		sessionReplayURLFunc = origSessionReplayURL
+		internetVerifyEnabled = origInternetVerifyEnabled
 	}
 }
 
