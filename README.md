@@ -281,6 +281,38 @@ nowifi tools -d
 | hcxpcapngtool | Convert captures for hashcat | `brew install hcxtools` |
 | reaver | WPS Pixie-Dust/PIN attacks | `brew install reaver` |
 
+### Antivirus false positives (chisel, hysteria, cloudflared)
+
+These tools are legitimate FOSS tunneling utilities, but several antivirus engines classify them as **HackTool / PUA** (potentially unwanted application) — not a virus, not a trojan, but a dual-use tool also seen in real attack chains (CISA AA22-216A, AA23-129A flagged chisel use by ransomware groups).
+
+What you may see:
+
+| Engine | Verdict | Severity |
+|---|---|---|
+| Microsoft Defender | `HackTool:Win64/Chisel`, `HackTool:Linux/Chisel` | informational |
+| ESET | `Linux/Chisel.A` (potentially unsafe application) | low |
+| Sophos | `HackTool/Chisel-A` | low |
+| Kaspersky | `not-a-virus:RemoteAdmin.*` | informational |
+| VirusTotal | 15-25 / 70 detections, all "HackTool / PUA" category | — |
+
+**Verification you have the real binaries:**
+
+```bash
+# nowifi auto-downloads from official release pages and verifies SHA-256.
+# To re-check manually:
+shasum -a 256 ~/.nowifi/tools/chisel       # compare to github.com/jpillora/chisel/releases
+shasum -a 256 ~/.nowifi/tools/hysteria     # compare to github.com/apernet/hysteria/releases
+shasum -a 256 ~/.nowifi/tools/cloudflared  # compare to github.com/cloudflare/cloudflared/releases
+```
+
+**If your antivirus quarantines a tool:**
+
+1. Confirm the binary path is under `~/.nowifi/tools/` (auto-downloaded, SHA-verified) — not a random location.
+2. Whitelist by SHA-256 in your AV (preferred, narrow exception). Generic path-whitelisting `~/.nowifi/tools/*` is also acceptable.
+3. If the SHA-256 does **not** match the upstream release, do **not** whitelist — re-run `nowifi tools -d` to re-download, or report a supply-chain concern in [SECURITY.md](SECURITY.md).
+
+These tools are not malware. They are the same binaries used by network engineers, pentesters, and remote-access tooling worldwide. Treat the AV verdict as informational, not a stop-the-line signal.
+
 ---
 
 ## Tunnel Server Setup
