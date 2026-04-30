@@ -38,7 +38,7 @@ import (
 
 // Info holds metadata about a provisioned server.
 type Info struct {
-	Provider  string            `json:"provider"`        // "cloudflare_worker", "digitalocean", "hetzner", "cloudflare_quick", "custom"
+	Provider  string            `json:"provider"`        // "cloudflare_worker", "digitalocean", "hetzner", "cloudflare_quick", "libp2p", "custom"
 	ServerID  string            `json:"server_id"`       // Droplet ID, Hetzner server ID, or Worker / tunnel name
 	IP        string            `json:"ip"`              // Public IP (empty for CF Workers / quick tunnels)
 	URL       string            `json:"url"`             // Chisel/proxy URL

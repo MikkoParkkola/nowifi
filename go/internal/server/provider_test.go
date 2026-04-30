@@ -15,7 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestNamesContainsAllFourProviders(t *testing.T) {
-	want := []string{"cloudflare_quick", "cloudflare_worker", "digitalocean", "hetzner"}
+	want := []string{"cloudflare_quick", "cloudflare_worker", "digitalocean", "hetzner", "libp2p"}
 	got := Names()
 	sort.Strings(got)
 
@@ -51,7 +51,7 @@ func TestGetUnknownProviderReturnsFalse(t *testing.T) {
 }
 
 func TestGetKnownProviderReturnsTrue(t *testing.T) {
-	for _, name := range []string{"cloudflare_quick", "cloudflare_worker", "digitalocean", "hetzner"} {
+	for _, name := range []string{"cloudflare_quick", "cloudflare_worker", "digitalocean", "hetzner", "libp2p"} {
 		p, ok := Get(name)
 		if !ok {
 			t.Errorf("Get(%q) returned false", name)
