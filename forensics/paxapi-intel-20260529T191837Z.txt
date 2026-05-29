@@ -1,0 +1,65 @@
+# pax-api enforcement intel Fri May 29 19:18:37 UTC 2026
+## portal-versions.json ##
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="msapplication-tap-highlight" content="no" />
+        <link rel="shortcut icon" href="/images/finnair_favicon.jpg" />
+        <link rel="apple-touch-icon" href="/images/touch-icons/apple-touch-icon-iphone-60x60.png" />
+        <link rel="apple-touch-icon" sizes="76x76" href="/images/touch-icons/apple-touch-icon-ipad-76x76.png" />
+        <link rel="apple-touch-icon" sizes="120x120" href="/images/touch-icons/apple-touch-icon-iphone-retina-120x120.png" />
+        <link rel="apple-touch-icon" sizes="152x152" href="/images/touch-icons/apple-touch-icon-ipad-retina-152x152.png" />
+        <title>Finnair Nordic Sky</title>
+        <style>
+            body {
+                font-family: Arial, Helvetica, sans-serif;
+            }
+            .loader-container {
+                width: 36px;
+                height: 36px;
+                border-radius: 100%;
+                margin: 0 auto;
+                position: fixed;
+                top: calc(50% - 18px);
+                left: 0;
+                right: 0;
+            }
+
+## /pax-api-service (root) ##
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="msapplication-tap-highlight" content="no" />
+        <link rel="shortcut icon" href="/images/finnair_favicon.jpg" />
+        <link rel="apple-touch-icon" href="/images/touch-icons/apple-touch-icon-iphone-60x60.png" />
+        <link rel="apple-touch-icon" sizes="76x76" href="/images/touch-icons/apple-touch-icon-ipad-76x76.png" />
+        <link rel="apple-touch-icon" sizes="120x120" href="/images/touch-icons/apple-touch-icon-iphone-retina-120x120.png" />
+        <link rel="apple-touch-icon" sizes="152x152" href="/images/touch-icons/apple-touch-icon-ipad-retina-152x152.png" />
+        <title>Finnair Nordic Sky</title>
+        <style>
+            body {
+                font-family: Arial, Helvetica, sans-serif;
+            }
+            .loader-container {
+## enumerate pax-api endpoints (session/quota/device/voucher) ##
+  HIT /pax-api-service/v1/session -> 200
+  HIT /pax-api-service/session -> 200
+  HIT /pax-api-service/device -> 200
+  HIT /pax-api-service/status -> 200
+  HIT /pax-api-service/quota -> 200
+  HIT /pax-api-service/plans -> 200
+  HIT /pax-api-service/v1/device -> 200
+  HIT /pax-api-service/v1/status -> 200
+  HIT /pax-api-service/health -> 200
+  HIT /pax-api-service/api-docs -> 200
+  HIT /pax-api-service/swagger.json -> 200
