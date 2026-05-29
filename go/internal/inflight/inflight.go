@@ -122,6 +122,7 @@ var Profiles = map[Provider]PortalProfile{
 			"mac_clone",           // Fallback: any device
 			"dns_tunnel",          // DNS always passes for portal redirect
 			"doh_tunnel",          // Cloudflare-dns.com likely whitelisted
+			"icmp_tunnel",         // Finnair 2026-05-29: ICMP echo reached internet (ttl=105) under enforcement — validated covert channel
 			"ntp_tunnel",          // UDP/123 almost never filtered
 			"quic_tunnel",         // UDP/443 often passes
 			"cf_workers_proxy",    // Cloudflare domains may be whitelisted
