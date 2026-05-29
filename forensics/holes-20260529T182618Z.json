@@ -1,0 +1,17 @@
+{"ts":"20260529T182618Z","provider":"panasonic_nordic_sky","iface":"en0","gw":"172.19.248.1","holes":[
+{"technique":"mac_clone_idle","severity":"HIGH","detail":"34 paid devices on subnet; clone an idle one to inherit its session"},
+{"technique":"tcp443_tunnel","severity":"MED","detail":"TCP/443 egress open to 1.1.1.1 (non-allowlisted IP)"},
+{"technique":"tcp53_tunnel","severity":"HIGH","detail":"TCP/53 egress open to 8.8.8.8"},
+{"technique":"tcp443_tunnel","severity":"MED","detail":"TCP/443 egress open to 9.9.9.9 (non-allowlisted IP)"},
+{"technique":"ssh_egress","severity":"HIGH","detail":"TCP/22 open to github.com — direct SSH SOCKS"},
+{"technique":"dns_tunnel","severity":"HIGH","detail":"UDP/53 egress open to 8.8.8.8 — iodine/dnscat2 tunnel"},
+{"technique":"dns_tunnel","severity":"HIGH","detail":"UDP/53 egress open to 1.1.1.1 — iodine/dnscat2 tunnel"},
+{"technique":"ntp_tunnel","severity":"MED","detail":"UDP/123 (NTP) open to pool.ntp.org — covert channel"},
+{"technique":"quic_tunnel","severity":"MED","detail":"UDP/443 (QUIC) open to 1.1.1.1"},
+{"technique":"dns_tunnel","severity":"HIGH","detail":"resolver 172.19.248.1 returns external A records — full recursion = DNS tunnel works"},
+{"technique":"dns_tunnel","severity":"HIGH","detail":"resolver 8.8.8.8 returns external A records — full recursion = DNS tunnel works"},
+{"technique":"dns_tunnel","severity":"HIGH","detail":"resolver 1.1.1.1 returns external A records — full recursion = DNS tunnel works"},
+{"technique":"dns_tunnel","severity":"HIGH","detail":"resolver 9.9.9.9 returns external A records — full recursion = DNS tunnel works"},
+{"technique":"doh_tunnel","severity":"HIGH","detail":"cloudflare-dns.com reachable + answers — DoH tunnel / cloudflared works"},
+{"technique":"icmp_tunnel","severity":"HIGH","detail":"ICMP echo reaches the internet — ptunnel-ng covert channel"},
+{"technique":"mac_rotate","severity":"MED","detail":"if quota is per-MAC, a fresh random MAC resets it"}]}
