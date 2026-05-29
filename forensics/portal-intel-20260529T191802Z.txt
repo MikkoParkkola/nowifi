@@ -1,0 +1,25 @@
+# portal surface intel Fri May 29 19:18:02 UTC 2026
+## gateway :80 headers ##
+## gateway :443 headers ##
+xh: warning: HTTP 403 Forbidden
+HTTP/1.1 403 Forbidden
+Date: Fri, 29 May 2026 19:18:05 GMT
+Content-Type: text/html
+Transfer-Encoding: chunked
+Connection: keep-alive
+Etag: W/"67a9ad0b-49"
+Server: PAC Web Server
+Content-Encoding: gzip
+
+## nordic-sky portal (the auth surface) ##
+Content-Type: text/html
+Server: PAC Web Server
+Cache-Control: max-age=43200
+Cache-Control: no-transform,public,max-age=43200,s-maxage=43200
+## portal API probe (Panasonic pax-api / session) ##
+  /api -> 301
+  /pax-api-service -> 200
+  /portal-versions.json -> 200
+  /api/session -> 404
+  /api/device -> 404
+  /api/status -> 404

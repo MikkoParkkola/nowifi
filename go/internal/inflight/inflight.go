@@ -47,11 +47,11 @@ const (
 type LinkType string
 
 const (
-	KuBand      LinkType = "ku_band"      // Satellite Ku-band, RTT 500-700ms
-	KaBand      LinkType = "ka_band"      // Satellite Ka-band, RTT 500-700ms
-	GX          LinkType = "gx"           // Inmarsat Global Xpress, RTT 600-800ms
+	KuBand      LinkType = "ku_band"       // Satellite Ku-band, RTT 500-700ms
+	KaBand      LinkType = "ka_band"       // Satellite Ka-band, RTT 500-700ms
+	GX          LinkType = "gx"            // Inmarsat Global Xpress, RTT 600-800ms
 	AirToGround LinkType = "air_to_ground" // Gogo ATG, RTT 100-200ms
-	LEO         LinkType = "leo"          // Starlink/OneWeb, RTT 25-60ms
+	LEO         LinkType = "leo"           // Starlink/OneWeb, RTT 25-60ms
 )
 
 // PortalProfile describes a known inflight WiFi portal configuration.
@@ -62,10 +62,10 @@ type PortalProfile struct {
 
 	// Detection fingerprints.
 	GatewayOUI    []string `json:"gateway_oui"`    // MAC OUI prefixes for gateway
-	DNSPatterns   []string `json:"dns_patterns"`    // Patterns in DNS search domain
-	PortalDomains []string `json:"portal_domains"`  // Known portal hostnames
-	HTMLMarkers   []string `json:"html_markers"`    // Strings in portal HTML
-	HeaderMarkers []string `json:"header_markers"`  // Strings in HTTP headers
+	DNSPatterns   []string `json:"dns_patterns"`   // Patterns in DNS search domain
+	PortalDomains []string `json:"portal_domains"` // Known portal hostnames
+	HTMLMarkers   []string `json:"html_markers"`   // Strings in portal HTML
+	HeaderMarkers []string `json:"header_markers"` // Strings in HTTP headers
 
 	// Network characteristics.
 	LinkTypes    []LinkType `json:"link_types"`
@@ -122,6 +122,7 @@ var Profiles = map[Provider]PortalProfile{
 			"mac_clone",           // Fallback: any device
 			"dns_tunnel",          // DNS always passes for portal redirect
 			"doh_tunnel",          // Cloudflare-dns.com likely whitelisted
+			"icmp_tunnel",         // Finnair 2026-05-29: ICMP echo reached internet (ttl=105) under enforcement — validated covert channel
 			"ntp_tunnel",          // UDP/123 almost never filtered
 			"quic_tunnel",         // UDP/443 often passes
 			"cf_workers_proxy",    // Cloudflare domains may be whitelisted
@@ -268,7 +269,7 @@ var Profiles = map[Provider]PortalProfile{
 			"portal.inflyt.com",
 		},
 		// Search domain often exposed via DHCP: "connect.klm.com" seen on KLM 172.19.0.0/23
-		HTMLMarkers:   []string{"inflyt", "thales", "flytlive", "topconnect", "onboard portal", "afklm"},
+		HTMLMarkers: []string{"inflyt", "thales", "flytlive", "topconnect", "onboard portal", "afklm"},
 		// AFKLM AIRCON HUB: unique KLM onboard portal Server header (observed 2026-04).
 		// Note: Kong gateway is NOT used as a marker here — it overlaps with Panasonic.
 		HeaderMarkers: []string{"Thales", "AFKLM AIRCON HUB"},
@@ -316,14 +317,14 @@ var Profiles = map[Provider]PortalProfile{
 		PortalDomains: []string{
 			"portal.onair.aero",
 		},
-		HTMLMarkers:   []string{"sita", "onair"},
-		HeaderMarkers: []string{"SITA"},
-		LinkTypes:     []LinkType{KuBand},
-		TypicalRTTMs:  800,
-		PortalType:    "redirect",
-		GatewayStack:  "custom",
+		HTMLMarkers:      []string{"sita", "onair"},
+		HeaderMarkers:    []string{"SITA"},
+		LinkTypes:        []LinkType{KuBand},
+		TypicalRTTMs:     800,
+		PortalType:       "redirect",
+		GatewayStack:     "custom",
 		WhitelistDomains: []string{},
-		HasFreeTier:     false,
+		HasFreeTier:      false,
 		RecommendedOrder: []string{
 			"mac_clone_idle",
 			"mac_clone",
@@ -345,14 +346,14 @@ var Profiles = map[Provider]PortalProfile{
 		PortalDomains: []string{
 			"portal.anuvu.com",
 		},
-		HTMLMarkers:   []string{"anuvu", "global-eagle"},
-		HeaderMarkers: nil,
-		LinkTypes:     []LinkType{KuBand},
-		TypicalRTTMs:  750,
-		PortalType:    "redirect",
-		GatewayStack:  "nginx",
+		HTMLMarkers:      []string{"anuvu", "global-eagle"},
+		HeaderMarkers:    nil,
+		LinkTypes:        []LinkType{KuBand},
+		TypicalRTTMs:     750,
+		PortalType:       "redirect",
+		GatewayStack:     "nginx",
 		WhitelistDomains: []string{},
-		HasFreeTier:     false,
+		HasFreeTier:      false,
 		RecommendedOrder: []string{
 			"mac_clone_idle",
 			"mac_clone",
