@@ -22,9 +22,26 @@ IFACE="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"; IFAC
 VERIFY_URL="https://ifconfig.me/ip"
 VERIFY_IP="1.1.1.1"
 
+# --- spark relay endpoints (set up + PROVEN 2026-05-29) ---------------------
+CHISEL_BIN="${CHISEL_BIN:-$HOME/go/bin/chisel}"
+CHISEL_AUTH="${CHISEL_AUTH:-mikko:7d3aae159ffb6b61a272063c}"
+CHISEL_TAILNET="http://100.85.108.8:8090"                        # spark over tailnet (proven)
+CHISEL_CF="https://friendly-perspective-forth-austin.trycloudflare.com"  # CF anycast (tailnet-independent)
+SOCKS="127.0.0.1:1080"
+NETSVC="${NETSVC:-Wi-Fi}"   # macOS network service to apply SOCKS proxy to
+
 log(){ printf '\033[36m[flight]\033[0m %s\n' "$*"; }
 ok(){  printf '\033[32m[ OK ]\033[0m %s\n' "$*"; }
 bad(){ printf '\033[31m[fail]\033[0m %s\n' "$*"; }
+
+macos_socks_on(){  networksetup -setsocksfirewallproxy "$NETSVC" 127.0.0.1 1080 2>/dev/null && networksetup -setsocksfirewallproxystate "$NETSVC" on 2>/dev/null && log "macOS SOCKS proxy -> $SOCKS ON ($NETSVC)"; }
+macos_socks_off(){ networksetup -setsocksfirewallproxystate "$NETSVC" off 2>/dev/null && log "macOS SOCKS proxy OFF"; }
+verify_socks(){ timeout 18 curl -fsS --max-time 16 --socks5-hostname "$SOCKS" "$VERIFY_URL" 2>/dev/null; }
+start_chisel(){ # $1=endpoint
+  pkill -f "chisel client" 2>/dev/null; sleep 1
+  nohup "$CHISEL_BIN" client --keepalive 25s --max-retry-count -1 --auth "$CHISEL_AUTH" "$1" socks >/tmp/nowifi-chisel.log 2>&1 &
+  sleep 6
+}
 
 verify(){   # returns 0 if real internet egress works
   # DNS-independent + portal-independent check
@@ -54,6 +71,31 @@ if run_rung 1; then
   if verify; then ok "RUNG 1 WORKS — exit via spark/Amsterdam. Egress IP: $(curl -fsS --max-time 6 $VERIFY_URL 2>/dev/null)"; exit 0; fi
   bad "rung 1 no egress (DERP may be blocked at cutoff); reverting exit-node"
   "$TS" set --exit-node= 2>/dev/null || "$TS" up --reset 2>/dev/null
+fi
+
+# ---- RUNG 1.5: chisel SOCKS -> spark over tailnet (PROVEN 2026-05-29) -------
+# Egress verified at 31.151.218.51 (Amsterdam). Rides tailnet/DERP like rung 1
+# but as a SOCKS proxy; also auto-applies the macOS system SOCKS proxy.
+if run_rung 1.5 && [ -x "$CHISEL_BIN" ]; then
+  log "RUNG 1.5: chisel SOCKS -> spark (tailnet) + macOS system proxy"
+  start_chisel "$CHISEL_TAILNET"
+  if egress="$(verify_socks)" && [ -n "$egress" ]; then
+    macos_socks_on
+    ok "RUNG 1.5 WORKS — whole-system via spark/Amsterdam. Egress: $egress"; exit 0
+  fi
+  bad "rung 1.5 no egress over tailnet"
+fi
+
+# ---- RUNG 1.6: chisel SOCKS -> spark over Cloudflare (tailnet-INDEPENDENT) --
+# Best bet if the portal blocks Tailscale DERP but allows Cloudflare anycast.
+if run_rung 1.6 && [ -x "$CHISEL_BIN" ]; then
+  log "RUNG 1.6: chisel SOCKS -> spark via Cloudflare quick tunnel"
+  start_chisel "$CHISEL_CF"
+  if egress="$(verify_socks)" && [ -n "$egress" ]; then
+    macos_socks_on
+    ok "RUNG 1.6 WORKS — via Cloudflare/Amsterdam. Egress: $egress"; exit 0
+  fi
+  bad "rung 1.6 no egress over Cloudflare"
 fi
 
 # ---- RUNG 2: nowifi auto (43 techniques, Panasonic profile) -----------------
