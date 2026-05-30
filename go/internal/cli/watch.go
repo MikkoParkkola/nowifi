@@ -13,6 +13,7 @@ import (
 
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/detect"
+	"github.com/MikkoParkkola/nowifi/internal/failreport"
 	"github.com/MikkoParkkola/nowifi/internal/guard"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/portal"
@@ -105,7 +106,13 @@ func runWatch(cmd *cobra.Command, args []string) {
 
 		if bypass.HasInternet() {
 			fmt.Printf("  %s  %s  Connected\n", dim(ts), green("OK"))
+			wasDown := disconnectCount > 0
 			disconnectCount = 0
+			// On a connectivity RESTORE transition, offer any queued
+			// unsolved-network reports for consent-gated submission (once).
+			if wasDown {
+				_ = failreport.MaybeOfferPending(os.Stdin, os.Stdout)
+			}
 		} else {
 			disconnectCount++
 			fmt.Printf("  %s  %s  Session expired (attempt %d)\n", dim(ts), red("DOWN"), disconnectCount)
