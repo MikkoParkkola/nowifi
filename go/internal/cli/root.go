@@ -137,6 +137,7 @@ func init() {
 	rootCmd.AddCommand(historyCmd)
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(scoreCmd)
+	rootCmd.AddCommand(forensicsCmd)
 }
 
 // loadConfigDefaults fills unset CLI flags from ~/.nowifi/config.json.

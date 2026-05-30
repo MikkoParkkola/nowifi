@@ -19,6 +19,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/capture"
 	"github.com/MikkoParkkola/nowifi/internal/detect"
+	"github.com/MikkoParkkola/nowifi/internal/forensics"
 	"github.com/MikkoParkkola/nowifi/internal/guard"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
 	"github.com/MikkoParkkola/nowifi/internal/probe"
@@ -481,6 +482,7 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 				}
 				if !reconnected {
 					p.Send(bypassResultMsg{technique: "Full bypass", success: false, detail: "all techniques failed"})
+					emitForensicsOnExhaustion(p, iface, stealth, probes)
 				}
 			}
 
@@ -512,6 +514,7 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 				}
 				if !reconnected {
 					p.Send(bypassResultMsg{technique: "Re-probe + bypass", success: false, detail: "all failed"})
+					emitForensicsOnExhaustion(p, iface, stealth, newProbes)
 				}
 			}
 
@@ -524,6 +527,30 @@ func maintainSessionTUI(p *tea.Program, iface string, results []bypass.Result, b
 			}
 		}
 	}
+}
+
+// emitForensicsOnExhaustion is the auto-trigger: when a full bypass exhausts
+// with zero success, it captures a forensic package so the unsolved
+// environment can be analyzed offline. Best-effort and non-fatal — it never
+// panics the audit flow. It runs in its own goroutine so the session-maintain
+// loop is never blocked for the duration of the capture (up to the time cap),
+// and reuses the probes already in scope (no fresh sweep).
+func emitForensicsOnExhaustion(p *tea.Program, iface string, stealth bool, probes *probe.ProbeResults) {
+	go func() {
+		defer func() { _ = recover() }()
+
+		pkg := forensics.Collect(forensics.Options{
+			Iface:   iface,
+			Stealth: stealth,
+		}.WithProbes(probes))
+
+		res, err := pkg.Write("", forensics.WriteOptions{Format: "both"})
+		if err != nil {
+			p.Send(statusMsg{text: fmt.Sprintf("Forensic capture failed: %v", err)})
+			return
+		}
+		p.Send(statusMsg{text: fmt.Sprintf("Bypass exhausted — forensic package saved: %s", res.JSONPath)})
+	}()
 }
 
 func runAuditDryRun(startTime time.Time, stealth bool) {
