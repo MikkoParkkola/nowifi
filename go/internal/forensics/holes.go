@@ -218,6 +218,15 @@ func (p *Package) Text() string {
 		fmt.Fprintf(&b, "  %-40s %d %s%s\n", ep.Path, ep.StatusCode, ep.ContentType,
 			truncMark(ep.Truncated))
 	}
+	if pa := p.Raw.PaxAPIAnalysis; pa != nil {
+		fmt.Fprintf(&b, "  -> real-API=%v swagger-openapi=%v\n", pa.IsRealAPI, pa.SwaggerIsOpenAPI)
+		for _, rv := range pa.CandidateResetVectors {
+			fmt.Fprintf(&b, "     candidate reset vector: %s\n", rv)
+		}
+		for _, note := range pa.Notes {
+			fmt.Fprintf(&b, "     %s\n", note)
+		}
+	}
 
 	b.WriteString("\n===== HOLES FOUND (ranked; each maps to a nowifi technique) =====\n")
 	if len(p.Holes) == 0 {
