@@ -16,6 +16,7 @@ package failreport
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/config"
@@ -356,7 +358,9 @@ func ghSubmit(title, body string) (string, error) {
 		return "", err
 	}
 	_ = tmp.Close()
-	cmd := exec.Command("gh", "issue", "create",
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "issue", "create",
 		"--repo", repoSlug, "--title", title, "--body-file", tmp.Name())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
