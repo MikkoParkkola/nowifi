@@ -118,7 +118,7 @@ var Profiles = map[Provider]PortalProfile{
 		},
 		HasFreeTier: false,
 		RecommendedOrder: []string{
-			"mac_clone_idle",      // 17 paid devices visible, high success
+			"mac_clone_idle",      // 34 paid MACs visible at 2026-05-29 Finnair cutoff; session inheritance UNVERIFIED for nowifi's path (a naive bash clone of 31 candidates inherited no session — enforcement likely keys MAC+pax-api device-id, not pure MAC). Kept first pending next-flight data.
 			"mac_clone",           // Fallback: any device
 			"dns_tunnel",          // DNS always passes for portal redirect
 			"doh_tunnel",          // Cloudflare-dns.com likely whitelisted
