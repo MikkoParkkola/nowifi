@@ -26,7 +26,7 @@ VERIFY_IP="1.1.1.1"
 CHISEL_BIN="${CHISEL_BIN:-$HOME/go/bin/chisel}"
 CHISEL_AUTH="${CHISEL_AUTH:-mikko:7d3aae159ffb6b61a272063c}"
 CHISEL_TAILNET="http://100.85.108.8:8090"                        # spark over tailnet (proven)
-CHISEL_CF="https://friendly-perspective-forth-austin.trycloudflare.com"  # CF anycast (tailnet-independent)
+CHISEL_CF="${NOWIFI_CHISEL_CF:-}"   # CF anycast (tailnet-independent); ephemeral trycloudflare URLs rotate — set per-session
 SOCKS="127.0.0.1:1080"
 NETSVC="${NETSVC:-Wi-Fi}"   # macOS network service to apply SOCKS proxy to
 
@@ -88,7 +88,7 @@ fi
 
 # ---- RUNG 1.6: chisel SOCKS -> spark over Cloudflare (tailnet-INDEPENDENT) --
 # Best bet if the portal blocks Tailscale DERP but allows Cloudflare anycast.
-if run_rung 1.6 && [ -x "$CHISEL_BIN" ]; then
+if run_rung 1.6 && [ -x "$CHISEL_BIN" ] && [ -n "$CHISEL_CF" ]; then
   log "RUNG 1.6: chisel SOCKS -> spark via Cloudflare quick tunnel"
   start_chisel "$CHISEL_CF"
   if egress="$(verify_socks)" && [ -n "$egress" ]; then
@@ -102,9 +102,12 @@ fi
 # The operator's own tool — auto-orders mac_clone_idle -> dns_tunnel -> doh ->
 # ntp -> quic for Panasonic. Backgrounds bypass, restores on Ctrl+C.
 if run_rung 2 && command -v nowifi >/dev/null 2>&1; then
-  log "RUNG 2: sudo nowifi  (auto-bypass, Panasonic-ordered)"
+  log "RUNG 2: sudo nowifi -y  (auto-bypass, provider auto-detected)"
   log "   -> running nowifi in detect+bypass mode (give it ~60s)"
-  ( nowifi --provider panasonic_avionics 2>&1 | sed 's/^/   /' ) &
+  # nowifi v0.15.0 has NO --provider flag; it fingerprints the captive portal
+  # itself and auto-orders techniques (Panasonic -> mac_clone_idle, dns, doh,
+  # ntp, quic). -y = non-interactive auto-bypass, --fast = skip stealth delays.
+  ( nowifi -y --fast 2>&1 | sed 's/^/   /' ) &
   NW=$!; for _ in $(seq 1 12); do sleep 5; verify && { ok "RUNG 2 WORKS — nowifi bypass up. IP: $(curl -fsS --max-time 6 $VERIFY_URL 2>/dev/null)"; exit 0; }; done
   bad "rung 2 not yet; leaving nowifi running (pid $NW) — it keeps trying"
 fi
