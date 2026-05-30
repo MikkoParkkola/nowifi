@@ -104,6 +104,9 @@ sudo nowifi
 # Read-only assessment (no changes to network)
 nowifi diagnose
 
+# Capture a forensic package when an environment can't be bypassed (read-only)
+nowifi forensics
+
 # WPA password cracking
 sudo nowifi crack
 
@@ -148,6 +151,9 @@ nowifi doctor
 | `nowifi recon -o klm.json` | Passive network fingerprint for contributing provider profiles |
 | `nowifi diagnose` | Read-only security assessment (no changes to network) |
 | `nowifi diagnose -r json -o report.json` | Save diagnosis as JSON file |
+| `nowifi forensics` | Capture a portable forensic package of which channels survive enforcement (read-only, no sudo, local-only `holes-<ts>.{txt,json}`) |
+| `nowifi forensics --baseline` | Capture a full-access baseline to diff against later under enforcement |
+| `nowifi report` | Review and submit queued reports from networks nowifi couldn't bypass (consent-gated GitHub issue, MACs redacted) |
 | `nowifi crack` | 8-technique WPA/WPA2 cracking pipeline (ordered fastest-to-slowest, stops on first recovered password) |
 | `nowifi crack --scan-only` | Scan for WiFi networks without attacking |
 | `nowifi scan` | Scan nearby WiFi networks with signal/security info |
@@ -216,6 +222,19 @@ These work when you're connected to WiFi but stuck behind a captive portal login
 | 33 | **Cloudflare WARP tunnel** | Zero-config — auto-registers free WARP device, tunnels via HTTP/2 CONNECT | Critical |
 | 34 | **Portal self-relay** | Zero-config — tunnels through portal-whitelisted domains (Stripe, Google, Apple) via HTTP/2 CONNECT | Critical |
 | 35 | **TURN relay** | Zero-config — relays through public WebRTC TURN servers on TCP/443, indistinguishable from video calls | High |
+
+### When nowifi can't bypass — the self-improving loop
+
+If every technique fails, nowifi turns the dead end into data. It automatically captures a **forensic package** (which egress channels survived enforcement, the portal's control-plane surface, the ranked candidate techniques) and **queues it locally** — because a failed bypass means you're offline and can't file anything yet.
+
+The next time you run nowifi **with working internet** (or `nowifi watch` reconnects), it asks once:
+
+```
+Unsolved network captured 2026-05-29 — provider=panasonic_nordic_sky, 25 open channels.
+Submit this report to github.com/MikkoParkkola/nowifi? [y/N]
+```
+
+On `y`, it files a GitHub issue containing everything needed to build a bypass for that environment. Nothing is ever uploaded without that explicit consent, and your MAC plus nearby device MACs are redacted to vendor IDs first. Disable with `nowifi config set report_failures false`.
 
 ### Anonymous Telemetry (opt-in, zero-cost)
 

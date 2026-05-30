@@ -50,6 +50,8 @@ That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tri
 | `sudo nowifi --connectip-server URL` | CONNECT-IP full IP tunnel (TUN device) |
 | `nowifi diagnose` | Read-only security assessment |
 | `nowifi diagnose -r json` | Assessment as JSON |
+| `nowifi forensics` | Capture a portable forensic package of which egress channels survive enforcement (read-only, no sudo, local-only) |
+| `nowifi report` | Review/submit queued reports from environments nowifi could not bypass (consent-gated GitHub issue) |
 | `nowifi crack` | WPA/WPA2 password cracking (8 techniques) |
 | `nowifi scan` | Scan nearby WiFi networks |
 | `nowifi watch` | Maintain access -- auto-reconnect on session expiry |
