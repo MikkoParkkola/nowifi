@@ -245,6 +245,7 @@ func configEntries() []configEntry {
 		stringEntry("wt_server", "WebTransport tunnel server URL", func(c *cfgpkg.Config) string { return c.WTServer }, func(c *cfgpkg.Config, v string) { c.WTServer = v }, func(c *cfgpkg.Config) { c.WTServer = "" }, platform.ValidateURL),
 		boolEntry("auto_login", "Enable saved portal login automation", func(c *cfgpkg.Config) bool { return c.AutoLogin }, func(c *cfgpkg.Config, v bool) { c.AutoLogin = v }, func(c *cfgpkg.Config) { c.AutoLogin = defaults.AutoLogin }),
 		boolEntry("stealth", "Enable randomized probe timing by default", func(c *cfgpkg.Config) bool { return c.Stealth }, func(c *cfgpkg.Config, v bool) { c.Stealth = v }, func(c *cfgpkg.Config) { c.Stealth = defaults.Stealth }),
+		boolEntry("report_failures", "Offer to file a GitHub issue (with consent) when nowifi cannot bypass a network", func(c *cfgpkg.Config) bool { return c.ReportFailures }, func(c *cfgpkg.Config, v bool) { c.ReportFailures = v }, func(c *cfgpkg.Config) { c.ReportFailures = defaults.ReportFailures }),
 	}
 }
 
