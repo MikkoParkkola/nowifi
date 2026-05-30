@@ -320,6 +320,20 @@ func IssueBody(p *forensics.Package, ssid string) string {
 			fmt.Fprintf(&b, "| `%s` | %d |\n", e.Path, e.StatusCode)
 		}
 		b.WriteString("\n")
+		if pa := p.Raw.PaxAPIAnalysis; pa != nil {
+			fmt.Fprintf(&b, "**Recon verdict:** real-API=`%v` swagger-openapi=`%v`\n\n", pa.IsRealAPI, pa.SwaggerIsOpenAPI)
+			if len(pa.CandidateResetVectors) > 0 {
+				b.WriteString("Candidate reset vectors (recon only — not attempted):\n")
+				for _, rv := range pa.CandidateResetVectors {
+					fmt.Fprintf(&b, "- `%s`\n", rv)
+				}
+				b.WriteString("\n")
+			}
+			for _, note := range pa.Notes {
+				fmt.Fprintf(&b, "> %s\n", note)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	if len(p.Raw.Limitations) > 0 {

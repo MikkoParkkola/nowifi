@@ -90,6 +90,10 @@ type RawSections struct {
 	Cloudflare probe.HttpsProbeResult  `json:"cloudflare"`
 	// Section 8/8c: portal/Kong surface + pax-api control plane.
 	PaxAPI []PaxEndpoint `json:"pax_api,omitempty"`
+	// PaxAPIAnalysis is the recon verdict over PaxAPI: whether it is a real
+	// enforcement API versus the SPA HTML fallback, plus candidate reset
+	// vectors from a real swagger doc.
+	PaxAPIAnalysis *PaxAPIAnalysis `json:"pax_api_analysis,omitempty"`
 	// Section 9: enforcement model.
 	SelfMAC string `json:"self_mac,omitempty"`
 	// Topology context.
@@ -278,6 +282,7 @@ func Collect(opts Options) *Package {
 		}
 		mu.Lock()
 		raw.PaxAPI = pax
+		raw.PaxAPIAnalysis = AnalyzePaxAPI(pax)
 		if paxLimit != "" {
 			raw.Limitations = append(raw.Limitations, paxLimit)
 		}
