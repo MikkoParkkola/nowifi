@@ -19,6 +19,7 @@ import (
 	"github.com/MikkoParkkola/nowifi/internal/bypass"
 	"github.com/MikkoParkkola/nowifi/internal/capture"
 	"github.com/MikkoParkkola/nowifi/internal/detect"
+	"github.com/MikkoParkkola/nowifi/internal/failreport"
 	"github.com/MikkoParkkola/nowifi/internal/forensics"
 	"github.com/MikkoParkkola/nowifi/internal/guard"
 	"github.com/MikkoParkkola/nowifi/internal/platform"
@@ -113,6 +114,14 @@ func buildBypassConfig(portalInfo *detect.PortalInfo, stealth bool) *bypass.Conf
 // Flow: WiFi info -> portal detection -> leak probing -> interactive choice -> bypass -> report.
 func runAudit(cmd *cobra.Command, args []string) {
 	startTime := time.Now()
+
+	// Automatic, consent-gated report flow: after this run completes, if we
+	// have real internet and there are queued unsolved-network reports, offer
+	// to file each as a GitHub issue (sanitized, with explicit consent). This
+	// is a no-op when offline, when nothing is queued, or when disabled in
+	// config — so it is safe on every invocation. Deferred so it runs after
+	// the TUI exits (clean terminal for the prompt).
+	defer func() { _ = failreport.MaybeOfferPending(os.Stdin, os.Stdout) }()
 
 	// When --fast is set, disable stealth.
 	stealth := flagStealth
@@ -550,6 +559,17 @@ func emitForensicsOnExhaustion(p *tea.Program, iface string, stealth bool, probe
 			return
 		}
 		p.Send(statusMsg{text: fmt.Sprintf("Bypass exhausted — forensic package saved: %s", res.JSONPath)})
+
+		// Queue the package for a consent-gated GitHub issue. We are offline
+		// now (bypass failed), so it is filed later when internet returns.
+		// Best-effort; never fatal to the audit flow.
+		ssid := ""
+		if wi, werr := platform.GetWifiInfo(iface); werr == nil && wi != nil {
+			ssid = wi.SSID
+		}
+		if _, eqErr := failreport.Enqueue(pkg, ssid); eqErr == nil {
+			p.Send(statusMsg{text: "Queued — you'll be asked to submit a GitHub issue next time you're online."})
+		}
 	}()
 }
 

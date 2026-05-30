@@ -41,6 +41,14 @@ type Config struct {
 	SSEServer       string `json:"sse_server,omitempty"`
 	GRPCServer      string `json:"grpc_server,omitempty"`
 	ConnectIPServer string `json:"connectip_server,omitempty"`
+
+	// ReportFailures controls whether nowifi NOTICES queued unsolved-network
+	// forensic reports and PROMPTS to file a GitHub issue when internet is
+	// available. It defaults to true, which does NOT violate the opt-in
+	// telemetry invariant: it only enables the consent prompt — nothing is ever
+	// uploaded without an explicit interactive "y". Set false to disable the
+	// notice entirely. No omitempty: an explicit false must persist.
+	ReportFailures bool `json:"report_failures"`
 }
 
 var (
@@ -66,8 +74,9 @@ func Path() string {
 // Defaults returns the default configuration.
 func Defaults() *Config {
 	return &Config{
-		Interface: "en0",
-		Stealth:   true,
+		Interface:      "en0",
+		Stealth:        true,
+		ReportFailures: true,
 	}
 }
 
@@ -181,6 +190,7 @@ func knownConfigKeys() map[string]struct{} {
 		"sse_server":       {},
 		"grpc_server":      {},
 		"connectip_server": {},
+		"report_failures":  {},
 	}
 }
 
