@@ -113,6 +113,14 @@ func MapHoles(raw *RawSections) []Hole {
 		}
 	}
 
+	// Section 8b: Kong admin API exposed = full gateway control.
+	for _, k := range raw.KongAdmin {
+		if k.Exposed {
+			holes = append(holes, Hole{"kong_admin_exposed", SeverityHigh,
+				fmt.Sprintf("Kong admin API open on :%d (HTTP 200) — full gateway control; add a permissive route to bypass enforcement", k.Port)})
+		}
+	}
+
 	// Section 8c: a live enforcement endpoint is a PoC surface.
 	for _, ep := range raw.PaxAPI {
 		if ep.StatusCode >= 200 && ep.StatusCode < 500 && ep.StatusCode != 404 {
@@ -207,6 +215,25 @@ func (p *Package) Text() string {
 		p.Raw.QUIC.IsOpen, p.Raw.NTP.IsOpen, p.Raw.DoH.IsOpen, p.Raw.ICMP.IsOpen)
 	for _, w := range p.Raw.Whitelists {
 		fmt.Fprintf(&b, "  allow? %s -> open=%t (%d)\n", w.Domain, w.IsOpen, w.StatusCode)
+	}
+
+	if len(p.Raw.KongAdmin) > 0 || p.Raw.NmapGateway != "" {
+		b.WriteString("\n===== 8b. GATEWAY ATTACK SURFACE =====\n")
+		for _, k := range p.Raw.KongAdmin {
+			status := "closed/filtered"
+			if k.Exposed {
+				status = "EXPOSED (HTTP 200 — full gateway control)"
+			} else if k.StatusCode != 0 {
+				status = fmt.Sprintf("HTTP %d", k.StatusCode)
+			}
+			fmt.Fprintf(&b, "  Kong admin :%d  %s\n", k.Port, status)
+		}
+		if p.Raw.NmapGateway != "" {
+			b.WriteString("  [nmap gateway sweep]\n")
+			for _, line := range strings.Split(p.Raw.NmapGateway, "\n") {
+				fmt.Fprintf(&b, "    %s\n", line)
+			}
+		}
 	}
 
 	b.WriteString("\n===== 8c. PORTAL API (pax-api enforcement control plane) =====\n")

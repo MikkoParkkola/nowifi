@@ -17,6 +17,7 @@ var (
 	forensicsBaseline     bool
 	forensicsBaselineFile string
 	forensicsTimeout      int
+	forensicsNmap         bool
 	forensicsPortalBase   string
 )
 
@@ -58,6 +59,8 @@ func init() {
 		"Hard total time cap in seconds for live collection")
 	forensicsCmd.Flags().StringVar(&forensicsPortalBase, "portal-base", "",
 		"Override the pax-api base URL (derived from detected portal otherwise)")
+	forensicsCmd.Flags().BoolVar(&forensicsNmap, "nmap", false,
+		"Run the slow nmap gateway service sweep (section 8b; needs nmap installed)")
 }
 
 func runForensics(cmd *cobra.Command, args []string) {
@@ -79,6 +82,7 @@ func runForensics(cmd *cobra.Command, args []string) {
 		Stealth:      stealth,
 		PortalBase:   forensicsPortalBase,
 		TotalTimeout: time.Duration(forensicsTimeout) * time.Second,
+		RunNmap:      forensicsNmap,
 	})
 	fmt.Println("done")
 

@@ -88,6 +88,9 @@ type RawSections struct {
 	// Section 7: allowlist + SNI/domain-fronting.
 	Whitelists []probe.WhitelistResult `json:"whitelists,omitempty"`
 	Cloudflare probe.HttpsProbeResult  `json:"cloudflare"`
+	// Section 8b: gateway attack surface (Kong admin exposure + optional nmap).
+	KongAdmin   []KongProbe `json:"kong_admin,omitempty"`
+	NmapGateway string      `json:"nmap_gateway,omitempty"`
 	// Section 8/8c: portal/Kong surface + pax-api control plane.
 	PaxAPI []PaxEndpoint `json:"pax_api,omitempty"`
 	// PaxAPIAnalysis is the recon verdict over PaxAPI: whether it is a real
@@ -126,6 +129,9 @@ type Options struct {
 	PortalBase string
 	// TotalTimeout is the hard wall-clock cap. Zero uses DefaultTotalTimeout.
 	TotalTimeout time.Duration
+	// RunNmap enables the optional, slow nmap gateway service sweep (section
+	// 8b). Off by default to keep the default run fast for an offline user.
+	RunNmap bool
 	// httpClient is injectable for tests; nil uses a real short-timeout client.
 	httpClient *http.Client
 	// probes, when non-nil, is used instead of running a live ProbeAll sweep.
@@ -324,6 +330,19 @@ func Collect(opts Options) *Package {
 	pkg.Provider = opts.Provider
 	if pkg.Provider == "" {
 		pkg.Provider = deriveProvider(portal)
+	}
+
+	// Section 8b: gateway attack surface. Kong admin exposure is a pure-Go,
+	// always-on probe (the highest-value 8b finding). The nmap sweep is
+	// opt-in (slow) and degrades when nmap is absent.
+	pkg.Raw.KongAdmin = probeKongAdmin(opts.httpClient, pkg.GW)
+	if opts.RunNmap {
+		if out, ran := runNmapGateway(pkg.GW); ran {
+			pkg.Raw.NmapGateway = out
+		} else {
+			pkg.Raw.Limitations = append(pkg.Raw.Limitations,
+				"nmap gateway sweep skipped (nmap not installed or no gateway)")
+		}
 	}
 
 	pkg.Holes = MapHoles(&pkg.Raw)
