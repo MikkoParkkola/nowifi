@@ -5,28 +5,28 @@
 class Nowifi < Formula
   desc "WiFi security assessment tool for captive portals and WPA audits"
   homepage "https://github.com/MikkoParkkola/nowifi"
-  version "0.14.3"
+  version "0.16.0"
   license "AGPL-3.0-or-later"
 
   on_macos do
     on_arm do
-      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.14.3/nowifi-darwin-arm64.tar.gz"
-      sha256 "bbb34678f157a76b89d878d886c9845e3cc7d1cbfe88cb98902840a6643005f7"
+      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.16.0/nowifi-darwin-arm64.tar.gz"
+      sha256 "3ce4ae213f7adc1bef3b5fa2d212975d3ffb93d0b68bfd8237ed207b01be9049"
     end
     on_intel do
-      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.14.3/nowifi-darwin-amd64.tar.gz"
-      sha256 "c351729597af59a59918ce2262855871ca5cf448a375185ab06bba1f1c6d8670"
+      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.16.0/nowifi-darwin-amd64.tar.gz"
+      sha256 "1edf6cc755258d1dcb826778a010564918070c65e1687b24287c4820b9d0cb23"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.14.3/nowifi-linux-arm64.tar.gz"
-      sha256 "73b17663b166de1a12ec9117a64a9f866f5b82c5a155155df266d29bd6a3af28"
+      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.16.0/nowifi-linux-arm64.tar.gz"
+      sha256 "54bf8f956286eaa4c5f08978baa324e41ac67c048e3f83a43e67543c62137b1a"
     end
     on_intel do
-      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.14.3/nowifi-linux-amd64.tar.gz"
-      sha256 "ae4d18ded5cf42a26725e0ebf37a1266aa0429a1980f72647ab3687d962c0cb8"
+      url "https://github.com/MikkoParkkola/nowifi/releases/download/v0.16.0/nowifi-linux-amd64.tar.gz"
+      sha256 "4bb4d517444385d0d34276ed10cb42ddb4983051459f7d020b5804e912319fa3"
     end
   end
 
