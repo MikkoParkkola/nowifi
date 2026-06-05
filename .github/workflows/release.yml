@@ -21,8 +21,35 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
+  # Release backstop for the dependency-vulnerability gate. ci.yml scans on
+  # every PR/push; this re-scans at tag time so a vuln that landed between the
+  # last green CI run and the release tag (or via a path that skipped CI) cannot
+  # ship. The `build` job below is `needs:`-ed to this gate, and `release`
+  # already `needs: build`, so the whole build -> release DAG (binaries,
+  # tarballs, SBOM, cosign signatures, provenance attestation, GitHub release)
+  # blocks if a known fixable vuln is present. Exceptions are time-boxed in
+  # .github/osv-scanner.toml.
+  security-gate:
+    name: Security gate (block release on known vulns)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Scan Go dependencies against OSV
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --config=.github/osv-scanner.toml
+            --recursive
+            ./
+
   build:
     name: Build ${{ matrix.target }}
+    needs: security-gate
     timeout-minutes: 15
     # CGO_ENABLED=0 means pure-Go cross-compilation: any single host
     # can produce all four binaries. Pinning the whole matrix to
