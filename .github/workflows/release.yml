@@ -44,6 +44,7 @@ jobs:
         with:
           scan-args: |-
             --config=.github/osv-scanner.toml
+            --no-call-analysis=all
             --recursive
             ./
 
