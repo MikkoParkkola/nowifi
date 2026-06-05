@@ -1,0 +1,37 @@
+# osv-scanner allowlist — the pressure valve for the CI security gate.
+#
+# The gate fails the build on ANY known, fixable vulnerability in the
+# dependency tree. It runs in two places:
+#   - ci.yml `osv-scan` job          -> fast layer, fires on every PR/push
+#   - release.yml `security-gate` job -> backstop, blocks the release if a
+#     vuln slipped past CI between merge and tag
+#
+# Scope (verified by local run 2026-06-05): Go modules. The Go module lives in
+# go/go.mod; osv-scanner is invoked with `--recursive ./` from the repo root, so
+# it descends into go/ and checks every dep (including ones govulncheck skips as
+# unreachable) against OSV. govulncheck (in ci.yml's `lint` job) stays as the
+# reachability-aware Go signal; osv-scanner is the broader net — it flags a
+# vulnerable dep even when no reachable call path exists. NOT covered:
+# github-actions advisories (our actions are SHA-pinned, which is itself the
+# mitigation, and osv-scanner does not map SHA pins to advisory versions). This
+# repo builds release binaries + tarballs + SBOM only — no Docker image is built
+# or pushed — so there is no container image layer to scan and no trivy gate.
+#
+# Failing on any fixable vuln is intentional: a new build must include the
+# security fixes that are available. Dependabot PROPOSES the bump PR; this gate
+# DISPOSES — it refuses to ship until the fix is merged.
+#
+# When a vulnerability has NO upstream fix yet, or is verified unreachable, it
+# would otherwise block every release indefinitely. Add a time-boxed exception
+# here instead of weakening the gate. Each entry MUST carry a reason and an
+# ignoreUntil review date — expired entries re-trigger the gate automatically.
+#
+# Format (https://google.github.io/osv-scanner/configuration/):
+#
+#   [[IgnoredVulns]]
+#   id = "GO-2024-1234"
+#   ignoreUntil = 2026-07-01   # review by this date; after it the gate fires again
+#   reason = "No patched release upstream yet; unreachable per govulncheck. Reviewed 2026-06-05 by <who>."
+#
+# Keep this list EMPTY unless a vuln genuinely has no fix. The right fix for a
+# fixable vuln is to bump the dependency, not to ignore it.
