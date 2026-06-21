@@ -386,7 +386,7 @@ func TestCrackLongDescription(t *testing.T) {
 }
 
 func TestReadmeRootCommandTableMatchesSessionMaintenance(t *testing.T) {
-	readmePath := filepath.Join("..", "..", "..", "README.md")
+	readmePath := filepath.Join("..", "..", "README.md")
 	data, err := os.ReadFile(readmePath)
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)

@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/MikkoParkkola/nowifi)](https://goreportcard.com/report/github.com/MikkoParkkola/nowifi)
 [![Release](https://img.shields.io/github/v/release/MikkoParkkola/nowifi)](https://github.com/MikkoParkkola/nowifi/releases)
 [![Downloads](https://img.shields.io/github/downloads/MikkoParkkola/nowifi/total)](https://github.com/MikkoParkkola/nowifi/releases)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/MikkoParkkola/nowifi/master?filename=go/go.mod)](go/go.mod)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/MikkoParkkola/nowifi/master?filename=go.mod)](go.mod)
 [![Dependencies](https://img.shields.io/librariesio/github/MikkoParkkola/nowifi)](https://libraries.io/github/MikkoParkkola/nowifi)
 [![GitHub Stars](https://img.shields.io/github/stars/MikkoParkkola/nowifi?style=social)](https://github.com/MikkoParkkola/nowifi)
 
@@ -35,6 +35,12 @@ Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-techniqu
 
 ```bash
 brew install MikkoParkkola/tap/nowifi
+```
+
+### Go
+
+```bash
+go install github.com/MikkoParkkola/nowifi/cmd/nowifi@latest
 ```
 
 That's it. Pre-built binary, no Go toolchain, no `sudo install`. Works on
@@ -83,7 +89,7 @@ sudo install -m 0755 nowifi-linux-arm64 /usr/local/bin/nowifi
 
 ```bash
 git clone https://github.com/MikkoParkkola/nowifi.git
-cd nowifi/go
+cd nowifi
 make build
 make test-short
 make ci

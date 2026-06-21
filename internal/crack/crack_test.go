@@ -289,7 +289,7 @@ func TestRunCrackPipelineOrder(t *testing.T) {
 }
 
 func TestReadmeCrackPipelineMatchesImplementation(t *testing.T) {
-	readmePath := filepath.Join("..", "..", "..", "README.md")
+	readmePath := filepath.Join("..", "..", "README.md")
 	data, err := os.ReadFile(readmePath)
 	if err != nil {
 		t.Fatalf("ReadFile(%q): %v", readmePath, err)

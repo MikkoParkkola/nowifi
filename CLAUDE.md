@@ -65,7 +65,7 @@ Scope boundary: nowifi is **not an MCP server**. It is a standalone CLI tool. `A
 |---|---|
 | Onboard a human user | `README.md` |
 | Onboard a fresh AI assistant to USE nowifi | `AGENTS.md` (intentionally diverged — different audience) |
-| Understand bypass techniques | `go/` + technique-specific modules |
+| Understand bypass techniques | repo root + technique-specific modules under `internal/bypass/` |
 | Server mode (tunnel + UDP) | recent commits e715a3f, d09dc0e, e4712db |
-| TUI + UX | `charmbracelet/bubbletea` + `lipgloss` modules under `go/` |
+| TUI + UX | `charmbracelet/bubbletea` + `lipgloss` modules under `internal/` |
 | Release process | CI workflow `.github/workflows/ci.yml` |

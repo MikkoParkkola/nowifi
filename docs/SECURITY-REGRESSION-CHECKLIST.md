@@ -11,7 +11,7 @@ Run these locally for security-sensitive changes:
 make ci
 cd go && go test -race -count=1 ./...
 cd go && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run
-cd go && go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 cd go && go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 ```
 
@@ -31,7 +31,7 @@ signatures, and GitHub provenance attestations.
 | TTL and hop limit | Stealth mode restores IPv4 TTL but leaves IPv6 hop limit changed | Store and restore both IPv4 TTL and IPv6 hop limit |
 | Bootstrap downloads | Cloud-init executes unchecked remote binaries as root | Pin version and verify SHA-256 before install |
 | Generated URLs and logs | Secrets leak through config display, logs, or result details | Redact `nowifi_token` and provider tokens in every user-visible path |
-| GitHub Actions | CI warnings hide real failures or cache the wrong module | Use Node 24-capable actions and point Go caches at `go/go.sum` |
+| GitHub Actions | CI warnings hide real failures or cache the wrong module | Use Node 24-capable actions and point Go caches at `go.sum` |
 | Release artifacts | Users cannot verify binary origin or contents | Publish checksums, SBOMs, keyless signatures, and provenance attestations for every archive |
 
 ## Existing Regression Coverage

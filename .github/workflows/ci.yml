@@ -26,23 +26,19 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go.sum
 
       - name: Build
-        working-directory: go
         run: make build
 
       - name: Vet
-        working-directory: go
         run: make vet
 
       - name: Test
-        working-directory: go
         run: make test GO_TESTFLAGS='-race -count=1'
 
       - name: Test Coverage
         if: matrix.os == 'ubuntu-latest' && matrix.go-version == 'stable'
-        working-directory: go
         run: make test-coverage
 
   lint:
@@ -56,20 +52,18 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.4
           install-mode: goinstall
-          working-directory: go
 
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Staticcheck
-        working-directory: go
         run: |
           "$(go env GOPATH)/bin/staticcheck" ./...
 
@@ -77,11 +71,10 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Vulnerability check
-        working-directory: go
         run: |
           "$(go env GOPATH)/bin/govulncheck" ./...
 
-  # Fast layer of the dependency-vulnerability gate: scans go/go.mod against the
+  # Fast layer of the dependency-vulnerability gate: scans go.mod against the
   # OSV database on every PR and push. Fails the build on any known, fixable
   # vuln so a security fix lands with the change that introduces (or fails to
   # bump past) it — not weeks later. govulncheck (in the `lint` job) stays as

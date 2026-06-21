@@ -105,7 +105,7 @@ func TestAllMethodConstants(t *testing.T) {
 }
 
 func TestReadmeTechniqueClaimsMatchImplementation(t *testing.T) {
-	readmePath := filepath.Join("..", "..", "..", "README.md")
+	readmePath := filepath.Join("..", "..", "README.md")
 	data, err := os.ReadFile(readmePath)
 	if err != nil {
 		t.Fatalf("ReadFile(%q): %v", readmePath, err)
