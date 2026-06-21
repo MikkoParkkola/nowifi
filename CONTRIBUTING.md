@@ -23,10 +23,9 @@ make lint
 ### Project Structure
 
 ```
-go/
-  cmd/nowifi/          Entry point
-  internal/
-    bypass/            19 bypass techniques (split by category)
+cmd/nowifi/          Entry point
+internal/
+  bypass/            19 bypass techniques (split by category)
     detect/            Portal detection + vendor fingerprinting
     probe/             Pre-auth leak enumeration
     platform/          OS abstraction (darwin.go / linux.go)

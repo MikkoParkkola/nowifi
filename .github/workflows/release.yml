@@ -82,15 +82,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go.sum
 
       - name: Install SBOM generator
-        working-directory: go
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
 
       - name: Build
-        working-directory: go
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -104,7 +102,6 @@ jobs:
             ./cmd/nowifi
 
       - name: Generate SBOM
-        working-directory: go
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -120,7 +117,7 @@ jobs:
             .
 
       - name: Package
-        working-directory: go/bin
+        working-directory: bin
         run: |
           tar czf "nowifi-${{ matrix.target }}.tar.gz" "nowifi-${{ matrix.target }}"
           shasum -a 256 "nowifi-${{ matrix.target }}.tar.gz" > "nowifi-${{ matrix.target }}.tar.gz.sha256"
@@ -130,10 +127,10 @@ jobs:
         with:
           name: nowifi-${{ matrix.target }}
           path: |
-            go/bin/nowifi-${{ matrix.target }}.tar.gz
-            go/bin/nowifi-${{ matrix.target }}.tar.gz.sha256
-            go/bin/nowifi-${{ matrix.target }}.sbom.cdx.json
-            go/bin/nowifi-${{ matrix.target }}.sbom.cdx.json.sha256
+            bin/nowifi-${{ matrix.target }}.tar.gz
+            bin/nowifi-${{ matrix.target }}.tar.gz.sha256
+            bin/nowifi-${{ matrix.target }}.sbom.cdx.json
+            bin/nowifi-${{ matrix.target }}.sbom.cdx.json.sha256
 
   release:
     name: Publish release

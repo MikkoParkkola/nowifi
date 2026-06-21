@@ -1,7 +1,5 @@
 # Go
 bin/
-go/bin/
-go/nowifi
 
 # Secrets
 .env
@@ -21,3 +19,4 @@ metrics/
 .nowifi/
 __pycache__/
 .claude/
+cover.out
