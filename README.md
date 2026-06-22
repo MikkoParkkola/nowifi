@@ -34,6 +34,7 @@ Need the actual WiFi password instead? `nowifi crack` runs an ordered 8-techniqu
 ### Homebrew (Recommended)
 
 ```bash
+brew trust --tap MikkoParkkola/tap   # Homebrew 6.0+
 brew install MikkoParkkola/tap/nowifi
 ```
 
