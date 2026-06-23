@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -166,5 +168,69 @@ func TestCreateVPS_UnknownProvider_RegistryError(t *testing.T) {
 	}
 	if !found || len(errStr) == 0 {
 		t.Errorf("error message unexpectedly empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// libp2p provider AC tests (verbatim from ticket + GH#29)
+// ---------------------------------------------------------------------------
+
+/*
+MIK.NOWI.1 — Root cause identified and a fix implemented for the issue described below; change is reviewed, merged to main, and deployed to production.
+MIK.NOWI.2 — A regression test (or reproducible verification step) covers the fixed behavior and passes in CI.
+MIK.NOWI.3 — The originating GitHub issue is referenced/closed once the fix is merged to main and deployed to production.
+
+From originating https://github.com/MikkoParkkola/nowifi/issues/29 :
+- Provider registered as `libp2p` in the existing registry
+- `nowifi server create -p libp2p` prints a 3-word pairing code in <3s
+- G1 auth-assertion + G3 no-anonymity disclosure preserved
+- udpws logic reused via shared `udppipe` abstraction, not duplicated
+- Unit tests for pairing flow, transport selection, peer-ID rotation
+*/
+func TestLibp2pProvider_CreateAfterAuthYieldsPairingCodeAndNonScaffold(t *testing.T) {
+	// This pins: G1 preserved, pairing code generated and returned in Extra,
+	// status updated by real impl (not left as scaffold), Create exercised.
+	old := stdinReader
+	stdinReader = strings.NewReader("yes\n")
+	defer func() { stdinReader = old }()
+
+	p, ok := Get("libp2p")
+	if !ok {
+		t.Fatal("libp2p provider not registered")
+	}
+
+	// Short ctx so rendezvous wait returns promptly (no peer in unit test).
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	info, err := p.Create(ctx, CreateOpts{
+		Extra: map[string]string{"udp_target": "127.0.0.1:51820"},
+	})
+	// Auth must have passed (G1), not declined.
+	if errors.Is(err, ErrAuthorizationDeclined) {
+		t.Fatalf("G1 auth failed despite 'yes': %v", err)
+	}
+	// May timeout on peer wait (expected in unit); must not be auth err.
+	if err != nil && errors.Is(err, ErrAuthorizationDeclined) {
+		t.Fatalf("unexpected auth decline: %v", err)
+	}
+
+	if info == nil {
+		t.Fatal("expected non-nil info even on timeout path")
+	}
+	if info.Provider != "libp2p" {
+		t.Errorf("Provider = %q, want libp2p", info.Provider)
+	}
+	code := info.Extra["pairing_code"]
+	if code == "" {
+		t.Error("pairing_code missing from Extra; create must print 3-word code")
+	}
+	parts := strings.Split(code, "-")
+	if len(parts) != 3 {
+		t.Errorf("pairing_code = %q, want 3 words", code)
+	}
+	// Polarity per AC: after impl the scaffold placeholder is replaced.
+	if strings.Contains(strings.ToLower(info.Status), "scaffold") {
+		t.Errorf("status still contains 'scaffold' placeholder; impl must replace it: %s", info.Status)
 	}
 }
