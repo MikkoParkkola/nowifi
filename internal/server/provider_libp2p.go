@@ -25,9 +25,21 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/MikkoParkkola/nowifi/internal/server/udppipe"
+	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 func init() { Register(&libp2pProvider{}) }
@@ -44,47 +56,261 @@ func (p libp2pProvider) Create(ctx context.Context, opts CreateOpts) (*Info, err
 		return nil, err
 	}
 
+	// G3 disclosure (per design + GH#29 AC).
+	fmt.Println("Note: your peer IP will be visible to the paired peer and briefly to circuit relays.")
+
 	// Generate ephemeral Ed25519 keypair → peer ID.
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("libp2p: keygen: %w", err)
 	}
-	_ = priv // used once the libp2p host is wired
-	peerID := fmt.Sprintf("%x", pub[:12]) // truncated fingerprint for display
+	_ = priv // stored in host (host owns the private key)
 
 	// Generate 3-word pairing code (33 bits entropy, 5-min TTL).
 	code := generatePairingCode()
+	topicStr := topicForCode(code)
 
-	// TODO(libp2p): bootstrap to public DHT, announce rendezvous on
-	// pubsub topic nowifi-pair-<hash(code)>, wait for peer.
-	//
-	// Rough sketch:
-	//   1. Create go-libp2p host with QUIC transport.
-	//   2. Connect to bootstrap.libp2p.io nodes.
-	//   3. Subscribe to /nowifi-pair/<sha256(code)> topic.
-	//   4. Exchange peer IDs + multiaddrs via pubsub.
-	//   5. DCUtR upgrade → direct UDP connection.
-	//   6. Bridge local UDP ↔ libp2p stream via udppipe.
-	//
-	// See docs/LIBP2P-PROVIDER-DESIGN.md §4 for full architecture.
+	// Determine UDP target to bridge to (from Extra or default).
+	udpTarget := "127.0.0.1:51820"
+	if t := opts.Extra["udp_target"]; t != "" {
+		udpTarget = t
+	}
 
+	fmt.Printf("  Pairing code: %s\n", code)
+	fmt.Println("  Waiting for peer... (expires in 5m)")
+
+	h, ps, err := p.startHostAndPubsub(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("libp2p: host: %w", err)
+	}
+
+	topic, err := ps.Join(topicStr)
+	if err != nil {
+		h.Close()
+		return nil, fmt.Errorf("libp2p: join topic: %w", err)
+	}
+	sub, err := topic.Subscribe()
+	if err != nil {
+		h.Close()
+		return nil, fmt.Errorf("libp2p: sub: %w", err)
+	}
+	defer sub.Cancel()
+
+	// Announce self.
+	selfAnnounce := peerAnnounce{
+		PeerID: h.ID().String(),
+		Addrs:  addrsToStrings(h.Addrs()),
+	}
+	if err := publishAnnounce(ctx, topic, selfAnnounce); err != nil {
+		h.Close()
+		return nil, err
+	}
+
+	// Wait for remote peer announce (different from self).
+	var remote peer.AddrInfo
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer waitCancel()
+	found := make(chan peer.AddrInfo, 1)
+	go func() {
+		for {
+			msg, err := sub.Next(waitCtx)
+			if err != nil {
+				return
+			}
+			if msg.ReceivedFrom == h.ID() {
+				continue
+			}
+			var a peerAnnounce
+			if json.Unmarshal(msg.Data, &a) != nil {
+				continue
+			}
+			if a.PeerID == h.ID().String() {
+				continue
+			}
+			pi, err := addrInfoFromAnnounce(a)
+			if err == nil {
+				select {
+				case found <- pi:
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	select {
+	case r := <-found:
+		remote = r
+	case <-waitCtx.Done():
+		h.Close()
+		return nil, fmt.Errorf("libp2p: timeout waiting for peer on topic %s", topicStr)
+	}
+
+	// Connect (DCUtR/holepunch will upgrade if possible).
+	if err := h.Connect(ctx, remote); err != nil {
+		h.Close()
+		return nil, fmt.Errorf("libp2p: connect remote: %w", err)
+	}
+
+	// Set stream handler for the UDP protocol (offer side accepts streams).
+	const udpProto = "/nowifi/udp/1.0.0"
+	h.SetStreamHandler(udpProto, func(s network.Stream) {
+		pipe := udppipe.NewLenPrefixPipe(s, udppipe.DefaultMTU)
+		_, stopBridge, _ := udppipe.BridgeUDPToPipe(udpTarget, pipe, udppipe.DefaultMTU, nil)
+		// Keep bridge alive for life of stream; close on stream close is handled by pipe.
+		go func() {
+			// When stream closes, stop bridge.
+			<-ctx.Done()
+			stopBridge()
+		}()
+	})
+
+	// Publish our announce again post-connect (helps).
+	_ = publishAnnounce(ctx, topic, selfAnnounce)
+
+	peerShort := remote.ID.String()[:12]
 	info := &Info{
 		Provider: "libp2p",
-		ServerID: peerID,
-		Status:   "scaffold — go-libp2p integration pending",
+		ServerID: fmt.Sprintf("%s", h.ID().String()[:12]),
+		Status:   "active",
 		Extra: map[string]string{
 			"pairing_code": code,
-			"peer_id":      peerID,
+			"peer_id":      h.ID().String(),
+			"remote_id":    peerShort,
+			"udp_target":   udpTarget,
 		},
 	}
+	// Store for Destroy.
+	storeActive(h)
 	return info, nil
 }
 
 func (libp2pProvider) Destroy(ctx context.Context, info *Info, _ string) error {
-	// TODO(libp2p): close libp2p host, stop DHT, cancel pubsub.
+	closeActive()
 	_ = ctx
 	_ = info
 	return nil
+}
+
+// peerAnnounce is exchanged over pubsub for rendezvous.
+type peerAnnounce struct {
+	PeerID string   `json:"id"`
+	Addrs  []string `json:"addrs"`
+}
+
+func publishAnnounce(ctx context.Context, topic *pubsub.Topic, a peerAnnounce) error {
+	b, _ := json.Marshal(a)
+	return topic.Publish(ctx, b)
+}
+
+func addrInfoFromAnnounce(a peerAnnounce) (peer.AddrInfo, error) {
+	pid, err := peer.Decode(a.PeerID)
+	if err != nil {
+		return peer.AddrInfo{}, err
+	}
+	addrs := make([]ma.Multiaddr, 0, len(a.Addrs))
+	for _, s := range a.Addrs {
+		m, err := ma.NewMultiaddr(s)
+		if err == nil {
+			addrs = append(addrs, m)
+		}
+	}
+	return peer.AddrInfo{ID: pid, Addrs: addrs}, nil
+}
+
+func addrsToStrings(addrs []ma.Multiaddr) []string {
+	out := make([]string, len(addrs))
+	for i, a := range addrs {
+		out[i] = a.String()
+	}
+	return out
+}
+
+// startHostAndPubsub creates a QUIC-only libp2p host, connects bootstraps,
+// and returns host + pubsub. Topic is computed from pairing code by caller.
+func (p libp2pProvider) startHostAndPubsub(ctx context.Context) (host.Host, *pubsub.PubSub, error) {
+	h, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/0.0.0.0/udp/0/quic-v1"),
+		libp2p.EnableHolePunching(),
+		libp2p.EnableRelay(),
+		libp2p.NATPortMap(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Bootstrap (best effort; continue even if some fail).
+	bootstraps := []string{
+		"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtb1RNz8h2V7o3G7z",
+		"/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+		"/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+	}
+	for _, s := range bootstraps {
+		m, err := ma.NewMultiaddr(s)
+		if err != nil {
+			continue
+		}
+		pi, err := peer.AddrInfoFromP2pAddr(m)
+		if err != nil {
+			continue
+		}
+		_ = h.Connect(ctx, *pi)
+	}
+
+	ps, err := pubsub.NewFloodSub(ctx, h)
+	if err != nil {
+		h.Close()
+		return nil, nil, err
+	}
+	return h, ps, nil
+}
+
+// topicForCode returns the rendezvous topic for a pairing code.
+func topicForCode(code string) string {
+	sum := sha256.Sum256([]byte(code))
+	return fmt.Sprintf("/nowifi/pair/%x", sum[:8])
+}
+
+// active host state for Destroy (single active P2P at a time is sufficient).
+var (
+	activeMu     sync.Mutex
+	activeHost   host.Host
+)
+
+func storeActive(h host.Host) {
+	activeMu.Lock()
+	if activeHost != nil {
+		_ = activeHost.Close()
+	}
+	activeHost = h
+	activeMu.Unlock()
+}
+
+func closeActive() {
+	activeMu.Lock()
+	if activeHost != nil {
+		_ = activeHost.Close()
+		activeHost = nil
+	}
+	activeMu.Unlock()
+}
+
+// Override topic computation for callers (pubsub join uses code hash).
+// The start func above returns empty topic; caller computes with topicForCode(code) then joins.
+func init() {
+	// ensure registration happens (already in file top)
+	_ = topicForCode // used by future client join and callers
+}
+
+// ConnectLibp2pClientPair is the joiner side invoked by `nowifi server client --pair CODE`.
+// For Phase 1 the rendezvous + stream + udppipe bridge is stubbed; server create side is complete.
+func ConnectLibp2pClientPair(ctx context.Context, code, udpLocal string) error {
+	_ = topicForCode(code)
+	_ = ctx
+	_ = udpLocal
+	// Real impl would: host, pubsub join same topic, announce, receive remote, Connect, NewStream(udpProto),
+	// wrap with NewLenPrefixPipe, ListenUDPAndBridge(udpLocal, pipe).
+	return fmt.Errorf("libp2p --pair client join not wired (use server create -p libp2p for P2P offer side)")
 }
 
 // ─── Pairing code generator ──────────────────────────────────────────────────
