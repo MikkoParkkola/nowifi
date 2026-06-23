@@ -4,7 +4,7 @@
 
 ## What To Do
 
-You are setting up `nowifi` -- captive portal bypass tool. One command, 43 techniques, browser works immediately.
+You are setting up `nowifi` -- a captive portal bypass tool. One command, 43 techniques, browser works immediately.
 
 ### Step 1: Install
 
@@ -33,7 +33,7 @@ nowifi diagnose
 nowifi tools
 ```
 
-That is it. `nowifi` auto-detects captive portal, probes for weaknesses, tries 35 bypass techniques (most powerful first), stops on first one that works, and maintains your connection until `Ctrl+C`. All network changes are restored on exit.
+That is it. `nowifi` auto-detects the captive portal, probes for weaknesses, tries 35 bypass techniques (most powerful first), stops on the first one that works, and maintains your connection until `Ctrl+C`. All network changes are restored on exit.
 
 ---
 
@@ -71,11 +71,11 @@ That is it. `nowifi` auto-detects captive portal, probes for weaknesses, tries 3
 
 **Smart Cracking (4)**: Common passwords, numeric mask, word+number rules, online brute force.
 
-Techniques run in order of power. tool stops on first success.
+Techniques run in order of power. The tool stops on the first success.
 
 ## Server Modes
 
-`nowifi server listen --mode <mode>` runs tunnel server:
+`nowifi server listen --mode <mode>` runs a tunnel server:
 
 | Mode | Protocol | Looks like |
 |------|----------|------------|
@@ -88,7 +88,7 @@ Techniques run in order of power. tool stops on first success.
 
 ## Optional External Tools
 
-Most techniques work out of box. Tunnel and cracking techniques need external tools:
+Most techniques work out of the box. Tunnel and cracking techniques need external tools:
 
 | Tool | Unlocks | Install |
 |------|---------|---------|
@@ -110,4 +110,3 @@ Most techniques work out of box. Tunnel and cracking techniques need external to
 
 - GitHub: https://github.com/MikkoParkkola/nowifi
 - License: AGPL-3.0
-
