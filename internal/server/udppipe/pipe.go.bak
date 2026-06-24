@@ -20,7 +20,7 @@
 //	pipe := udppipe.Pipe{MTU: 1400}
 //	pipe.Pump(ctx, udpConn, stream) // blocks until either side closes
 //
-// Usage (client side — local PacketConn to a remote stream):
+// Usage (client side — local UDP listener to a remote stream):
 //
 //	udpConn, _ := net.ListenUDP("udp", addr)
 //	pipe := udppipe.Pipe{MTU: 1400}
@@ -133,15 +133,14 @@ func (p *Pipe) Pump(ctx context.Context, udpConn net.Conn, stream ReadWriteClose
 	}
 }
 
-// PumpPacket bridges a PacketConn (connectionless UDP listener) and a
-// bidirectional byte stream.  It is the client-side counterpart of Pump:
-// incoming UDP datagrams are forwarded to the stream, and the sender address
-// of the first datagram is remembered as the "peer" to which stream→UDP
-// replies are sent.
+// PumpPacket bridges a connectionless UDP listener and a bidirectional byte
+// stream.  It is the client-side counterpart of Pump: incoming UDP datagrams
+// are forwarded to the stream, and the sender address of the first datagram
+// is remembered as the "peer" to which stream→UDP replies are sent.
 //
 //	udpConn  → stream  (goroutine, remembers peer)
 //	stream   → lastPeer (caller goroutine, blocks)
-func (p *Pipe) PumpPacket(ctx context.Context, udpConn net.PacketConn, stream ReadWriteCloser) error {
+func (p *Pipe) PumpPacket(ctx context.Context, udpConn *net.UDPConn, stream ReadWriteCloser) error {
 	mtu := p.mtu()
 	done := make(chan struct{})
 
@@ -166,10 +165,7 @@ func (p *Pipe) PumpPacket(ctx context.Context, udpConn net.PacketConn, stream Re
 				p.logf("udppipe: truncating stream→UDP datagram %d→%d bytes", n, mtu)
 				n = mtu
 			}
-			// WriteTo with *net.UDPAddr
-			if _, err := udpConn.(interface {
-				WriteTo([]byte, net.Addr) (int, error)
-			}).WriteTo(msg[:n], peer); err != nil {
+			if _, err := udpConn.WriteToUDP(msg[:n], peer); err != nil {
 				return
 			}
 		}
@@ -188,9 +184,7 @@ func (p *Pipe) PumpPacket(ctx context.Context, udpConn net.PacketConn, stream Re
 		default:
 		}
 		_ = udpConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		n, addr, err := udpConn.(interface {
-			ReadFrom([]byte) (int, net.Addr, error)
-		}).ReadFrom(buf)
+		n, addr, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
@@ -199,11 +193,7 @@ func (p *Pipe) PumpPacket(ctx context.Context, udpConn net.PacketConn, stream Re
 			<-done
 			return err
 		}
-		if addr != nil {
-			if udpAddr, ok := addr.(*net.UDPAddr); ok {
-				lastPeer.Store(udpAddr)
-			}
-		}
+		lastPeer.Store(addr)
 		payload := buf[:n]
 		if len(payload) > mtu {
 			p.logf("udppipe: truncating UDP→stream datagram %d→%d bytes", len(payload), mtu)
