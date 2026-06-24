@@ -177,7 +177,7 @@ func serverRequiredTechniqueNames() []string {
 func init() {
 	// server create flags.
 	serverCreateCmd.Flags().StringVarP(&serverProvider, "provider", "p", "cloudflare",
-		"Infrastructure provider: cloudflare, cloudflare-quick, github-codespace, digitalocean, hetzner")
+		"Infrastructure provider: cloudflare, cloudflare-quick, github-codespace, digitalocean, hetzner, libp2p")
 	serverCreateCmd.Flags().StringVarP(&serverToken, "token", "t", "",
 		"API token for cloud provider")
 	serverCreateCmd.Flags().IntVar(&serverTTL, "ttl", 24,
@@ -289,6 +289,29 @@ func runServerCreate(cmd *cobra.Command, args []string) {
 		fmt.Printf("  %s Worker deployed: %s\n", green("OK"), info.URL)
 		fmt.Println("  Free tier: 100,000 requests/day")
 		fmt.Printf("  Use: sudo nowifi --cf-workers %s\n", info.URL)
+	case "libp2p":
+		fmt.Println("\nnowifi — libp2p P2P Tunnel")
+		fmt.Println()
+		info, err := server.CreateViaRegistry(context.Background(), "libp2p", server.CreateOpts{
+			Target:   serverTarget,
+			TTLHours: serverTTL,
+		})
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			os.Exit(1)
+		}
+		fmt.Printf("  %s Peer ID: %s\n", green("OK"), info.ServerID)
+		if code, ok := info.Extra["pairing_code"]; ok {
+			fmt.Printf("  Pairing code: %s\n", bold(code))
+		}
+		fmt.Println()
+		fmt.Println("  Share the pairing code with the remote peer.")
+		if code, ok := info.Extra["pairing_code"]; ok {
+			fmt.Printf("  On the peer: nowifi server client --pair %s --udp-local 127.0.0.1:51820\n", code)
+		}
+		fmt.Println()
+		fmt.Println("  Note: go-libp2p integration pending — see docs/LIBP2P-PROVIDER-DESIGN.md and issue #29.")
 	case "digitalocean", "hetzner":
 		fmt.Printf("\nnowifi — Creating %s VPS\n\n", serverProvider)
 		info, err := server.CreateVPS(serverProvider, serverToken, serverTTL)
