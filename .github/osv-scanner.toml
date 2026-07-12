@@ -7,7 +7,8 @@
 #     vuln slipped past CI between merge and tag
 #
 # Scope (verified by local run 2026-06-05): Go modules. The Go module lives in
-# go/go.mod; osv-scanner is invoked with `--recursive ./` from the repo root, so
+# go.mod at the repo root (the go/ subdir layout was flattened); osv-scanner is
+# invoked with `--recursive ./` from the repo root, so
 # it scans go.mod and checks every dep (including ones govulncheck skips as
 # unreachable) against OSV. govulncheck (in ci.yml's `lint` job) stays as the
 # reachability-aware Go signal; osv-scanner is the broader net — it flags a
@@ -35,3 +36,16 @@
 #
 # Keep this list EMPTY unless a vuln genuinely has no fix. The right fix for a
 # fixable vuln is to bump the dependency, not to ignore it.
+#
+# Suppression standard (BLOCKING for reviewers): an "unreachable" IgnoredVulns
+# entry MUST carry proof that the vulnerable code is not in the build graph —
+# `go mod why <pkg>` (main module does not need it) + `go list -deps ./...`
+# (pkg absent) + `govulncheck ./...` (0 vulnerabilities). govulncheck is the
+# reachability gate and is NEVER suppressed here, so it re-fires the moment a
+# future change makes the package reachable. Do not silence a *reachable* vuln
+# with a module-level ignore; fix or bound it instead.
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2027-01-12  # 6-month review; re-fires after this date
+reason = "golang.org/x/crypto/openpgp is deprecated/unmaintained with no upstream fix (abandoned, not patchable). nowifi does not use OpenPGP at all: `go mod why` reports the main module does not need the package, `go list -deps ./...` shows nothing in the build graph imports it, and govulncheck = 0 vulnerabilities. osv-scanner flags it only at module level (x/crypto ships openpgp alongside ssh/curve25519, which we do use). Nothing to switch to ProtonMail/go-crypto since no OpenPGP call exists. Verified 2026-07-12 (MIK-6902)."
