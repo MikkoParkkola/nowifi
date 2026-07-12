@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs on the same PR ref — a rapid re-push stops paying for
+# the outdated matrix instead of running it to completion. Push-to-master keeps
+# running (no cancel) so every landed commit gets a full signal.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     timeout-minutes: 20
