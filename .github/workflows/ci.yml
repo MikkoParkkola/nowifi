@@ -26,7 +26,11 @@ jobs:
         # Per-PR macOS added cost + a documented 7h macos-13 agent queue for no
         # extra signal.
         os: [ubuntu-latest]
-        go-version: ['1.26', 'stable']
+        # Pinned toolchain only. 'stable' resolved to the same 1.26.x, so the
+        # matrix ran the whole -race suite twice for identical Go. Drop it; the
+        # pin (per CLAUDE.md reproducibility rule) is the shipping toolchain.
+        # When Go 1.27 lands, bump the pin to re-test the new floor.
+        go-version: ['1.26']
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -52,7 +56,7 @@ jobs:
         run: make test GO_TESTFLAGS='-race -count=1'
 
       - name: Test Coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == 'stable'
+        if: matrix.go-version == '1.26'
         working-directory: go
         run: make test-coverage
 
