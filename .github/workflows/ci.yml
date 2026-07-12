@@ -28,8 +28,10 @@ jobs:
         os: [ubuntu-latest]
         # 'stable' resolved to the same 1.26.x, so the -race suite ran twice for
         # identical Go. Keep only the pinned toolchain (the shipping one); bump
-        # the pin when a new Go floor lands.
-        go-version: ['1.26']
+        # the pin when a new Go floor lands. Pin the exact patch, not '1.26':
+        # setup-go's manifest can lag a fresh patch release, resolving '1.26' to
+        # an older patch than go.mod's floor and breaking GOTOOLCHAIN=local steps.
+        go-version: ['1.26.5']
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -61,7 +63,7 @@ jobs:
         run: GOOS=darwin GOARCH=arm64 go build ./...
 
       - name: Test Coverage
-        if: matrix.go-version == '1.26'
+        if: matrix.go-version == '1.26.5'
         run: make test-coverage
 
   lint:
