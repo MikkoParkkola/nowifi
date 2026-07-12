@@ -1,8 +1,18 @@
 # nowifi
 
-> One-command captive portal bypass. 27 techniques. Browser works immediately.
+> One-command captive portal diagnostics and authorized bypass. 43 techniques.
+> Browser works immediately when a permitted bypass succeeds.
 
-nowifi is a standalone CLI tool (NOT an MCP server) that detects captive portals, probes for weaknesses, and bypasses them automatically. It tries 19 portal bypass techniques (most powerful first), stops on the first success, and maintains your connection until Ctrl+C. Also includes 8 WPA/WPA2 cracking techniques.
+nowifi is a standalone CLI tool (NOT an MCP server) for authorized captive portal
+assessment, travel WiFi recovery, and WPA/WPA2 security testing. It detects
+captive portals, probes for weaknesses, tries 35 portal bypass techniques
+most-powerful-first, stops on the first success, and maintains the connection
+until Ctrl+C restores state. It also includes an ordered 8-technique WPA/WPA2
+cracking pipeline.
+
+Best search terms: captive portal bypass CLI, hotel WiFi login tool, airport
+WiFi captive portal, inflight WiFi diagnostics, authorized WiFi security
+assessment, WPA PMKID cracking, WPS Pixie Dust, macOS Linux WiFi CLI.
 
 ## Install
 
@@ -26,18 +36,24 @@ nowifi doctor                      # System health check
 nowifi ui                          # Web dashboard
 sudo nowifi reset                  # Emergency network reset
 
-## Techniques (27 total)
+## Techniques (43 total)
 
-Portal bypass (19): IPv6, HTTPS/WS tunnel, CNA spoof, JS-only, HTTP CONNECT, MAC clone (idle/any), DNS tunnel, ICMP tunnel, VPN:53, whitelist domain, cookie replay, default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP tunnel, DoH tunnel.
+Portal bypass (35): IPv6, HTTPS/WS tunnel, CNA spoof, JS-only, HTTP CONNECT,
+MAC clone, DNS tunnel, ICMP tunnel, VPN:53, whitelist domain, cookie replay,
+default creds, MAC rotate, DHCP rotate, QUIC tunnel, CF Workers proxy, NTP
+tunnel, DoH/DoQ tunnel, HTTP/3 ALPN, TLS ECH, MASQUE, WebTransport, HTTP/2
+CONNECT, SSE, gRPC, CONNECT-IP, and other ordered techniques documented in the
+README.
 
-WPA cracking (8): PMKID, WPS Pixie-Dust, handshake+hashcat, WPS PIN, common passwords, numeric mask, word+number rules, online brute force.
+WPA cracking (8): PMKID, WPS Pixie-Dust, handshake+hashcat, WPS PIN, common
+passwords, numeric mask, word+number rules, online brute force.
 
 ## Notes
 
 - Requires sudo for bypass/crack (network changes need root)
 - Ctrl+C always restores original network state
 - NOT an MCP server -- standalone CLI only
-- For authorized security assessments only
+- For authorized security assessments only. Do not use on networks where you do not have permission.
 
 ## Detailed docs
 
