@@ -14,7 +14,11 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS billed at 10x. Pure Go (CGO_ENABLED=0) cross-compiles from Linux;
+        # release.yml already ships all darwin/linux targets from ubuntu-latest.
+        # Per-PR macOS added cost + a documented 7h macos-13 agent queue for no
+        # extra signal.
+        os: [ubuntu-latest]
         go-version: ['1.26', 'stable']
     runs-on: ${{ matrix.os }}
 
