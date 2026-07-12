@@ -83,7 +83,7 @@ sudo install -m 0755 nowifi-linux-arm64 /usr/local/bin/nowifi
 
 ```bash
 git clone https://github.com/MikkoParkkola/nowifi.git
-cd nowifi/go
+cd nowifi
 make build
 make test-short
 make ci
