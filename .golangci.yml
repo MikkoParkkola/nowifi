@@ -5,15 +5,32 @@ linters:
     - bodyclose
     - gosec
     - noctx
+    - staticcheck
   disable:
     - exhaustruct
-    - staticcheck
   settings:
     gosec:
       excludes:
         - G204
         - G304
         - G402
+    staticcheck:
+      # Mirror the standalone `staticcheck ./...` CLI default so folding it into
+      # golangci-lint keeps the SAME coverage: SA (correctness/bugs), S
+      # (simplify), ST (style), and U1000 (unused code). Two deltas keep parity
+      # with the old CLI step, not a stricter gate: the six ST checks staticcheck
+      # turns off by default stay off, and QF quickfix checks stay off — the
+      # `staticcheck` CLI suppresses QF (editor-only), so the old step never
+      # enforced them; golangci-lint would, which is why they are excluded here.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF*
   exclusions:
     generated: lax
     presets:
