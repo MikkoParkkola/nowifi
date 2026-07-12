@@ -1,13 +1,13 @@
 module github.com/MikkoParkkola/nowifi
 
-go 1.26.2
+go 1.26.4
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/getlantern/systray v1.2.2
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.60.0
 	github.com/quic-go/webtransport-go v0.10.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.52.0

@@ -21,8 +21,36 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
+  # Release backstop for the dependency-vulnerability gate. ci.yml scans on
+  # every PR/push; this re-scans at tag time so a vuln that landed between the
+  # last green CI run and the release tag (or via a path that skipped CI) cannot
+  # ship. The `build` job below is `needs:`-ed to this gate, and `release`
+  # already `needs: build`, so the whole build -> release DAG (binaries,
+  # tarballs, SBOM, cosign signatures, provenance attestation, GitHub release)
+  # blocks if a known fixable vuln is present. Exceptions are time-boxed in
+  # .github/osv-scanner.toml.
+  security-gate:
+    name: Security gate (block release on known vulns)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Scan Go dependencies against OSV
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --config=.github/osv-scanner.toml
+            --no-call-analysis=all
+            --recursive
+            ./
+
   build:
     name: Build ${{ matrix.target }}
+    needs: security-gate
     timeout-minutes: 15
     # CGO_ENABLED=0 means pure-Go cross-compilation: any single host
     # can produce all four binaries. Pinning the whole matrix to
@@ -46,7 +74,7 @@ jobs:
             goarch: arm64
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
@@ -54,15 +82,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go.sum
 
       - name: Install SBOM generator
-        working-directory: go
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
 
       - name: Build
-        working-directory: go
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -76,7 +102,6 @@ jobs:
             ./cmd/nowifi
 
       - name: Generate SBOM
-        working-directory: go
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -92,7 +117,7 @@ jobs:
             .
 
       - name: Package
-        working-directory: go/bin
+        working-directory: bin
         run: |
           tar czf "nowifi-${{ matrix.target }}.tar.gz" "nowifi-${{ matrix.target }}"
           shasum -a 256 "nowifi-${{ matrix.target }}.tar.gz" > "nowifi-${{ matrix.target }}.tar.gz.sha256"
@@ -102,10 +127,10 @@ jobs:
         with:
           name: nowifi-${{ matrix.target }}
           path: |
-            go/bin/nowifi-${{ matrix.target }}.tar.gz
-            go/bin/nowifi-${{ matrix.target }}.tar.gz.sha256
-            go/bin/nowifi-${{ matrix.target }}.sbom.cdx.json
-            go/bin/nowifi-${{ matrix.target }}.sbom.cdx.json.sha256
+            bin/nowifi-${{ matrix.target }}.tar.gz
+            bin/nowifi-${{ matrix.target }}.tar.gz.sha256
+            bin/nowifi-${{ matrix.target }}.sbom.cdx.json
+            bin/nowifi-${{ matrix.target }}.sbom.cdx.json.sha256
 
   release:
     name: Publish release
@@ -113,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
@@ -148,7 +173,7 @@ jobs:
           done
 
       - name: Attest release files
-        uses: actions/attest-build-provenance@v4.1.0
+        uses: actions/attest-build-provenance@v4.1.1
         with:
           subject-path: |
             dist/*.tar.gz

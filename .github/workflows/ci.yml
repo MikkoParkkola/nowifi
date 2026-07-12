@@ -9,11 +9,12 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on the same PR ref — a rapid re-push stops paying for
-# the outdated matrix instead of running it to completion. Push-to-main keeps
-# running (no cancel) so every landed commit gets a full signal.
+# PR runs are keyed by PR number so a rapid re-push cancels the superseded
+# matrix instead of paying for it. Push-to-main falls back to the unique run_id,
+# giving every landed commit its own group — never cancelled, never evicted from
+# the single-pending-run slot — so main always gets a full signal.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -21,70 +22,62 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        # macOS billed at 10x. Pure Go (CGO_ENABLED=0) cross-compiles from Linux;
-        # release.yml already ships all darwin/linux targets from ubuntu-latest.
-        # Per-PR macOS added cost + a documented 7h macos-13 agent queue for no
-        # extra signal.
+        # macOS billed at 10x; pure Go (CGO_ENABLED=0) cross-compiles from Linux
+        # and release.yml ships every darwin/linux target from ubuntu — a per-PR
+        # macOS leg adds cost + queue time for no extra signal.
         os: [ubuntu-latest]
-        # Pinned toolchain only. 'stable' resolved to the same 1.26.x, so the
-        # matrix ran the whole -race suite twice for identical Go. Drop it; the
-        # pin (per CLAUDE.md reproducibility rule) is the shipping toolchain.
-        # When Go 1.27 lands, bump the pin to re-test the new floor.
+        # 'stable' resolved to the same 1.26.x, so the -race suite ran twice for
+        # identical Go. Keep only the pinned toolchain (the shipping one); bump
+        # the pin when a new Go floor lands.
         go-version: ['1.26']
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go.sum
 
       - name: Build
-        working-directory: go
         run: make build
 
       - name: Vet
-        working-directory: go
         run: make vet
 
       - name: Test
-        working-directory: go
         run: make test GO_TESTFLAGS='-race -count=1'
 
       - name: Test Coverage
         if: matrix.go-version == '1.26'
-        working-directory: go
         run: make test-coverage
 
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.4
           install-mode: goinstall
-          working-directory: go
 
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Staticcheck
-        working-directory: go
         run: |
           "$(go env GOPATH)/bin/staticcheck" ./...
 
@@ -92,6 +85,31 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Vulnerability check
-        working-directory: go
         run: |
           "$(go env GOPATH)/bin/govulncheck" ./...
+
+  # Fast layer of the dependency-vulnerability gate: scans go.mod against the
+  # OSV database on every PR and push. Fails the build on any known, fixable
+  # vuln so a security fix lands with the change that introduces (or fails to
+  # bump past) it — not weeks later. govulncheck (in the `lint` job) stays as
+  # the reachability-aware Go signal; osv-scanner is broader — it flags
+  # vulnerable deps even when no reachable call path exists. Accepted/unfixable
+  # vulns are time-boxed in .github/osv-scanner.toml. The release.yml
+  # `security-gate` job is the backstop. (No Docker image is built, so no trivy
+  # image scan is needed.)
+  osv-scan:
+    name: OSV vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Scan Go dependencies against OSV
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --config=.github/osv-scanner.toml
+            --no-call-analysis=all
+            --recursive
+            ./
