@@ -50,9 +50,6 @@ jobs:
       - name: Vet
         run: make vet
 
-      - name: Test
-        run: make test GO_TESTFLAGS='-race -count=1'
-
       # macOS is off the matrix (10x cost), but darwin-tagged files (menubar,
       # tun_darwin, platform/darwin) are invisible to `go test` on Linux. A
       # GOOS=darwin cross-compile compile-checks that code every PR at ~1x Linux
@@ -62,9 +59,12 @@ jobs:
       - name: Cross-compile darwin (build-tag coverage)
         run: GOOS=darwin GOARCH=arm64 go build ./...
 
-      - name: Test Coverage
-        if: matrix.go-version == '1.26.5'
-        run: make test-coverage
+      # Single suite run with BOTH -race and coverage. Previously the suite ran
+      # twice (a -race pass, then a separate coverage pass) — same tests, double
+      # the CI minutes. `go test` supports race + coverage together, so one run
+      # gives both signals. `-count=1` keeps it uncached (a real run every time).
+      - name: Test (race + coverage)
+        run: make test-coverage GO_TESTFLAGS='-race -count=1'
 
   lint:
     runs-on: ubuntu-latest
@@ -76,24 +76,27 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: 'stable'
+          # Pin to the same toolchain as the test job so both jobs share one
+          # setup-go module/build cache instead of warming two. 'stable' also
+          # silently drifts patch-to-patch; the pin is reproducible.
+          go-version: '1.26.5'
           cache-dependency-path: go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.4
-          install-mode: goinstall
-
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
-
-      - name: Staticcheck
-        run: |
-          "$(go env GOPATH)/bin/staticcheck" ./...
+          # Default 'binary' mode downloads the prebuilt release binary.
+          # 'goinstall' compiled golangci-lint from source on every run (~minutes
+          # of CPU for zero extra signal). staticcheck now runs *inside*
+          # golangci-lint (enabled in .golangci.yml at its CLI-default check set),
+          # so its coverage is preserved here — no separate compile-from-@latest step.
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        # Pinned (was @latest): reproducible, and a floating release can't break
+        # CI out from under a green PR. govulncheck stays as the reachability-aware
+        # Go signal that osv-scanner (broader, reachability-blind) does not give.
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
 
       - name: Vulnerability check
         run: |
