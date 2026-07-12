@@ -2,15 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: read
 
 # Cancel superseded runs on the same PR ref — a rapid re-push stops paying for
-# the outdated matrix instead of running it to completion. Push-to-master keeps
+# the outdated matrix instead of running it to completion. Push-to-main keeps
 # running (no cancel) so every landed commit gets a full signal.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
