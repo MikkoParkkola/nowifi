@@ -29,11 +29,12 @@ var serverCmd = &cobra.Command{
 // --- server create ---
 
 var (
-	serverProvider string
-	serverToken    string
-	serverTTL      int
-	serverTarget   string
-	serverUDP      bool
+	serverProvider  string
+	serverToken     string
+	serverTTL       int
+	serverTarget    string
+	serverUDP       bool
+	serverUDPTarget string
 )
 
 var serverCreateCmd = &cobra.Command{
@@ -92,6 +93,7 @@ Examples:
 var (
 	serverClientURL      string
 	serverClientUDPLocal string
+	serverClientPair     string
 )
 
 var serverClientCmd = &cobra.Command{
@@ -177,7 +179,7 @@ func serverRequiredTechniqueNames() []string {
 func init() {
 	// server create flags.
 	serverCreateCmd.Flags().StringVarP(&serverProvider, "provider", "p", "cloudflare",
-		"Infrastructure provider: cloudflare, cloudflare-quick, github-codespace, digitalocean, hetzner")
+		"Infrastructure provider: cloudflare, cloudflare-quick, github-codespace, digitalocean, hetzner, libp2p")
 	serverCreateCmd.Flags().StringVarP(&serverToken, "token", "t", "",
 		"API token for cloud provider")
 	serverCreateCmd.Flags().IntVar(&serverTTL, "ttl", 24,
@@ -186,6 +188,8 @@ func init() {
 		"Local service URL to expose (cloudflare-quick only)")
 	serverCreateCmd.Flags().BoolVar(&serverUDP, "udp", false,
 		"Enable UDP-over-WebSocket mode (cloudflare-quick only); starts in-process udpws bridge")
+	serverCreateCmd.Flags().StringVar(&serverUDPTarget, "udp-target", "127.0.0.1:51820",
+		"Local UDP target to bridge (libp2p provider)")
 
 	// server destroy flags.
 	serverDestroyCmd.Flags().BoolVar(&serverDestroyAll, "all", false,
@@ -196,7 +200,8 @@ func init() {
 		"Quick Tunnel URL (wss://... or https://...) printed by server create --udp")
 	serverClientCmd.Flags().StringVar(&serverClientUDPLocal, "udp-local", "127.0.0.1:51820",
 		"Local UDP address to listen on (WireGuard/VPN peer endpoint)")
-	_ = serverClientCmd.MarkFlagRequired("url")
+	serverClientCmd.Flags().StringVar(&serverClientPair, "pair", "",
+		"libp2p 3-word pairing code (alternative to --url)")
 
 	// Register subcommands under server.
 	serverCmd.AddCommand(serverCreateCmd)
@@ -301,6 +306,37 @@ func runServerCreate(cmd *cobra.Command, args []string) {
 		fmt.Printf("  Tunnel URL: %s\n", info.URL)
 		fmt.Printf("  TTL: %dh (auto-destroy)\n", serverTTL)
 		fmt.Printf("  Use: sudo nowifi -t %s\n", info.URL)
+	case "libp2p":
+		fmt.Println("\nnowifi — libp2p P2P Peer (native UDP)")
+		fmt.Printf("  UDP target: %s\n", serverUDPTarget)
+		fmt.Println()
+		p, ok := server.Get("libp2p")
+		if !ok {
+			fmt.Printf("  %s provider not registered\n", red("ERROR"))
+			os.Exit(1)
+		}
+		tunnelCtx, tunnelCancel := context.WithCancel(context.Background())
+		defer tunnelCancel()
+		info, err := p.Create(tunnelCtx, server.CreateOpts{
+			Extra: map[string]string{"udp_target": serverUDPTarget},
+		})
+		if err != nil {
+			fmt.Printf("  %s %v\n", red("ERROR"), err)
+			fmt.Println()
+			os.Exit(1)
+		}
+		fmt.Printf("  %s libp2p peer active: %s\n", green("OK"), info.ServerID)
+		if code := info.Extra["pairing_code"]; code != "" {
+			fmt.Printf("  Pairing code: %s\n", code)
+		}
+		fmt.Println("  Ctrl+C to stop.")
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		fmt.Println("\n  Stopping libp2p peer…")
+		tunnelCancel()
+		_ = server.DestroyServer(info, "")
+		fmt.Println("  Stopped.")
 	default:
 		fmt.Printf("  Unknown provider %q. Available: %v\n", serverProvider, server.Names())
 		os.Exit(1)
@@ -453,6 +489,34 @@ func runServerInfo(cmd *cobra.Command, args []string) {
 }
 
 func runServerClient(cmd *cobra.Command, args []string) {
+	// Exactly one connection mode is required. The --url required-flag guard was
+	// dropped when --pair was added, so validate here: without this, invoking
+	// with neither flag builds "wss:///udp" from an empty URL and fails obscurely.
+	if serverClientPair == "" && serverClientURL == "" {
+		fmt.Printf("\n  %s provide --url <server-url> or --pair <3-word-code>\n\n", red("ERROR"))
+		os.Exit(1)
+	}
+	if serverClientPair != "" && serverClientURL != "" {
+		fmt.Printf("\n  %s --url and --pair are mutually exclusive; use one\n\n", red("ERROR"))
+		os.Exit(1)
+	}
+	if serverClientPair != "" {
+		fmt.Println("\nnowifi — libp2p P2P Client")
+		fmt.Printf("  Pairing code: %s\n", serverClientPair)
+		fmt.Printf("  Local UDP: %s\n\n", serverClientUDPLocal)
+		if err := server.ConnectLibp2pClientPair(context.Background(), serverClientPair, serverClientUDPLocal); err != nil {
+			fmt.Printf("  %s %v\n\n", red("ERROR"), err)
+			os.Exit(1)
+		}
+		fmt.Printf("  %s libp2p client connected\n", green("OK"))
+		fmt.Println("  Ctrl+C to stop.")
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		fmt.Println("\n  Stopping libp2p client.")
+		return
+	}
+
 	fmt.Println("\nnowifi — UDP-over-WebSocket Client")
 	fmt.Println()
 
