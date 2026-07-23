@@ -79,7 +79,7 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # Pinned to match go.mod + the CI test toolchain: releases build with
           # the exact Go that tests ran against, and no redundant GOTOOLCHAIN
