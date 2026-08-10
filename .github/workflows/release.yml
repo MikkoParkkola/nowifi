@@ -176,7 +176,7 @@ jobs:
           done
 
       - name: Attest release files
-        uses: actions/attest-build-provenance@v4.1.1
+        uses: actions/attest-build-provenance@v4.2.2
         with:
           subject-path: |
             dist/*.tar.gz
