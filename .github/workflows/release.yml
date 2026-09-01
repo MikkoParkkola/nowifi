@@ -40,7 +40,7 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
       - name: Scan Go dependencies against OSV
-        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
             --config=.github/osv-scanner.toml
@@ -84,7 +84,7 @@ jobs:
           # Pinned to match go.mod + the CI test toolchain: releases build with
           # the exact Go that tests ran against, and no redundant GOTOOLCHAIN
           # switch fires when 'stable' lags the go.mod floor.
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache-dependency-path: go.sum
 
       - name: Install SBOM generator

@@ -31,7 +31,7 @@ jobs:
         # the pin when a new Go floor lands. Pin the exact patch, not '1.26':
         # setup-go's manifest can lag a fresh patch release, resolving '1.26' to
         # an older patch than go.mod's floor and breaking GOTOOLCHAIN=local steps.
-        go-version: ['1.26.5']
+        go-version: ['1.26.6']
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -79,7 +79,7 @@ jobs:
           # Pin to the same toolchain as the test job so both jobs share one
           # setup-go module/build cache instead of warming two. 'stable' also
           # silently drifts patch-to-patch; the pin is reproducible.
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache-dependency-path: go.sum
 
       - name: golangci-lint
@@ -120,7 +120,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Scan Go dependencies against OSV
-        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
             --config=.github/osv-scanner.toml
