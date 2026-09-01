@@ -246,7 +246,7 @@ nowifi telemetry status    # show state
 nowifi telemetry disable   # opt out
 ```
 
-**Collected**: technique ID, success, provider, duration, version, country
+**Collected**: technique ID, success, provider, duration, version, country, OS/architecture (e.g. `darwin/arm64`)
 **NEVER collected**: IP, MAC, SSID, portal URL, DNS names, or any personal identifier
 
 Data goes to a single Cloudflare Worker running on the free tier (100K events/day). Source: [worker/telemetry/](worker/telemetry/).
