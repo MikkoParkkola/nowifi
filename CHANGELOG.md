@@ -21,9 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.16.1] - 2026-06-21
 
-GitHub Release [v0.16.1](https://github.com/MikkoParkkola/nowifi/releases/tag/v0.16.1)
-shipped without a changelog section. This entry records that cut so later
-notes can refer to it.
+GitHub Release [0.16.1] shipped without a changelog section. This entry
+records that cut so later notes can refer to it.
 
 [0.16.1]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.16.1
 
