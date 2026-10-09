@@ -13,6 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `net/http`, `net/textproto` and `os` packages that landed in Go 1.26.9
   and 1.27.2 on 2026-10-08. `govulncheck` reports no vulnerable call paths
   from this module.
+- `golang.org/x/net` 0.57.0 to 0.60.0, clearing five advisories
+  (GO-2026-6603/6610/6611/6612/6617) the CI OSV scan flags at module level.
 
 ## [0.16.2] - 2026-09-04
 
