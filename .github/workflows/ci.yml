@@ -19,20 +19,16 @@ concurrency:
 
 jobs:
   test:
+    name: test
     timeout-minutes: 20
-    strategy:
-      matrix:
-        # macOS billed at 10x; pure Go (CGO_ENABLED=0) cross-compiles from Linux
-        # and release.yml ships every darwin/linux target from ubuntu — a per-PR
-        # macOS leg adds cost + queue time for no extra signal.
-        os: [ubuntu-latest]
-        # 'stable' resolved to the same 1.26.x, so the -race suite ran twice for
-        # identical Go. Keep only the pinned toolchain (the shipping one); bump
-        # the pin when a new Go floor lands. Pin the exact patch, not '1.26':
-        # setup-go's manifest can lag a fresh patch release, resolving '1.26' to
-        # an older patch than go.mod's floor and breaking GOTOOLCHAIN=local steps.
-        go-version: ['1.26.6']
-    runs-on: ${{ matrix.os }}
+    # Single toolchain, single OS — kept un-matrixed on purpose so the required
+    # check name stays 'test' and a Go-version bump never orphans branch
+    # protection. macOS is billed at 10x; pure Go (CGO_ENABLED=0) cross-compiles
+    # from Linux and release.yml ships every darwin/linux target from ubuntu, so
+    # a per-PR macOS leg adds cost + queue time for no extra signal. Pin the
+    # exact Go patch (not '1.26'): setup-go's manifest can lag a fresh patch and
+    # resolve '1.26' below go.mod's floor, breaking GOTOOLCHAIN=local steps.
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
@@ -41,7 +37,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: '1.26.9'
           cache-dependency-path: go.sum
 
       - name: Build
@@ -79,7 +75,7 @@ jobs:
           # Pin to the same toolchain as the test job so both jobs share one
           # setup-go module/build cache instead of warming two. 'stable' also
           # silently drifts patch-to-patch; the pin is reproducible.
-          go-version: '1.26.6'
+          go-version: '1.26.9'
           cache-dependency-path: go.sum
 
       - name: golangci-lint
