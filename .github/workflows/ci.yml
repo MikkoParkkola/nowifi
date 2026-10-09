@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   test:
+    name: test
     timeout-minutes: 20
     strategy:
       matrix:
