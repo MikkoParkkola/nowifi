@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-10-09
+
+### Security
+
+- Go toolchain 1.26.9, so the release bottle includes the ten stdlib CVE
+  fixes in the `go` command and the `crypto/tls`, `html/template`,
+  `net/http`, `net/textproto` and `os` packages that landed in Go 1.26.9
+  and 1.27.2 on 2026-10-08. `govulncheck` reports no vulnerable call paths
+  from this module.
+
 ## [0.16.2] - 2026-09-04
 
 ### Security
