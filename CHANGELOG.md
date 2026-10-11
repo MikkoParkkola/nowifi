@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `golang.org/x/net` 0.57.0 to 0.60.0, clearing five advisories
   (GO-2026-6603/6610/6611/6612/6617) the CI OSV scan flags at module level.
 
+[0.16.3]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.16.3
+
 ## [0.16.2] - 2026-09-04
 
 ### Security
@@ -37,6 +39,62 @@ GitHub Release [0.16.1] shipped without a changelog section. This entry
 records that cut so later notes can refer to it.
 
 [0.16.1]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.16.1
+
+## [0.16.0] - 2026-05-31 — the self-improving loop
+
+### Added
+
+- `nowifi forensics` — offline, read-only, local-only capture of which egress
+  channels survive captive-portal enforcement (#41).
+- Gateway attack-surface recon: Kong admin-plane exposure detection with an
+  optional nmap sweep (#45), and pax-api recon that distinguishes a real
+  enforcement API from the SPA's catch-all 200s (#44).
+- `nowifi report` — automatic, consent-gated, deferred GitHub-issue report when
+  a bypass fails offline; nothing is uploaded without explicit consent and MACs
+  are redacted to vendor IDs first (#42).
+- `icmp_tunnel` added to the Panasonic / Nordic-Sky recommended order, validated
+  reaching the internet under enforcement on a real flight (#39).
+
+### Changed
+
+- Documented the forensics and report commands; `report_failures` is now
+  toggleable (#43).
+- `golang.org/x/crypto` 0.51 to 0.52 (#38).
+
+### Fixed
+
+- Corrected flight-connect bugs and an inaccurate `mac_clone` comment (#40).
+
+[0.16.0]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.16.0
+
+## [0.15.1] - 2026-05-21
+
+### Changed
+
+- Dependency bumps: `quic-go` (#36), `golang.org/x/net` 0.53 to 0.54 (#35),
+  `golang.org/x/term` 0.42 to 0.43 (#34), `cosign-installer` 4.1.1 to
+  4.1.2 (#33).
+
+[0.15.1]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.15.1
+
+## [0.15.0] - 2026-04-30
+
+### Added
+
+- libp2p provider for P2P tunnel peers (server mode).
+- Captive-resistant `HasInternet` quorum verifier, so bypass detection is not
+  fooled by a portal that answers every probe (#31).
+
+### Changed
+
+- Release signatures now use sigstore bundles; the SBOM generator runs on the
+  host architecture; signed release artifacts are published.
+
+### Documentation
+
+- README explains antivirus false positives for chisel / hysteria / cloudflared.
+
+[0.15.0]: https://github.com/MikkoParkkola/nowifi/releases/tag/v0.15.0
 
 ## [0.14.3] - 2026-04-26
 

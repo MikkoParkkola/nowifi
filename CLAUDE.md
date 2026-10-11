@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for agents working on nowifi.** `AGENTS.md` in this repo is the public install-facing guide for end-user agents (same pattern as `trvl`). They are intentionally diverged; do not symlink.
 
-**Status**: v0.14.1 · Go 1.26.2 · AGPL-3.0 · single binary · public · active
+**Status**: v0.16.3 · Go 1.26.9 · AGPL-3.0 · single binary · public · active
 
 ## Product Vision
 
@@ -14,9 +14,9 @@ Scope boundary: nowifi is **not an MCP server**. It is a standalone CLI tool. `A
 
 ## Current Status
 
-- **v0.14.1** with CF Quick Tunnel + UDP-over-QUIC server modes
+- **v0.16.3** with CF Quick Tunnel + UDP-over-QUIC server modes, `nowifi forensics`/`report`, and the self-improving loop
 - **43 techniques** total: 35 captive-portal bypass + 8 WPA cracking
-- **Build**: Go 1.26.2 · Bubbletea TUI · Cobra CLI · quic-go · systray
+- **Build**: Go 1.26.9 · Bubbletea TUI · Cobra CLI · quic-go · systray
 - **Distribution**: Homebrew tap · direct binaries on darwin-arm64 / darwin-amd64 / linux-amd64 / linux-arm64
 - **CI**: cross-compile all targets from ubuntu-latest (recent consolidation)
 - **Coverage**: udpws 95.6% · server 84.7% (recent #30 lift)
@@ -38,7 +38,7 @@ Scope boundary: nowifi is **not an MCP server**. It is a standalone CLI tool. `A
 | **`Ctrl+C` restores everything** | Trust signal; users run with `sudo` | Leave residual network state on termination |
 | **NOT an MCP server** | Scope boundary; MCP tooling is a different product category | Add MCP surface without explicit user direction |
 | **AGPL-3.0 license** | Copyleft; derivative network services must share source | Relicense without explicit user direction |
-| **Go 1.26.2 toolchain pinning** | CI reproducibility; tied to quic-go + charmbracelet libs | Bump Go version without testing UDP/QUIC paths |
+| **Go 1.26.9 toolchain pinning** | CI reproducibility; tied to quic-go + charmbracelet libs; tracks stdlib CVE fixes | Bump Go version without testing UDP/QUIC paths |
 | **Legitimate-use framing** | Bypass + cracking tools need clear purpose statement | Remove the responsible-use caveats from README/AGENTS.md |
 | **Zero-cost telemetry is opt-in** | Privacy-by-default | Make telemetry opt-out; avoid send-by-default patterns |
 
